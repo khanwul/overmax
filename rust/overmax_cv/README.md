@@ -33,14 +33,20 @@ Rust 설치 후 현재 폴더에서:
 ```powershell
 cd rust\overmax_cv
 $env:VIRTUAL_ENV=(Resolve-Path ..\..\.venv_build).Path
-..\..\.venv_build\Scripts\python.exe -m maturin develop --release
+..\..\.venv_build\Scripts\python.exe -m maturin develop --release --features python
 ```
 
-`cargo test`를 직접 실행할 때는 PyO3가 사용할 Python을 지정한다.
+순수 Rust API만 검증할 때는 Python 없이 실행한다.
+
+```powershell
+cargo test -p overmax_cv
+```
+
+PyO3 확장 모듈까지 빌드·검증할 때는 `python` feature와 Python 경로를 지정한다.
 
 ```powershell
 $env:PYO3_PYTHON=(Resolve-Path ..\..\.venv_build\Scripts\python.exe).Path
-cargo test
+cargo test -p overmax_cv --features python
 ```
 
 ## 검증 목표

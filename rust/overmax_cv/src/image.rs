@@ -1,15 +1,17 @@
+use crate::error::CvError;
+
 pub fn validate_image(
     data: &[u8],
     width: usize,
     height: usize,
     channels: usize,
     name: &str,
-) -> Result<(), String> {
+) -> Result<(), CvError> {
     if width == 0 || height == 0 || !matches!(channels, 1 | 3 | 4) {
-        return Err(format!("{name} received invalid image shape"));
+        return Err(CvError::new(format!("{name} received invalid image shape")));
     }
     if data.len() != width * height * channels {
-        return Err(format!("{name} received unexpected byte length"));
+        return Err(CvError::new(format!("{name} received unexpected byte length")));
     }
     Ok(())
 }

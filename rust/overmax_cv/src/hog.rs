@@ -1,3 +1,4 @@
+use crate::error::CvError;
 use crate::image::resize_area_u8;
 
 const SIZE: usize = 64;
@@ -7,9 +8,9 @@ const BINS: usize = 9;
 const HOG_LEN: usize = BLOCKS * BLOCKS * 4 * BINS;
 const BLOCK_SIGMA: f32 = 4.0;
 
-pub fn hog_gray_64(data: &[u8]) -> Result<Vec<f32>, String> {
+pub fn hog_gray_64(data: &[u8]) -> Result<Vec<f32>, CvError> {
     if data.len() != SIZE * SIZE {
-        return Err("hog_gray_64 expects 4096 grayscale bytes".to_string());
+        return Err(CvError::new("hog_gray_64 expects 4096 grayscale bytes"));
     }
     Ok(hog_from_resized_gray(data))
 }

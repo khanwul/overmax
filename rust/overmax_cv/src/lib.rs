@@ -1,3 +1,4 @@
+pub mod error;
 pub mod hog;
 pub mod image;
 pub mod ocr;
@@ -43,9 +44,17 @@ pub fn preprocess_ocr_bgra(
 #[cfg(feature = "python")]
 use pyo3::exceptions::PyValueError;
 #[cfg(feature = "python")]
+use pyo3::exceptions::PyValueError;
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
 
 #[cfg(feature = "python")]
+fn into_py_value_err(err: error::CvError) -> PyErr {
+    PyValueError::new_err(err.to_string())
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
 fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
@@ -53,20 +62,21 @@ fn version() -> &'static str {
 #[cfg(feature = "python")]
 #[pyfunction]
 fn hog_gray_64(data: &[u8]) -> PyResult<Vec<f32>> {
-    hog::hog_gray_64(data).map_err(PyValueError::new_err)
+    hog::hog_gray_64(data).map_err(into_py_value_err)
 }
 
 #[cfg(feature = "python")]
 #[pyfunction]
 fn hog_gray(data: &[u8], width: usize, height: usize) -> PyResult<Vec<f32>> {
-    image::validate_image(data, width, height, 1, "hog_gray").map_err(PyValueError::new_err)?;
+    image::validate_image(data, width, height, 1, "hog_gray").map_err(into_py_value_err)?;
     Ok(hog::hog_gray(data, width, height))
 }
 
 #[cfg(feature = "python")]
 #[pyfunction]
 fn hashes_gray(data: &[u8], width: usize, height: usize) -> PyResult<(String, String, String)> {
-    compute_hashes_gray(data, width, height).map_err(PyValueError::new_err)
+    image::validate_image(data, width, height, 1, "hashes_gray").map_err(into_py_value_err)?;
+    Ok(image::compute_hashes(data, width, height))
 }
 
 #[cfg(feature = "python")]
@@ -77,13 +87,21 @@ fn image_features(
     height: usize,
     channels: usize,
 ) -> PyResult<(String, String, String, Vec<f32>)> {
-    compute_image_features(data, width, height, channels).map_err(PyValueError::new_err)
+    image::validate_image(data, width, height, channels, "image_features")
+        .map_err(into_py_value_err)?;
+    let gray = image::to_gray(data, channels);
+    let (phash, dhash, ahash) = image::compute_hashes(&gray, width, height);
+    let hog = hog::hog_gray(&gray, width, height);
+    Ok((phash, dhash, ahash, hog))
 }
 
 #[cfg(feature = "python")]
 #[pyfunction]
 fn thumbnail_bgra_32(data: &[u8], width: usize, height: usize) -> PyResult<Vec<u8>> {
-    make_thumbnail_bgra_32(data, width, height).map_err(PyValueError::new_err)
+    image::validate_image(data, width, height, 4, "thumbnail_bgra_32")
+        .map_err(into_py_value_err)?;
+    let gray = image::to_gray(data, 4);
+    Ok(image::resize_area_u8(&gray, width, height, 32, 32))
 }
 
 #[cfg(feature = "python")]
@@ -94,7 +112,9 @@ fn ocr_preprocess_bgra(
     height: usize,
     force_invert: bool,
 ) -> PyResult<Vec<u8>> {
-    preprocess_ocr_bgra(data, width, height, force_invert).map_err(PyValueError::new_err)
+    image::validate_image(data, width, height, 4, "ocr_preprocess_bgra")
+        .map_err(into_py_value_err)?;
+    Ok(ocr::preprocess_bgra(data, width, height, force_invert))
 }
 
 #[cfg(feature = "python")]
