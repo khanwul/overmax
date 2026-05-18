@@ -22,8 +22,11 @@ impl NativeApp {
             native_helpers::vp_debug(),
             ViewportBuilder::default()
                 .with_title(&title)
-                .with_inner_size([720.0, 420.0]),
+                .with_inner_size([720.0, 420.0])
+                .with_active(true)
+                .with_always_on_top(),
             move |ctx, class| {
+                ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
                 debug_ui::render_debug(ctx, class, &title, &lines);
                 debug_ui::close_if_requested(ctx, &open);
             },
@@ -40,12 +43,25 @@ impl NativeApp {
         let defaults = self.defaults.clone();
         let base = self.base_settings.clone();
         let merged = self.merged_settings.clone();
+        let settings_ctx = settings_ui::SettingsUiContext {
+            current_steam_id: self
+                .sync_steam_id
+                .lock()
+                .map(|g| g.clone())
+                .unwrap_or_default(),
+            sync_open: self.sync_open.clone(),
+            scan_pending: self.scan_pending.clone(),
+            sync_steam_id: self.sync_steam_id.clone(),
+        };
         ctx.show_viewport_deferred(
             native_helpers::vp_settings(),
             ViewportBuilder::default()
                 .with_title("Overmax 설정")
-                .with_inner_size([440.0, 520.0]),
+                .with_inner_size([520.0, 560.0])
+                .with_active(true)
+                .with_always_on_top(),
             move |ctx, class| {
+                ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
                 let mut local_draft = draft.lock().map(|g| g.clone()).unwrap_or_default();
                 egui::TopBottomPanel::bottom("sett_actions").show(ctx, |ui| {
                     ui.horizontal(|ui| {
@@ -68,7 +84,13 @@ impl NativeApp {
                         }
                     });
                 });
-                settings_ui::render_settings_deferred(ctx, class, "설정", &mut local_draft);
+                settings_ui::render_settings_deferred(
+                    ctx,
+                    class,
+                    "설정",
+                    &mut local_draft,
+                    &settings_ctx,
+                );
                 if let Ok(mut d) = draft.lock() {
                     *d = local_draft;
                 }
@@ -91,8 +113,11 @@ impl NativeApp {
             native_helpers::vp_sync(),
             ViewportBuilder::default()
                 .with_title("V-Archive 동기화")
-                .with_inner_size([520.0, 560.0]),
+                .with_inner_size([520.0, 560.0])
+                .with_active(true)
+                .with_always_on_top(),
             move |ctx, class| {
+                ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
                 let list = candidates.lock().map(|g| g.clone()).unwrap_or_default();
                 let mut steam_g = steam.lock().unwrap_or_else(|e| e.into_inner());
                 let status_s = status.lock().map(|g| g.clone()).unwrap_or_default();
@@ -130,25 +155,25 @@ impl eframe::App for NativeApp {
         }
         self.prev_settings_open = settings_on;
 
+        self.start_log_pump(ctx);
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
-        self.drain_logs();
+        self.drain_detection_results();
+        if self.drain_ui_commands() {
+            ctx.request_repaint();
+        }
         self.poll_scan_requests();
         self.poll_upload_requests();
         self.drain_sync_scan();
         self.drain_upload_results();
         self.drain_game_found_refresh_steam();
         self.apply_overlay_visual(ctx);
+        ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
 
-        let debug_on = self.debug_open.load(Ordering::Relaxed);
-        let sync_on = self.sync_open.load(Ordering::Relaxed);
         let overlay_on = self.overlay_visible.load(Ordering::Relaxed);
-        let blocking_viewport_open = settings_on || sync_on || debug_on;
         let hidden_size = Vec2::new(1.0, 1.0);
         let visible_size = Vec2::new(overlay_ui::WIDTH, overlay_ui::HEIGHT);
 
-        ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(
-            !overlay_on || blocking_viewport_open,
-        ));
+        ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(!overlay_on));
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(if overlay_on {
             visible_size
         } else {
@@ -171,12 +196,19 @@ impl eframe::App for NativeApp {
                     ui,
                     &self.session,
                     self.confidence,
+                    &self.current_song_label(),
+                    &self.pattern_tabs,
+                    &self.recommendations,
                     self.settings_open.clone(),
                     self.debug_open.clone(),
                     self.sync_open.clone(),
                 );
                 if actions.start_drag {
                     ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                }
+                if let Some(command) = actions.command {
+                    self.handle_ui_command(command);
+                    ctx.request_repaint();
                 }
             });
     }

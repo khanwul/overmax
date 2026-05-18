@@ -15,6 +15,7 @@ pub struct PatternInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Song {
+    #[serde(deserialize_with = "deserialize_string_id")]
     pub title: String, // Actually song_id
     pub name: String,
     pub composer: String,
@@ -37,7 +38,10 @@ impl VArchiveDB {
         }
     }
 
-    pub fn load_from_file(&mut self, path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn load_from_file(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let content = fs::read_to_string(path)?;
         self.songs = serde_json::from_str(&content)?;
         self.build_index();
@@ -78,7 +82,10 @@ impl VArchiveDB {
 
             if query == comp_norm {
                 score = 200.0;
-            } else if !query.is_empty() && !comp_norm.is_empty() && (comp_norm.contains(&query) || query.contains(&comp_norm)) {
+            } else if !query.is_empty()
+                && !comp_norm.is_empty()
+                && (comp_norm.contains(&query) || query.contains(&comp_norm))
+            {
                 score = 150.0;
             } else {
                 score = normalized_damerau_levenshtein(&query, &comp_norm) * 100.0;
@@ -141,6 +148,20 @@ impl VArchiveDB {
     }
 }
 
+fn deserialize_string_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::String(value) => Ok(value),
+        serde_json::Value::Number(value) => Ok(value.to_string()),
+        _ => Err(serde::de::Error::custom(
+            "song title must be string or number",
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,8 +202,13 @@ mod tests {
     #[test]
     fn composer_disambiguation() {
         let mut db = VArchiveDB::new();
-        db.songs.push(create_mock_song("1", "End of the Moonlight", "Forte Escape"));
-        db.songs.push(create_mock_song("2", "End of the Moonlight", "BEXTER"));
+        db.songs.push(create_mock_song(
+            "1",
+            "End of the Moonlight",
+            "Forte Escape",
+        ));
+        db.songs
+            .push(create_mock_song("2", "End of the Moonlight", "BEXTER"));
         db.build_index();
 
         let song1 = db.find_exact("End of the Moonlight", "bexter");
@@ -190,5 +216,21 @@ mod tests {
 
         let song2 = db.find_exact("End of the Moonlight", "forte");
         assert_eq!(song2.unwrap().title, "1");
+    }
+
+    #[test]
+    fn parses_numeric_song_id_title_from_cache_json() {
+        let song: Song = serde_json::from_str(
+            r#"{
+                "title": 0,
+                "name": "비상 ~Stay With Me~",
+                "composer": "Mycin.T",
+                "patterns": {}
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(song.title, "0");
+        assert_eq!(song.name, "비상 ~Stay With Me~");
     }
 }

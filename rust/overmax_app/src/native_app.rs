@@ -4,7 +4,8 @@ use eframe::egui::{self, Color32, ViewportBuilder};
 use overmax_core::GameSessionState;
 use overmax_data::{
     build_candidates, load_base_settings, load_merged_settings, normalize_settings,
-    upsert_varchive_cache_record, DataCompatibility, RecordDB, SyncCandidate, VArchiveDB,
+    upsert_varchive_cache_record, DataCompatibility, RecommendResult, RecordDB, SyncCandidate,
+    VArchiveDB,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -14,16 +15,18 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use crate::debug_ui;
+use crate::detection_pipeline::DetectionOutput;
+use crate::detection_worker;
 use crate::global_hotkey::GlobalHotkey;
 use crate::native_helpers::{
     account_path_for_steam, button_num, first_steam_from_settings, toggle_hotkey_from_settings,
 };
 use crate::overlay_ui;
-use crate::probe_worker;
 use crate::single_instance::SingleInstanceGuard;
 use crate::steam_session;
 #[cfg(target_os = "windows")]
 use crate::tray_icon::TrayIcon;
+use crate::ui_command::UiCommand;
 use crate::updater::{self, AppUpdateConfig};
 use crate::varchive_upload;
 
@@ -98,7 +101,7 @@ pub struct NativeApp {
     pub(crate) sync_open: Arc<AtomicBool>,
     pub(crate) scan_pending: Arc<AtomicBool>,
     pub(crate) log_lines: Arc<Mutex<VecDeque<String>>>,
-    pub(crate) log_rx: Receiver<String>,
+    pub(crate) log_rx: Option<Receiver<String>>,
     pub(crate) session: GameSessionState,
     pub(crate) confidence: f32,
     pub(crate) sync_steam_id: Arc<Mutex<String>>,
@@ -110,6 +113,11 @@ pub struct NativeApp {
     pub(crate) upload_req_tx: Sender<usize>,
     pub(crate) upload_res_rx: Receiver<(usize, String, String)>,
     pub(crate) upload_res_tx: Sender<(usize, String, String)>,
+    pub(crate) detection_rx: Receiver<DetectionOutput>,
+    pub(crate) ui_cmd_rx: Receiver<UiCommand>,
+    pub(crate) varchive_db: Arc<VArchiveDB>,
+    pub(crate) recommendations: RecommendResult,
+    pub(crate) pattern_tabs: Vec<crate::overlay_recommend_ui::PatternTabInfo>,
     pub(crate) prev_settings_open: bool,
     pub(crate) record_db: Arc<RecordDB>,
     pub(crate) game_found_rx: Receiver<()>,
@@ -142,7 +150,7 @@ impl NativeApp {
 
         let (log_tx, log_rx) = mpsc::channel();
         let (game_found_tx, game_found_rx) = mpsc::channel();
-        probe_worker::spawn((*root).clone(), log_tx.clone(), game_found_tx);
+        let (detection_tx, detection_rx) = mpsc::channel();
 
         let compat = DataCompatibility::current();
         let recent_steam = steam_session::most_recent_steam_id();
@@ -155,6 +163,7 @@ impl NativeApp {
         if let Err(e) = varchive_db.load_from_file(&songs_path) {
             let _ = log_tx.send(format!("[VArchive] songs load failed: {e}"));
         }
+        let varchive_db = Arc::new(varchive_db);
 
         let steam0 = {
             let mg = merged_settings
@@ -183,6 +192,17 @@ impl NativeApp {
         let (sync_tx, sync_rx) = mpsc::channel();
         let (upload_req_tx, upload_req_rx) = mpsc::channel();
         let (upload_res_tx, upload_res_rx) = mpsc::channel();
+        let (ui_cmd_tx, ui_cmd_rx) = mpsc::channel();
+        detection_worker::spawn(
+            (*root).clone(),
+            merged_settings
+                .lock()
+                .map_err(|_| "settings lock poisoned")?
+                .clone(),
+            log_tx.clone(),
+            game_found_tx,
+            detection_tx,
+        );
 
         Ok(Self {
             root,
@@ -195,7 +215,7 @@ impl NativeApp {
             sync_open: sync_open.clone(),
             scan_pending: Arc::new(AtomicBool::new(false)),
             log_lines: Arc::new(Mutex::new(VecDeque::new())),
-            log_rx,
+            log_rx: Some(log_rx),
             session: GameSessionState::detecting(),
             confidence: 0.0,
             sync_steam_id: Arc::new(Mutex::new(steam0)),
@@ -207,6 +227,11 @@ impl NativeApp {
             upload_req_tx,
             upload_res_rx,
             upload_res_tx,
+            detection_rx,
+            ui_cmd_rx,
+            varchive_db,
+            recommendations: RecommendResult::empty(),
+            pattern_tabs: Vec::new(),
             prev_settings_open: false,
             record_db,
             game_found_rx,
@@ -214,13 +239,7 @@ impl NativeApp {
             exit_requested: exit_requested.clone(),
             _hotkey,
             #[cfg(target_os = "windows")]
-            _tray: Some(TrayIcon::spawn(
-                overlay_visible,
-                settings_open,
-                sync_open,
-                debug_open,
-                exit_requested,
-            )),
+            _tray: Some(TrayIcon::spawn(ui_cmd_tx)),
         })
     }
 
@@ -268,11 +287,6 @@ impl NativeApp {
                 (255.0 * opacity.clamp(0.1, 1.0)) as u8,
             );
         });
-    }
-
-    pub(crate) fn drain_logs(&self) {
-        let max = self.max_log_lines();
-        debug_ui::drain_channel(&self.log_lines, &self.log_rx, max);
     }
 
     pub(crate) fn poll_scan_requests(&mut self) {
@@ -406,6 +420,11 @@ impl NativeApp {
                 &candidate.composer,
             );
             if res.success {
+                let success_message = if res.updated {
+                    "갱신 완료"
+                } else {
+                    "등록 완료"
+                };
                 let btn = button_num(&candidate.button_mode);
                 let cache_root = root.join("cache").join("varchive");
                 if let Err(e) = upsert_varchive_cache_record(
@@ -423,7 +442,7 @@ impl NativeApp {
                         format!("업로드 OK, 캐시 갱신 실패: {e}"),
                     ));
                 } else {
-                    let _ = tx.send((index, "success".into(), "등록 완료".into()));
+                    let _ = tx.send((index, "success".into(), success_message.into()));
                 }
             } else {
                 let _ = tx.send((index, "error".into(), res.message));

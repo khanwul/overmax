@@ -1,15 +1,19 @@
 mod debug_ui;
 mod detection_pipeline;
+mod detection_worker;
 mod frame_utils;
 mod global_hotkey;
 mod hysteresis;
 mod native_app;
+mod native_app_commands;
+mod native_app_log;
+mod native_app_recommend;
 mod native_app_viewports;
 mod native_helpers;
 mod ocr_engine;
+mod overlay_recommend_ui;
 mod overlay_ui;
 mod play_state;
-mod probe_worker;
 mod roi;
 mod screen_capture;
 mod settings_ui;
@@ -18,6 +22,7 @@ mod steam_session;
 mod sync_ui;
 #[cfg(target_os = "windows")]
 mod tray_icon;
+mod ui_command;
 mod updater;
 mod varchive_upload;
 mod window_tracker;

@@ -1,8 +1,13 @@
+use crate::overlay_recommend_ui::{
+    avg_rate_text, draw_diff_tabs, draw_recommendations, pattern_count_text, PatternTabInfo,
+};
+use crate::ui_command::UiCommand;
 use eframe::egui::{
     self, Align, Button, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
-    Frame, Label, Layout, Margin, RichText, Sense, Vec2,
+    Frame, Label, Layout, Margin, Rect, RichText, Sense, Vec2,
 };
 use overmax_core::GameSessionState;
+use overmax_data::RecommendResult;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -12,6 +17,7 @@ pub const HEIGHT: f32 = 326.0;
 #[derive(Default, Clone, Copy)]
 pub struct OverlayActions {
     pub start_drag: bool,
+    pub command: Option<UiCommand>,
 }
 
 struct Theme;
@@ -43,17 +49,12 @@ impl Px {
     const MODE_BADGE_H: f32 = 22.0;
     const SETTINGS_BTN: f32 = 24.0;
     const BODY_GAP: f32 = 6.0;
-    const TAB_WIDTH: f32 = 52.0;
     const TAB_HEIGHT: f32 = 46.0;
     const TAB_GAP: f32 = 4.0;
-    const TAB_RADIUS: u8 = 6;
     const TAB_PANEL_PAD_Y: f32 = 6.0;
-    const RECOMMEND_PAD_Y: f32 = 8.0;
-    const RECOMMEND_ROW_GAP: f32 = 4.0;
     const FOOTER_MARGIN_X: i8 = 10;
     const FOOTER_MARGIN_Y: i8 = 5;
     const INNER_WIDTH: f32 = WIDTH - 16.0;
-    const RECOMMEND_WIDTH: f32 = Self::INNER_WIDTH - Self::TAB_WIDTH - Self::BODY_GAP;
     const BODY_HEIGHT: f32 =
         Self::TAB_PANEL_PAD_Y * 2.0 + Self::TAB_HEIGHT * 4.0 + Self::TAB_GAP * 3.0;
 }
@@ -94,6 +95,9 @@ pub fn draw_overlay_panel(
     ui: &mut egui::Ui,
     state: &GameSessionState,
     confidence: f32,
+    song_label: &str,
+    pattern_tabs: &[PatternTabInfo],
+    recommendations: &RecommendResult,
     settings_open: Arc<AtomicBool>,
     debug_open: Arc<AtomicBool>,
     sync_open: Arc<AtomicBool>,
@@ -106,11 +110,18 @@ pub fn draw_overlay_panel(
         .stroke(egui::Stroke::new(1.0, Theme::PANEL_STROKE))
         .show(ui, |ui| {
             ui.set_width(WIDTH - f32::from(Px::PANEL_MARGIN * 2));
-            draw_header(ui, state, &settings_open, &mut actions);
+            draw_header(ui, state, song_label, &settings_open, &mut actions);
             ui.add_space(Px::PANEL_GAP);
-            draw_body(ui, state);
+            draw_body(ui, state, pattern_tabs, recommendations);
             ui.add_space(Px::PANEL_GAP);
-            draw_footer(ui, confidence, &debug_open, &sync_open);
+            draw_footer(
+                ui,
+                confidence,
+                recommendations,
+                &debug_open,
+                &sync_open,
+                &mut actions,
+            );
         });
     actions
 }
@@ -118,9 +129,11 @@ pub fn draw_overlay_panel(
 fn draw_header(
     ui: &mut egui::Ui,
     state: &GameSessionState,
+    song_label: &str,
     settings_open: &Arc<AtomicBool>,
     actions: &mut OverlayActions,
 ) {
+    let mut settings_button_rect = None;
     let header = Frame::new()
         .fill(Theme::HEADER_BG)
         .corner_radius(CornerRadius::same(Px::HEADER_RADIUS))
@@ -132,7 +145,7 @@ fn draw_header(
                 draw_mode_badge(ui, state.mode.as_deref());
                 ui.add(
                     Label::new(
-                        RichText::new("곡을 선택하세요")
+                        RichText::new(song_label)
                             .color(Theme::TEXT_PRIMARY)
                             .font(FontId::proportional(14.0))
                             .strong(),
@@ -140,12 +153,18 @@ fn draw_header(
                     .selectable(false),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let btn = Button::new(RichText::new("⚙").color(Theme::TEXT_SECONDARY))
-                        .frame(false)
+                    let text = RichText::new("⚙")
+                        .color(Theme::TEXT_PRIMARY)
+                        .font(FontId::proportional(15.0));
+                    let btn = Button::new(text)
+                        .fill(Theme::SECTION_BG)
+                        .corner_radius(CornerRadius::same(6))
                         .min_size(Vec2::splat(Px::SETTINGS_BTN));
-                    if ui.add(btn).clicked() {
-                        let v = settings_open.load(Ordering::Relaxed);
-                        settings_open.store(!v, Ordering::Relaxed);
+                    let response = ui.add(btn).on_hover_text("설정");
+                    settings_button_rect = Some(response.rect);
+                    if response.clicked() {
+                        settings_open.store(true, Ordering::Relaxed);
+                        actions.command = Some(UiCommand::OpenSettings);
                     }
                 });
             });
@@ -163,14 +182,24 @@ fn draw_header(
             });
         });
 
+    let drag_rect = drag_rect_excluding_button(header.response.rect, settings_button_rect);
     let drag_response = ui.interact(
-        header.response.rect,
+        drag_rect,
         ui.id().with("overlay_header_drag"),
-        Sense::click_and_drag(),
+        Sense::drag(),
     );
     if drag_response.drag_started() {
         actions.start_drag = true;
     }
+}
+
+fn drag_rect_excluding_button(header: Rect, button: Option<Rect>) -> Rect {
+    let Some(button) = button else {
+        return header;
+    };
+    let mut rect = header;
+    rect.max.x = (button.min.x - 4.0).max(rect.min.x);
+    rect
 }
 
 fn draw_status_lamp(ui: &mut egui::Ui, stable: bool) {
@@ -203,74 +232,19 @@ fn draw_mode_badge(ui: &mut egui::Ui, mode: Option<&str>) {
     );
 }
 
-fn draw_body(ui: &mut egui::Ui, state: &GameSessionState) {
+fn draw_body(
+    ui: &mut egui::Ui,
+    state: &GameSessionState,
+    pattern_tabs: &[PatternTabInfo],
+    recommendations: &RecommendResult,
+) {
     ui.allocate_ui_with_layout(
         Vec2::new(Px::INNER_WIDTH, Px::BODY_HEIGHT),
         Layout::left_to_right(Align::Min),
         |ui| {
             ui.spacing_mut().item_spacing.x = Px::BODY_GAP;
-            draw_diff_tabs(ui, state.diff.as_deref());
-            draw_recommend_placeholder(ui, Px::RECOMMEND_WIDTH, Px::BODY_HEIGHT);
-        },
-    );
-}
-
-fn draw_diff_tabs(ui: &mut egui::Ui, active: Option<&str>) {
-    ui.set_width(Px::TAB_WIDTH);
-    ui.vertical(|ui| {
-        ui.add_space(Px::TAB_PANEL_PAD_Y);
-        ui.spacing_mut().item_spacing.y = Px::TAB_GAP;
-        for diff in ["NM", "HD", "MX", "SC"] {
-            let fill = if active == Some(diff) {
-                diff_color(diff)
-            } else {
-                Color32::from_rgb(28, 36, 54)
-            };
-            Frame::new()
-                .fill(fill)
-                .corner_radius(CornerRadius::same(Px::TAB_RADIUS))
-                .inner_margin(Margin::same(0))
-                .show(ui, |ui| {
-                    ui.set_min_size(Vec2::new(Px::TAB_WIDTH, Px::TAB_HEIGHT));
-                    ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                        ui.add_space(6.0);
-                        ui.label(
-                            RichText::new(diff)
-                                .color(Theme::TEXT_PRIMARY)
-                                .font(FontId::proportional(11.0))
-                                .strong(),
-                        );
-                        ui.label(
-                            RichText::new("—")
-                                .color(Color32::from_rgb(80, 88, 112))
-                                .font(FontId::proportional(10.0))
-                                .strong(),
-                        );
-                    });
-                });
-        }
-        ui.add_space(Px::TAB_PANEL_PAD_Y);
-    });
-}
-
-fn draw_recommend_placeholder(ui: &mut egui::Ui, width: f32, height: f32) {
-    ui.allocate_ui_with_layout(
-        Vec2::new(width, height),
-        Layout::top_down(Align::Min),
-        |ui| {
-            ui.add_space(Px::RECOMMEND_PAD_Y);
-            ui.spacing_mut().item_spacing.y = Px::RECOMMEND_ROW_GAP;
-            ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
-                ui.add(
-                    Label::new(
-                        RichText::new("패턴을 감지하는 중...")
-                            .color(Theme::TEXT_SECONDARY)
-                            .font(FontId::proportional(11.0)),
-                    )
-                    .selectable(false),
-                );
-            });
-            ui.add_space(Px::RECOMMEND_PAD_Y);
+            draw_diff_tabs(ui, state.diff.as_deref(), pattern_tabs);
+            draw_recommendations(ui, state, recommendations);
         },
     );
 }
@@ -278,8 +252,10 @@ fn draw_recommend_placeholder(ui: &mut egui::Ui, width: f32, height: f32) {
 fn draw_footer(
     ui: &mut egui::Ui,
     confidence: f32,
+    recommendations: &RecommendResult,
     debug_open: &Arc<AtomicBool>,
     sync_open: &Arc<AtomicBool>,
+    actions: &mut OverlayActions,
 ) {
     Frame::new()
         .fill(Theme::SECTION_BG)
@@ -288,21 +264,24 @@ fn draw_footer(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 if ui.small_button("debug").clicked() {
-                    let v = debug_open.load(Ordering::Relaxed);
-                    debug_open.store(!v, Ordering::Relaxed);
+                    debug_open.store(true, Ordering::Relaxed);
+                    actions.command = Some(UiCommand::OpenDebug);
                 }
                 if ui.small_button("sync").clicked() {
-                    let v = sync_open.load(Ordering::Relaxed);
-                    sync_open.store(!v, Ordering::Relaxed);
+                    sync_open.store(true, Ordering::Relaxed);
+                    actions.command = Some(UiCommand::OpenSync);
                 }
                 ui.label(RichText::new("유사 구간 평균").color(Theme::TEXT_SECONDARY));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
-                        RichText::new(format!("신뢰도 {:.0}%", confidence * 100.0))
+                        RichText::new(pattern_count_text(recommendations))
+                            .color(Theme::TEXT_SECONDARY),
+                    );
+                    ui.label(
+                        RichText::new(avg_rate_text(recommendations, confidence))
                             .color(Theme::TEXT_SECONDARY)
                             .strong(),
                     );
-                    ui.label(RichText::new("——").color(Theme::TEXT_SECONDARY));
                 });
             });
         });
@@ -315,7 +294,7 @@ fn meta_text(state: &GameSessionState) -> String {
     }
 }
 
-fn diff_color(diff: &str) -> Color32 {
+pub(crate) fn diff_color(diff: &str) -> Color32 {
     match diff {
         "NM" => Color32::from_rgb(0x4A, 0x90, 0xD9),
         "HD" => Color32::from_rgb(0xF5, 0xA6, 0x23),

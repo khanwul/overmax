@@ -190,9 +190,11 @@ impl<'a> Recommender<'a> {
                     for diff in DIFFICULTIES {
                         if let Some(p) = mode_patterns.get(*diff) {
                             let cand_floor_val = Self::parse_floor_value(p.floor_name.as_ref());
-                            
+
                             let final_cand_floor = if use_official {
-                                if cand_floor_val.is_some() || Self::diff_group(diff) != ref_diff_grp {
+                                if cand_floor_val.is_some()
+                                    || Self::diff_group(diff) != ref_diff_grp
+                                {
                                     continue;
                                 }
                                 p.level.unwrap_or(0) as f64
@@ -207,7 +209,8 @@ impl<'a> Recommender<'a> {
                                 continue;
                             }
 
-                            if sid == target_song_id && mode == &target_mode && diff == &target_diff {
+                            if sid == target_song_id && mode == &target_mode && diff == &target_diff
+                            {
                                 continue;
                             }
 
@@ -246,7 +249,11 @@ impl<'a> Recommender<'a> {
         let rate_map = self.rdb.get_rate_map(&unique_ids);
 
         for entry in candidates.iter_mut() {
-            if let Some(&(rate, is_max_combo)) = rate_map.get(&(entry.song_id, entry.button_mode.clone(), entry.difficulty.clone())) {
+            if let Some(&(rate, is_max_combo)) = rate_map.get(&(
+                entry.song_id,
+                entry.button_mode.clone(),
+                entry.difficulty.clone(),
+            )) {
                 entry.rate = Some(rate);
                 entry.is_max_combo = is_max_combo;
             }

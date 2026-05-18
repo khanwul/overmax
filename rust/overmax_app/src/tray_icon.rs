@@ -1,7 +1,9 @@
 //! Windows system tray icon for the native Rust app.
 
+use crate::ui_command::UiCommand;
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
 
@@ -36,28 +38,12 @@ pub struct TrayIcon {
 }
 
 struct TrayActions {
-    overlay_visible: Arc<AtomicBool>,
-    settings_open: Arc<AtomicBool>,
-    sync_open: Arc<AtomicBool>,
-    debug_open: Arc<AtomicBool>,
-    exit_requested: Arc<AtomicBool>,
+    command_tx: Sender<UiCommand>,
 }
 
 impl TrayIcon {
-    pub fn spawn(
-        overlay_visible: Arc<AtomicBool>,
-        settings_open: Arc<AtomicBool>,
-        sync_open: Arc<AtomicBool>,
-        debug_open: Arc<AtomicBool>,
-        exit_requested: Arc<AtomicBool>,
-    ) -> Self {
-        let _ = ACTIONS.set(TrayActions {
-            overlay_visible,
-            settings_open,
-            sync_open,
-            debug_open,
-            exit_requested,
-        });
+    pub fn spawn(command_tx: Sender<UiCommand>) -> Self {
+        let _ = ACTIONS.set(TrayActions { command_tx });
         let hwnd = Arc::new(AtomicIsize::new(0));
         let thread_hwnd = hwnd.clone();
         let thread = thread::spawn(move || unsafe {
@@ -229,16 +215,17 @@ fn handle_menu_command(cmd: usize) {
         return;
     };
     match cmd {
-        CMD_TOGGLE => {
-            let current = actions.overlay_visible.load(Ordering::Relaxed);
-            actions.overlay_visible.store(!current, Ordering::Relaxed);
-        }
-        CMD_SETTINGS => actions.settings_open.store(true, Ordering::Relaxed),
-        CMD_SYNC => actions.sync_open.store(true, Ordering::Relaxed),
-        CMD_DEBUG => actions.debug_open.store(true, Ordering::Relaxed),
-        CMD_EXIT => actions.exit_requested.store(true, Ordering::Relaxed),
+        CMD_TOGGLE => send_command(actions, UiCommand::ToggleOverlay),
+        CMD_SETTINGS => send_command(actions, UiCommand::OpenSettings),
+        CMD_SYNC => send_command(actions, UiCommand::OpenSync),
+        CMD_DEBUG => send_command(actions, UiCommand::OpenDebug),
+        CMD_EXIT => send_command(actions, UiCommand::Exit),
         _ => {}
     }
+}
+
+fn send_command(actions: &TrayActions, command: UiCommand) {
+    let _ = actions.command_tx.send(command);
 }
 
 fn wide(text: &str) -> Vec<u16> {

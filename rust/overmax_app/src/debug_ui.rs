@@ -17,16 +17,6 @@ pub fn push_log(lines: &Arc<Mutex<VecDeque<String>>>, max_lines: usize, line: St
     g.push_back(line);
 }
 
-pub fn drain_channel(
-    lines: &Arc<Mutex<VecDeque<String>>>,
-    rx: &std::sync::mpsc::Receiver<String>,
-    max_lines: usize,
-) {
-    while let Ok(msg) = rx.try_recv() {
-        push_log(lines, max_lines, msg);
-    }
-}
-
 pub fn render_debug(
     ctx: &egui::Context,
     class: ViewportClass,

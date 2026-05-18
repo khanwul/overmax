@@ -98,7 +98,10 @@ fn merge_record_entries(
             .and_then(|v| v.as_bool())
             .or_else(|| rec.get("maxCombo").and_then(|v| v.as_u64()).map(|n| n != 0))
             .unwrap_or(false);
-        cache.insert((song_id, button_mode.to_string(), diff.to_string()), (rate, is_max_combo));
+        cache.insert(
+            (song_id, button_mode.to_string(), diff.to_string()),
+            (rate, is_max_combo),
+        );
     }
 }
 
@@ -166,7 +169,11 @@ pub fn build_candidates(
         });
     }
 
-    candidates.sort_by(|a, b| sort_key(a).partial_cmp(&sort_key(b)).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        sort_key(a)
+            .partial_cmp(&sort_key(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     candidates
 }
 
@@ -193,7 +200,11 @@ pub fn upsert_varchive_cache_record(
 
     let records = root
         .as_object_mut()
-        .and_then(|m| m.entry("records".to_string()).or_insert_with(|| json!([])).as_array_mut())
+        .and_then(|m| {
+            m.entry("records".to_string())
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+        })
         .ok_or_else(|| "invalid cache shape".to_string())?;
 
     let title = song_id.to_string();

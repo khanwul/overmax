@@ -30,10 +30,18 @@ pub fn load_merged_settings(root: impl AsRef<Path>, defaults: Value) -> Value {
 /// Packaged defaults merged with `settings.json` only (no `settings.user.json`), for delta-save base.
 pub fn load_base_settings(root: impl AsRef<Path>, defaults: Value) -> Value {
     let paths = SettingsPaths::in_dir(root);
-    merge_settings_layers(defaults, load_json_object(&paths.settings_json), empty_object())
+    merge_settings_layers(
+        defaults,
+        load_json_object(&paths.settings_json),
+        empty_object(),
+    )
 }
 
-pub fn merge_settings_layers(defaults: Value, settings_json: Value, settings_user_json: Value) -> Value {
+pub fn merge_settings_layers(
+    defaults: Value,
+    settings_json: Value,
+    settings_user_json: Value,
+) -> Value {
     let mut merged = object_or_empty(defaults);
     merge_object_value(&mut merged, settings_json);
     merge_object_value(&mut merged, settings_user_json);
@@ -160,7 +168,10 @@ pub fn diff_settings(base: &Value, current: &Value) -> Value {
             }
             Some(base_val) => {
                 if let (Value::Object(base_obj), Value::Object(val_obj)) = (base_val, val) {
-                    let sub_diff = diff_settings(&Value::Object(base_obj.clone()), &Value::Object(val_obj.clone()));
+                    let sub_diff = diff_settings(
+                        &Value::Object(base_obj.clone()),
+                        &Value::Object(val_obj.clone()),
+                    );
                     if let Value::Object(sub_map) = &sub_diff {
                         if !sub_map.is_empty() {
                             diff.insert(key.clone(), sub_diff);
@@ -180,9 +191,8 @@ pub fn save_user_settings(root: impl AsRef<Path>, diff: &Value) -> std::io::Resu
     if let Some(parent) = paths.settings_user_json.parent() {
         fs::create_dir_all(parent)?;
     }
-    
-    let text = serde_json::to_string_pretty(diff)
-        .unwrap_or_else(|_| "{}".to_string());
+
+    let text = serde_json::to_string_pretty(diff).unwrap_or_else(|_| "{}".to_string());
     fs::write(&paths.settings_user_json, text)?;
     Ok(())
 }
@@ -201,11 +211,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("overmax-base-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
-        fs::write(
-            root.join("settings.json"),
-            r#"{"overlay":{"scale":1.25}}"#,
-        )
-        .unwrap();
+        fs::write(root.join("settings.json"), r#"{"overlay":{"scale":1.25}}"#).unwrap();
         fs::write(
             root.join("settings.user.json"),
             r#"{"overlay":{"base_opacity":0.3}}"#,
@@ -257,10 +263,8 @@ mod tests {
 
     #[test]
     fn loads_settings_json_then_user_settings_json_from_root() {
-        let root = std::env::temp_dir().join(format!(
-            "overmax-settings-test-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("overmax-settings-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
 
@@ -298,12 +302,15 @@ mod tests {
             "b": {"x": 10, "y": 25, "z": 30},
             "d": 4
         });
-        
+
         let diff = diff_settings(&base, &current);
-        assert_eq!(diff, json!({
-            "b": {"y": 25, "z": 30},
-            "d": 4
-        }));
+        assert_eq!(
+            diff,
+            json!({
+                "b": {"y": 25, "z": 30},
+                "d": 4
+            })
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, Result};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::fs;
 
 pub struct RecordDB {
     db_path: PathBuf,
@@ -74,7 +74,12 @@ impl RecordDB {
         Ok(())
     }
 
-    fn table_has_column(&self, conn: &Connection, table_name: &str, column_name: &str) -> Result<bool> {
+    fn table_has_column(
+        &self,
+        conn: &Connection,
+        table_name: &str,
+        column_name: &str,
+    ) -> Result<bool> {
         let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table_name))?;
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
@@ -134,7 +139,14 @@ impl RecordDB {
                     rate          = excluded.rate,
                     is_max_combo  = excluded.is_max_combo,
                     updated_at    = CAST(strftime('%s', 'now') AS INTEGER)",
-                params![steam_id, sid, button_mode, difficulty, rate, is_max_combo_int],
+                params![
+                    steam_id,
+                    sid,
+                    button_mode,
+                    difficulty,
+                    rate,
+                    is_max_combo_int
+                ],
             );
             return result.is_ok();
         }
@@ -148,10 +160,12 @@ impl RecordDB {
 
         let steam_id = self.get_steam_id();
         if let Ok(conn) = Connection::open(&self.db_path) {
-            let mut stmt = conn.prepare(
-                "SELECT rate, is_max_combo FROM records
+            let mut stmt = conn
+                .prepare(
+                    "SELECT rate, is_max_combo FROM records
                  WHERE steam_id=?1 AND song_id=?2 AND button_mode=?3 AND difficulty=?4",
-            ).ok()?;
+                )
+                .ok()?;
             let result: Result<(f64, i32)> = stmt.query_row(
                 params![steam_id, song_id.to_string(), button_mode, difficulty],
                 |row| Ok((row.get(0)?, row.get(1)?)),
@@ -163,7 +177,10 @@ impl RecordDB {
         None
     }
 
-    pub fn get_rate_map(&self, song_ids: &[i32]) -> std::collections::HashMap<(i32, String, String), (f64, bool)> {
+    pub fn get_rate_map(
+        &self,
+        song_ids: &[i32],
+    ) -> std::collections::HashMap<(i32, String, String), (f64, bool)> {
         if !self.is_ready || song_ids.is_empty() {
             return std::collections::HashMap::new();
         }
@@ -173,7 +190,7 @@ impl RecordDB {
         let query = format!(
             "SELECT song_id, button_mode, difficulty, rate, is_max_combo 
              FROM records 
-             WHERE steam_id=?1 AND song_id IN ({})", 
+             WHERE steam_id=?1 AND song_id IN ({})",
             placeholders
         );
 
@@ -189,17 +206,24 @@ impl RecordDB {
 
                 if let Ok(mut rows) = stmt.query(&*p) {
                     while let Ok(Some(row)) = rows.next() {
-                        if let (Ok(song_id_str), Ok(button_mode), Ok(difficulty), Ok(rate), Ok(is_max_combo_int)) =
-                            (
-                                row.get::<_, String>(0),
-                                row.get::<_, String>(1),
-                                row.get::<_, String>(2),
-                                row.get::<_, f64>(3),
-                                row.get::<_, i32>(4),
-                            )
-                        {
+                        if let (
+                            Ok(song_id_str),
+                            Ok(button_mode),
+                            Ok(difficulty),
+                            Ok(rate),
+                            Ok(is_max_combo_int),
+                        ) = (
+                            row.get::<_, String>(0),
+                            row.get::<_, String>(1),
+                            row.get::<_, String>(2),
+                            row.get::<_, f64>(3),
+                            row.get::<_, i32>(4),
+                        ) {
                             if let Ok(sid) = song_id_str.parse::<i32>() {
-                                map.insert((sid, button_mode, difficulty), (rate, is_max_combo_int != 0));
+                                map.insert(
+                                    (sid, button_mode, difficulty),
+                                    (rate, is_max_combo_int != 0),
+                                );
                             }
                         }
                     }

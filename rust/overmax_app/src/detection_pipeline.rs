@@ -10,14 +10,34 @@ use overmax_data::ImageIndexDb;
 const JACKET_MATCH_INTERVAL: f64 = 0.8;
 const JACKET_CHANGE_THRESHOLD: f32 = 2.5;
 const JACKET_FORCE_RECHECK_SEC: f64 = 2.0;
+const JACKET_STABLE_HITS: u8 = 2;
 const LOGO_OCR_COOLDOWN_SEC: f64 = 1.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DetectionOutput {
+    pub logo_detected: bool,
     pub is_song_select: bool,
     pub is_leaving: bool,
     pub confidence: f32,
     pub state: GameSessionState,
+    pub current_song_id: Option<u32>,
+    pub image_db_ready: bool,
+    pub jacket_status: JacketMatchStatus,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum JacketMatchStatus {
+    NotSongSelect,
+    Leaving,
+    DbNotReady,
+    Cooldown,
+    CropMissing,
+    ThumbnailMissing,
+    Unchanged,
+    NoMatch,
+    Pending { song_id: u32, similarity: f32 },
+    InvalidId { image_id: String, similarity: f32 },
+    Matched { song_id: u32, similarity: f32 },
 }
 
 pub struct DetectionPipeline {
@@ -32,6 +52,13 @@ pub struct DetectionPipeline {
     last_jacket_ts: f64,
     last_jacket_match_ts: f64,
     last_jacket_thumb: Option<Vec<u8>>,
+    pending_jacket_match: Option<PendingJacketMatch>,
+}
+
+#[derive(Clone, Debug)]
+struct PendingJacketMatch {
+    song_id: u32,
+    hits: u8,
 }
 
 impl DetectionPipeline {
@@ -48,6 +75,7 @@ impl DetectionPipeline {
             last_jacket_ts: 0.0,
             last_jacket_match_ts: 0.0,
             last_jacket_thumb: None,
+            pending_jacket_match: None,
         }
     }
 
@@ -72,18 +100,32 @@ impl DetectionPipeline {
 
         if !is_song_select {
             self.reset_on_screen_exit();
-            return self.output(false, is_leaving, confidence, GameSessionState::detecting());
+            return self.output(
+                logo_detected,
+                false,
+                is_leaving,
+                confidence,
+                GameSessionState::detecting(),
+                JacketMatchStatus::NotSongSelect,
+            );
         }
 
         if is_leaving {
-            return self.output(true, true, confidence, GameSessionState::detecting());
+            return self.output(
+                logo_detected,
+                true,
+                true,
+                confidence,
+                GameSessionState::detecting(),
+                JacketMatchStatus::Leaving,
+            );
         }
 
-        self.update_song_id_from_jacket(frame, now);
+        let jacket_status = self.update_song_id_from_jacket(frame, now);
         let state = self
             .play_state
             .detect(frame, &self.rois, self.current_song_id, &self.ocr);
-        self.output(true, false, confidence, state)
+        self.output(logo_detected, true, false, confidence, state, jacket_status)
     }
 
     fn detect_logo_if_due(&mut self, frame: &CapturedFrame, now: f64) -> bool {
@@ -103,9 +145,12 @@ impl DetectionPipeline {
         self.last_logo_ocr_ok
     }
 
-    fn update_song_id_from_jacket(&mut self, frame: &CapturedFrame, now: f64) {
-        if !self.should_match_jacket(now) {
-            return;
+    fn update_song_id_from_jacket(&mut self, frame: &CapturedFrame, now: f64) -> JacketMatchStatus {
+        if !self.image_db.is_ready() {
+            return JacketMatchStatus::DbNotReady;
+        }
+        if now - self.last_jacket_ts < JACKET_MATCH_INTERVAL {
+            return JacketMatchStatus::Cooldown;
         }
         self.last_jacket_ts = now;
         let Some(jacket) = self
@@ -113,10 +158,10 @@ impl DetectionPipeline {
             .get_roi("jacket")
             .and_then(|roi| crop_roi(frame, roi))
         else {
-            return;
+            return JacketMatchStatus::CropMissing;
         };
         let Some(thumb) = make_thumbnail(&jacket) else {
-            return;
+            return JacketMatchStatus::ThumbnailMissing;
         };
         let image_changed = thumbnail_changed(
             &thumb,
@@ -125,56 +170,105 @@ impl DetectionPipeline {
         );
         let force_recheck = now - self.last_jacket_match_ts >= JACKET_FORCE_RECHECK_SEC;
         if !(image_changed || force_recheck) {
-            return;
+            return JacketMatchStatus::Unchanged;
         }
 
         self.last_jacket_thumb = Some(thumb);
         self.last_jacket_match_ts = now;
-        if image_changed {
-            self.current_song_id = None;
+        self.apply_jacket_match(&jacket)
+    }
+
+    fn apply_jacket_match(
+        &mut self,
+        jacket: &crate::frame_utils::ImageRegion,
+    ) -> JacketMatchStatus {
+        let Some(result) = self.image_db.search(
+            &jacket.bgra,
+            jacket.width as usize,
+            jacket.height as usize,
+            4,
+        ) else {
+            self.pending_jacket_match = None;
+            return JacketMatchStatus::NoMatch;
+        };
+        match result.image_id.parse::<u32>() {
+            Ok(song_id) => self.stabilize_jacket_match(song_id, result.similarity),
+            Err(_) => {
+                self.pending_jacket_match = None;
+                JacketMatchStatus::InvalidId {
+                    image_id: result.image_id,
+                    similarity: result.similarity,
+                }
+            }
         }
-        self.current_song_id = self.search_song_id_from_jacket(&jacket);
     }
 
-    fn should_match_jacket(&self, now: f64) -> bool {
-        self.image_db.is_ready() && now - self.last_jacket_ts >= JACKET_MATCH_INTERVAL
+    fn stabilize_jacket_match(&mut self, song_id: u32, similarity: f32) -> JacketMatchStatus {
+        if self.current_song_id == Some(song_id) {
+            self.pending_jacket_match = None;
+            return JacketMatchStatus::Matched {
+                song_id,
+                similarity,
+            };
+        }
+
+        let hits = self.next_pending_hits(song_id);
+        if hits < JACKET_STABLE_HITS {
+            return JacketMatchStatus::Pending {
+                song_id,
+                similarity,
+            };
+        }
+
+        self.current_song_id = Some(song_id);
+        self.pending_jacket_match = None;
+        JacketMatchStatus::Matched {
+            song_id,
+            similarity,
+        }
     }
 
-    fn search_song_id_from_jacket(&self, jacket: &crate::frame_utils::ImageRegion) -> Option<u32> {
-        self.image_db
-            .search(
-                &jacket.bgra,
-                jacket.width as usize,
-                jacket.height as usize,
-                4,
-            )
-            .and_then(|result| result.image_id.parse::<u32>().ok())
+    fn next_pending_hits(&mut self, song_id: u32) -> u8 {
+        let hits = self
+            .pending_jacket_match
+            .as_ref()
+            .filter(|pending| pending.song_id == song_id)
+            .map_or(1, |pending| pending.hits.saturating_add(1));
+        self.pending_jacket_match = Some(PendingJacketMatch { song_id, hits });
+        hits
     }
 
     fn reset_on_screen_exit(&mut self) {
         self.current_song_id = None;
+        self.pending_jacket_match = None;
         self.play_state.reset();
     }
 
     fn output(
         &self,
+        logo_detected: bool,
         is_song_select: bool,
         is_leaving: bool,
         confidence: f32,
         state: GameSessionState,
+        jacket_status: JacketMatchStatus,
     ) -> DetectionOutput {
         DetectionOutput {
+            logo_detected,
             is_song_select,
             is_leaving,
             confidence,
             state,
+            current_song_id: self.current_song_id,
+            image_db_ready: self.image_db.is_ready(),
+            jacket_status,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::DetectionPipeline;
+    use super::{DetectionPipeline, JacketMatchStatus};
     use crate::screen_capture::CapturedFrame;
     use overmax_data::ImageIndexDb;
 
@@ -188,8 +282,10 @@ mod tests {
         let third = pipeline.process_frame_with_logo(&frame, true, 3.0);
 
         assert!(!first.is_song_select);
+        assert_eq!(first.jacket_status, JacketMatchStatus::NotSongSelect);
         assert!(!second.is_song_select);
         assert!(third.is_song_select);
+        assert_eq!(third.jacket_status, JacketMatchStatus::DbNotReady);
     }
 
     #[test]
@@ -204,6 +300,38 @@ mod tests {
 
         assert!(output.is_song_select);
         assert!(output.state.song_id.is_none());
+    }
+
+    #[test]
+    fn jacket_match_requires_repeated_candidate_before_commit() {
+        let mut pipeline = DetectionPipeline::new(ImageIndexDb::new("missing.db", 0.6));
+
+        let first = pipeline.stabilize_jacket_match(7, 0.8);
+        let second = pipeline.stabilize_jacket_match(8, 0.8);
+        let third = pipeline.stabilize_jacket_match(8, 0.8);
+
+        assert_eq!(
+            first,
+            JacketMatchStatus::Pending {
+                song_id: 7,
+                similarity: 0.8
+            }
+        );
+        assert_eq!(
+            second,
+            JacketMatchStatus::Pending {
+                song_id: 8,
+                similarity: 0.8
+            }
+        );
+        assert_eq!(
+            third,
+            JacketMatchStatus::Matched {
+                song_id: 8,
+                similarity: 0.8
+            }
+        );
+        assert_eq!(pipeline.current_song_id, Some(8));
     }
 
     fn blank_frame() -> CapturedFrame {
