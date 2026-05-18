@@ -70,6 +70,7 @@ fn preprocess_ocr_bmp(image: &ImageRegion, force_invert: bool) -> Result<Vec<u8>
         image.height as usize,
         force_invert,
     )
+    .map_err(|e| e.to_string())
 }
 
 fn recognize_bmp(engine: &OcrEngine, bmp: &[u8]) -> Result<String, String> {
