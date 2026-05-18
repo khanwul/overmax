@@ -1,6 +1,6 @@
 [package]
 name = "overmax-app"
-version = "0.1.0"
+version = "0.1.6"
 edition.workspace = true
 license.workspace = true
 
@@ -24,6 +24,9 @@ reqwest = { version = "0.12.24", default-features = false, features = [
     "rustls-tls",
 ] }
 serde_json = "1"
+sha2 = "0.10.8"
+winreg = "0.55"
+zip = "2.4"
 windows = { version = "0.62.2", features = [
     "Foundation",
     "Globalization",
@@ -35,5 +38,7 @@ windows-future = "0.3.2"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }

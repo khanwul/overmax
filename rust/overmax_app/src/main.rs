@@ -1,8 +1,11 @@
 mod debug_ui;
 mod detection_pipeline;
 mod frame_utils;
+mod global_hotkey;
 mod hysteresis;
 mod native_app;
+mod native_app_viewports;
+mod native_helpers;
 mod ocr_engine;
 mod overlay_ui;
 mod play_state;
@@ -10,12 +13,19 @@ mod probe_worker;
 mod roi;
 mod screen_capture;
 mod settings_ui;
+mod single_instance;
+mod steam_session;
 mod sync_ui;
 mod varchive_upload;
 mod window_tracker;
+mod updater;
 
 #[cfg(target_os = "windows")]
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(wa) = updater::worker::parse_worker_args(&args) {
+        std::process::exit(updater::worker::run_update_worker(wa));
+    }
     if let Err(err) = native_app::run_native_app() {
         eprintln!("overmax-rs failed: {err}");
         std::process::exit(1);

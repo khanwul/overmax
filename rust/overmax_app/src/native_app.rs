@@ -1,6 +1,6 @@
 //! Single `eframe` app: overlay + deferred debug / settings / sync viewports.
 
-use eframe::egui::{self, Color32, Frame, Vec2, ViewportBuilder, ViewportId};
+use eframe::egui::{self, Color32, ViewportBuilder};
 use overmax_core::GameSessionState;
 use overmax_data::{
     build_candidates, load_base_settings, load_merged_settings, normalize_settings, upsert_varchive_cache_record,
@@ -14,23 +14,48 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use crate::debug_ui;
+use crate::global_hotkey::GlobalHotkey;
+use crate::native_helpers::{account_path_for_steam, button_num, first_steam_from_settings, toggle_hotkey_from_settings};
 use crate::overlay_ui;
 use crate::probe_worker;
-use crate::settings_ui;
-use crate::sync_ui;
+use crate::single_instance::SingleInstanceGuard;
+use crate::steam_session;
+use crate::updater::{self, AppUpdateConfig};
 use crate::varchive_upload;
 
-fn vp_debug() -> ViewportId {
-    ViewportId::from_hash_of("overmax_debug_vp")
-}
-fn vp_settings() -> ViewportId {
-    ViewportId::from_hash_of("overmax_settings_vp")
-}
-fn vp_sync() -> ViewportId {
-    ViewportId::from_hash_of("overmax_sync_vp")
-}
-
 pub fn run_native_app() -> eframe::Result<()> {
+    let Some(_single) = SingleInstanceGuard::try_acquire() else {
+        std::process::exit(0);
+    };
+
+    let root = std::env::current_dir().unwrap_or_else(|e| {
+        eprintln!("cwd: {e}");
+        std::process::exit(1);
+    });
+    let defaults: Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../settings.json"
+    )))
+    .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+    let mut merged = load_merged_settings(root.as_path(), defaults);
+    normalize_settings(&mut merged);
+    let upd_cfg = AppUpdateConfig::from_merged_settings(&merged);
+    let ok_notify = updater::notify_previous_update(root.as_path()).unwrap_or_else(|e| {
+        eprintln!("[AppUpdater] notify: {e}");
+        true
+    });
+    if !ok_notify {
+        return Ok(());
+    }
+    match updater::check_and_apply_update_blocking(root.as_path(), &upd_cfg) {
+        Ok(true) => {}
+        Ok(false) => std::process::exit(0),
+        Err(e) => {
+            eprintln!("[AppUpdater] {e}");
+            std::process::exit(1);
+        }
+    }
+
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
             .with_title("Overmax")
@@ -59,29 +84,33 @@ pub fn run_native_app() -> eframe::Result<()> {
 }
 
 pub struct NativeApp {
-    root: Arc<std::path::PathBuf>,
-    defaults: Arc<Value>,
-    base_settings: Arc<Mutex<Value>>,
-    merged_settings: Arc<Mutex<Value>>,
-    settings_draft: Arc<Mutex<Value>>,
-    debug_open: Arc<AtomicBool>,
-    settings_open: Arc<AtomicBool>,
-    sync_open: Arc<AtomicBool>,
-    scan_pending: Arc<AtomicBool>,
-    log_lines: Arc<Mutex<VecDeque<String>>>,
-    log_rx: Receiver<String>,
-    session: GameSessionState,
-    confidence: f32,
-    sync_steam_id: Arc<Mutex<String>>,
-    sync_status: Arc<Mutex<String>>,
-    sync_candidates: Arc<Mutex<Vec<SyncCandidate>>>,
-    sync_rx: Receiver<Result<Vec<SyncCandidate>, String>>,
-    sync_tx: Sender<Result<Vec<SyncCandidate>, String>>,
-    upload_req_rx: Receiver<usize>,
-    upload_req_tx: Sender<usize>,
-    upload_res_rx: Receiver<(usize, String, String)>,
-    upload_res_tx: Sender<(usize, String, String)>,
-    prev_settings_open: bool,
+    pub(crate) root: Arc<std::path::PathBuf>,
+    pub(crate) defaults: Arc<Value>,
+    pub(crate) base_settings: Arc<Mutex<Value>>,
+    pub(crate) merged_settings: Arc<Mutex<Value>>,
+    pub(crate) settings_draft: Arc<Mutex<Value>>,
+    pub(crate) debug_open: Arc<AtomicBool>,
+    pub(crate) settings_open: Arc<AtomicBool>,
+    pub(crate) sync_open: Arc<AtomicBool>,
+    pub(crate) scan_pending: Arc<AtomicBool>,
+    pub(crate) log_lines: Arc<Mutex<VecDeque<String>>>,
+    pub(crate) log_rx: Receiver<String>,
+    pub(crate) session: GameSessionState,
+    pub(crate) confidence: f32,
+    pub(crate) sync_steam_id: Arc<Mutex<String>>,
+    pub(crate) sync_status: Arc<Mutex<String>>,
+    pub(crate) sync_candidates: Arc<Mutex<Vec<SyncCandidate>>>,
+    pub(crate) sync_rx: Receiver<Result<Vec<SyncCandidate>, String>>,
+    pub(crate) sync_tx: Sender<Result<Vec<SyncCandidate>, String>>,
+    pub(crate) upload_req_rx: Receiver<usize>,
+    pub(crate) upload_req_tx: Sender<usize>,
+    pub(crate) upload_res_rx: Receiver<(usize, String, String)>,
+    pub(crate) upload_res_tx: Sender<(usize, String, String)>,
+    pub(crate) prev_settings_open: bool,
+    pub(crate) record_db: Arc<RecordDB>,
+    pub(crate) game_found_rx: Receiver<()>,
+    pub(crate) overlay_visible: Arc<AtomicBool>,
+    pub(crate) _hotkey: Option<GlobalHotkey>,
 }
 
 impl NativeApp {
@@ -102,11 +131,14 @@ impl NativeApp {
         let settings_draft = Arc::new(Mutex::new(merged));
 
         let (log_tx, log_rx) = mpsc::channel();
-        probe_worker::spawn((*root).clone(), log_tx.clone());
+        let (game_found_tx, game_found_rx) = mpsc::channel();
+        probe_worker::spawn((*root).clone(), log_tx.clone(), game_found_tx);
 
         let compat = DataCompatibility::current();
-        let mut record_db = RecordDB::new(root.join(compat.record_db), None);
+        let recent_steam = steam_session::most_recent_steam_id();
+        let mut record_db = RecordDB::new(root.join(compat.record_db), recent_steam.as_deref());
         record_db.initialize();
+        let record_db = Arc::new(record_db);
 
         let mut varchive_db = VArchiveDB::new();
         let songs_path = root.join(compat.songs_json);
@@ -116,8 +148,19 @@ impl NativeApp {
 
         let steam0 = {
             let mg = merged_settings.lock().map_err(|_| "settings lock poisoned")?;
-            first_steam_from_settings(mg.clone())
+            let mut sid = first_steam_from_settings(mg.clone());
+            if sid.is_empty() {
+                sid = recent_steam.unwrap_or_default();
+            }
+            sid
         };
+
+        let overlay_visible = Arc::new(AtomicBool::new(true));
+        let hk_key = {
+            let mg = merged_settings.lock().map_err(|_| "settings lock poisoned")?;
+            toggle_hotkey_from_settings(&mg)
+        };
+        let _hotkey = GlobalHotkey::spawn_toggle(&hk_key, overlay_visible.clone());
 
         let (sync_tx, sync_rx) = mpsc::channel();
         let (upload_req_tx, upload_req_rx) = mpsc::channel();
@@ -147,10 +190,14 @@ impl NativeApp {
             upload_res_rx,
             upload_res_tx,
             prev_settings_open: false,
+            record_db,
+            game_found_rx,
+            overlay_visible,
+            _hotkey,
         })
     }
 
-    fn max_log_lines(&self) -> usize {
+    pub(crate) fn max_log_lines(&self) -> usize {
         let Ok(m) = self.merged_settings.lock() else {
             return 500;
         };
@@ -160,7 +207,7 @@ impl NativeApp {
             .unwrap_or(500) as usize
     }
 
-    fn debug_title(&self) -> String {
+    pub(crate) fn debug_title(&self) -> String {
         let Ok(m) = self.merged_settings.lock() else {
             return "Overmax Debug Log".into();
         };
@@ -171,7 +218,7 @@ impl NativeApp {
             .to_string()
     }
 
-    fn apply_overlay_visual(&self, ctx: &egui::Context) {
+    pub(crate) fn apply_overlay_visual(&self, ctx: &egui::Context) {
         let Ok(merged) = self.merged_settings.lock() else {
             return;
         };
@@ -192,12 +239,12 @@ impl NativeApp {
         });
     }
 
-    fn drain_logs(&self) {
+    pub(crate) fn drain_logs(&self) {
         let max = self.max_log_lines();
         debug_ui::drain_channel(&self.log_lines, &self.log_rx, max);
     }
 
-    fn poll_scan_requests(&mut self) {
+    pub(crate) fn poll_scan_requests(&mut self) {
         if self.scan_pending.swap(false, Ordering::Relaxed) {
             if let Ok(mut s) = self.sync_status.lock() {
                 *s = "스캔 중…".into();
@@ -206,7 +253,7 @@ impl NativeApp {
         }
     }
 
-    fn poll_upload_requests(&mut self) {
+    pub(crate) fn poll_upload_requests(&mut self) {
         while let Ok(idx) = self.upload_req_rx.try_recv() {
             let cand = self
                 .sync_candidates
@@ -219,7 +266,7 @@ impl NativeApp {
         }
     }
 
-    fn drain_sync_scan(&self) {
+    pub(crate) fn drain_sync_scan(&self) {
         while let Ok(res) = self.sync_rx.try_recv() {
             match res {
                 Ok(list) => {
@@ -240,7 +287,7 @@ impl NativeApp {
         }
     }
 
-    fn drain_upload_results(&self) {
+    pub(crate) fn drain_upload_results(&self) {
         while let Ok((idx, status, msg)) = self.upload_res_rx.try_recv() {
             if let Ok(mut list) = self.sync_candidates.lock() {
                 if let Some(c) = list.get_mut(idx) {
@@ -251,10 +298,31 @@ impl NativeApp {
         }
     }
 
+    pub(crate) fn drain_game_found_refresh_steam(&self) {
+        while self.game_found_rx.try_recv().is_ok() {
+            let sid = steam_session::most_recent_steam_id();
+            let (changed, before, after) = self.record_db.set_steam_id(sid.as_deref());
+            if changed {
+                debug_ui::push_log(
+                    &self.log_lines,
+                    self.max_log_lines(),
+                    format!("[Main] Steam 세션 갱신 (게임 창 발견): {before} -> {after}"),
+                );
+            } else if sid.is_some() {
+                debug_ui::push_log(
+                    &self.log_lines,
+                    self.max_log_lines(),
+                    format!("[Main] Steam 세션 유지 (게임 창 발견): {after}"),
+                );
+            }
+        }
+    }
+
     fn spawn_scan(&self) {
         let steam = self.sync_steam_id.lock().map(|g| g.clone()).unwrap_or_default();
         let tx = self.sync_tx.clone();
         let root = self.root.clone();
+        let rdb = self.record_db.clone();
         std::thread::spawn(move || {
             let compat = DataCompatibility::current();
             let songs_path = root.join(compat.songs_json);
@@ -263,10 +331,8 @@ impl NativeApp {
                 let _ = tx.send(Err(format!("songs.json: {e}")));
                 return;
             }
-            let mut rdb = RecordDB::new(root.join(compat.record_db), None);
-            rdb.initialize();
             let cache_root = root.join("cache").join("varchive");
-            let list = build_candidates(&db, &rdb, &steam, &cache_root);
+            let list = build_candidates(&db, rdb.as_ref(), &steam, &cache_root);
             let _ = tx.send(Ok(list));
         });
     }
@@ -320,180 +386,5 @@ impl NativeApp {
                 let _ = tx.send((index, "error".into(), res.message));
             }
         });
-    }
-
-    fn show_debug_viewport(&self, ctx: &egui::Context) {
-        if !self.debug_open.load(Ordering::Relaxed) {
-            return;
-        }
-        let open = self.debug_open.clone();
-        let lines = self.log_lines.clone();
-        let title = self.debug_title();
-        ctx.show_viewport_deferred(
-            vp_debug(),
-            ViewportBuilder::default()
-                .with_title(&title)
-                .with_inner_size([720.0, 420.0]),
-            move |ctx, class| {
-                debug_ui::render_debug(ctx, class, &title, &lines);
-                debug_ui::close_if_requested(ctx, &open);
-            },
-        );
-    }
-
-    fn show_settings_viewport(&self, ctx: &egui::Context) {
-        if !self.settings_open.load(Ordering::Relaxed) {
-            return;
-        }
-        let open = self.settings_open.clone();
-        let draft = self.settings_draft.clone();
-        let root = self.root.clone();
-        let defaults = self.defaults.clone();
-        let base = self.base_settings.clone();
-        let merged = self.merged_settings.clone();
-        ctx.show_viewport_deferred(
-            vp_settings(),
-            ViewportBuilder::default()
-                .with_title("Overmax 설정")
-                .with_inner_size([440.0, 520.0]),
-            move |ctx, class| {
-                egui::TopBottomPanel::bottom("sett_actions").show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        if ui.button("저장").clicked() {
-                            let base_g = base.lock().map(|g| g.clone()).unwrap_or_default();
-                            let mut merged_g = merged.lock().map(|g| g.clone()).unwrap_or_default();
-                            if let Ok(mut d) = draft.lock() {
-                                let _ = settings_ui::save_settings_to_disk(
-                                    root.as_ref(),
-                                    defaults.as_ref(),
-                                    &base_g,
-                                    &mut *d,
-                                    &mut merged_g,
-                                );
-                                if let Ok(mut m) = merged.lock() {
-                                    *m = merged_g;
-                                }
-                            }
-                        }
-                        if ui.button("닫기").clicked() {
-                            open.store(false, Ordering::Relaxed);
-                        }
-                    });
-                });
-                if let Ok(mut d) = draft.lock() {
-                    settings_ui::render_settings_deferred(ctx, class, "설정", &mut *d);
-                }
-                settings_ui::close_if_requested(ctx, &open);
-            },
-        );
-    }
-
-    fn show_sync_viewport(&self, ctx: &egui::Context) {
-        if !self.sync_open.load(Ordering::Relaxed) {
-            return;
-        }
-        let open = self.sync_open.clone();
-        let scan_pending = self.scan_pending.clone();
-        let steam = self.sync_steam_id.clone();
-        let status = self.sync_status.clone();
-        let candidates = self.sync_candidates.clone();
-        let upload_tx = self.upload_req_tx.clone();
-        ctx.show_viewport_deferred(
-            vp_sync(),
-            ViewportBuilder::default()
-                .with_title("V-Archive 동기화")
-                .with_inner_size([520.0, 560.0]),
-            move |ctx, class| {
-                let list = candidates.lock().map(|g| g.clone()).unwrap_or_default();
-                let mut steam_g = steam.lock().unwrap_or_else(|e| e.into_inner());
-                let status_s = status.lock().map(|g| g.clone()).unwrap_or_default();
-                sync_ui::render_sync(
-                    ctx,
-                    class,
-                    &mut *steam_g,
-                    &status_s,
-                    &list,
-                    || {
-                        scan_pending.store(true, Ordering::Relaxed);
-                    },
-                    |i| {
-                        let _ = upload_tx.send(i);
-                    },
-                );
-                sync_ui::close_if_requested(ctx, &open);
-            },
-        );
-    }
-}
-
-impl eframe::App for NativeApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let settings_on = self.settings_open.load(Ordering::Relaxed);
-        if settings_on && !self.prev_settings_open {
-            if let (Ok(m), Ok(mut d)) = (self.merged_settings.lock(), self.settings_draft.lock()) {
-                *d = m.clone();
-            }
-        }
-        self.prev_settings_open = settings_on;
-
-        ctx.request_repaint_after(std::time::Duration::from_millis(250));
-        self.drain_logs();
-        self.poll_scan_requests();
-        self.poll_upload_requests();
-        self.drain_sync_scan();
-        self.drain_upload_results();
-        self.apply_overlay_visual(ctx);
-
-        self.show_debug_viewport(ctx);
-        self.show_settings_viewport(ctx);
-        self.show_sync_viewport(ctx);
-
-        egui::CentralPanel::default()
-            .frame(Frame::NONE.fill(Color32::TRANSPARENT))
-            .show(ctx, |ui| {
-                ui.set_min_size(Vec2::new(overlay_ui::WIDTH, overlay_ui::HEIGHT));
-                overlay_ui::draw_overlay_panel(
-                    ui,
-                    &self.session,
-                    self.confidence,
-                    self.settings_open.clone(),
-                    self.debug_open.clone(),
-                    self.sync_open.clone(),
-                );
-            });
-    }
-}
-
-fn first_steam_from_settings(settings: Value) -> String {
-    let Some(Value::Object(map)) = settings.get("varchive").and_then(|v| v.get("user_map")) else {
-        return String::new();
-    };
-    map.keys().next().cloned().unwrap_or_default()
-}
-
-fn account_path_for_steam(settings: &Value, steam: &str) -> String {
-    settings
-        .get("varchive")
-        .and_then(|v| v.get("user_map"))
-        .and_then(|m| m.get(steam))
-        .and_then(|entry| {
-            if let Some(s) = entry.as_str() {
-                return Some(s.to_string());
-            }
-            entry
-                .get("account_path")
-                .and_then(|p| p.as_str())
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_default()
-}
-
-fn button_num(mode: &str) -> i32 {
-    match mode {
-        "4B" => 4,
-        "5B" => 5,
-        "6B" => 6,
-        "8B" => 8,
-        _ => 4,
     }
 }

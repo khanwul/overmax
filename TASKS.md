@@ -48,8 +48,10 @@ OpenCV 제거 이력은 `docs/opencv-to-rust-plan.md`, 전체 Rust 전환 계획
 - [x] Windows OCR 연동 Rust 구현
 - [x] `egui/winit` 오버레이 UI 구현
 - [x] 설정 / 동기화 / 디버그 창 구현
-- [ ] Steam session / hotkey / single instance 구현
-- [ ] Updater / packaging Rust 구현
+- [x] Steam session / hotkey / single instance 구현
+- [x] Updater / packaging Rust 구현
+- [ ] Tray Icon 구현
+- [ ] Look & Feel 맞추기
 - [ ] 병렬 런타임 검증 harness 작성
 - [ ] Rust 앱 전환 및 Python 제거 절차 진행
 
