@@ -27,6 +27,12 @@ pub fn load_merged_settings(root: impl AsRef<Path>, defaults: Value) -> Value {
     )
 }
 
+/// Packaged defaults merged with `settings.json` only (no `settings.user.json`), for delta-save base.
+pub fn load_base_settings(root: impl AsRef<Path>, defaults: Value) -> Value {
+    let paths = SettingsPaths::in_dir(root);
+    merge_settings_layers(defaults, load_json_object(&paths.settings_json), empty_object())
+}
+
 pub fn merge_settings_layers(defaults: Value, settings_json: Value, settings_user_json: Value) -> Value {
     let mut merged = object_or_empty(defaults);
     merge_object_value(&mut merged, settings_json);
@@ -184,11 +190,38 @@ pub fn save_user_settings(root: impl AsRef<Path>, diff: &Value) -> std::io::Resu
 #[cfg(test)]
 mod tests {
     use super::{
-        diff_settings, load_merged_settings, merge_settings_layers, normalize_settings,
-        SettingsPaths,
+        diff_settings, load_base_settings, load_merged_settings, merge_settings_layers,
+        normalize_settings, SettingsPaths,
     };
     use serde_json::{json, Value};
     use std::fs;
+
+    #[test]
+    fn load_base_ignores_user_json_layer() {
+        let root = std::env::temp_dir().join(format!("overmax-base-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("settings.json"),
+            r#"{"overlay":{"scale":1.25}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("settings.user.json"),
+            r#"{"overlay":{"base_opacity":0.3}}"#,
+        )
+        .unwrap();
+
+        let defaults = json!({"overlay":{"scale":1.0,"base_opacity":0.8}});
+        let base = load_base_settings(&root, defaults.clone());
+        assert_eq!(base["overlay"]["scale"], json!(1.25));
+        assert_eq!(base["overlay"]["base_opacity"], json!(0.8));
+
+        let merged = load_merged_settings(&root, defaults);
+        assert_eq!(merged["overlay"]["base_opacity"], json!(0.3));
+
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn user_settings_override_packaged_settings_and_defaults() {

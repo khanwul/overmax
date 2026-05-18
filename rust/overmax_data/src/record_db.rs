@@ -208,4 +208,45 @@ impl RecordDB {
         }
         map
     }
+
+    /// All local rows for a Steam id (for sync). Ignores internal `steam_id` mutex.
+    pub fn all_records_for_steam(
+        &self,
+        steam_id: &str,
+    ) -> std::collections::HashMap<(i32, String, String), (f64, bool)> {
+        let mut map = std::collections::HashMap::new();
+        if !self.is_ready || steam_id.is_empty() || steam_id == Self::UNKNOWN_STEAM_ID {
+            return map;
+        }
+        let Ok(conn) = Connection::open(&self.db_path) else {
+            return map;
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT song_id, button_mode, difficulty, rate, is_max_combo
+             FROM records
+             WHERE steam_id = ?1 AND rate > 0",
+        ) {
+            Ok(s) => s,
+            Err(_) => return map,
+        };
+        let mut rows = match stmt.query(params![steam_id]) {
+            Ok(r) => r,
+            Err(_) => return map,
+        };
+        while let Ok(Some(row)) = rows.next() {
+            let song_id_str: String = match row.get(0) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let Ok(sid) = song_id_str.parse::<i32>() else {
+                continue;
+            };
+            let button_mode: String = row.get(1).unwrap_or_default();
+            let difficulty: String = row.get(2).unwrap_or_default();
+            let rate: f64 = row.get(3).unwrap_or(0.0);
+            let is_max_combo: i32 = row.get(4).unwrap_or(0);
+            map.insert((sid, button_mode, difficulty), (rate, is_max_combo != 0));
+        }
+        map
+    }
 }

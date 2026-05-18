@@ -1,43 +1,25 @@
 use eframe::egui::{
-    self, Align, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame,
-    Layout, Margin, RichText, Vec2, ViewportBuilder,
+    self, Align, Button, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame,
+    Layout, Margin, RichText, Vec2,
 };
 use overmax_core::GameSessionState;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-const WIDTH: f32 = 360.0;
-const HEIGHT: f32 = 230.0;
+pub const WIDTH: f32 = 360.0;
+pub const HEIGHT: f32 = 230.0;
 
-pub fn run_overlay() -> eframe::Result<()> {
-    let options = eframe::NativeOptions {
-        viewport: ViewportBuilder::default()
-            .with_title("Overmax")
-            .with_inner_size([WIDTH, HEIGHT])
-            .with_resizable(false)
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_always_on_top(),
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "Overmax",
-        options,
-        Box::new(|cc| {
-            install_korean_font(&cc.egui_ctx);
-            Ok(Box::new(OverlayApp::default()))
-        }),
-    )
-}
-
-fn install_korean_font(ctx: &egui::Context) {
+pub fn install_korean_font(ctx: &egui::Context) {
     let Some(font_bytes) = load_windows_korean_font() else {
         return;
     };
     let mut fonts = FontDefinitions::default();
     fonts
         .font_data
-        .insert("malgun_gothic".to_string(), Arc::new(FontData::from_owned(font_bytes)));
+        .insert(
+            "malgun_gothic".to_string(),
+            std::sync::Arc::new(FontData::from_owned(font_bytes)),
+        );
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
         fonts
             .families
@@ -48,7 +30,7 @@ fn install_korean_font(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-fn load_windows_korean_font() -> Option<Vec<u8>> {
+pub fn load_windows_korean_font() -> Option<Vec<u8>> {
     for path in [
         r"C:\Windows\Fonts\malgun.ttf",
         r"C:\Windows\Fonts\malgunsl.ttf",
@@ -61,48 +43,29 @@ fn load_windows_korean_font() -> Option<Vec<u8>> {
     None
 }
 
-struct OverlayApp {
-    state: GameSessionState,
+pub fn draw_overlay_panel(
+    ui: &mut egui::Ui,
+    state: &GameSessionState,
     confidence: f32,
-}
-
-impl Default for OverlayApp {
-    fn default() -> Self {
-        Self {
-            state: GameSessionState::detecting(),
-            confidence: 0.0,
-        }
-    }
-}
-
-impl eframe::App for OverlayApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(std::time::Duration::from_millis(250));
-        egui::CentralPanel::default()
-            .frame(Frame::NONE.fill(Color32::TRANSPARENT))
-            .show(ctx, |ui| {
-                ui.set_min_size(Vec2::new(WIDTH, HEIGHT));
-                draw_panel(ui, &self.state, self.confidence);
-            });
-    }
-}
-
-fn draw_panel(ui: &mut egui::Ui, state: &GameSessionState, confidence: f32) {
+    settings_open: Arc<AtomicBool>,
+    debug_open: Arc<AtomicBool>,
+    sync_open: Arc<AtomicBool>,
+) {
     Frame::new()
         .fill(Color32::from_rgb(18, 24, 38))
         .corner_radius(CornerRadius::same(14))
         .inner_margin(Margin::same(8))
         .show(ui, |ui| {
             ui.set_width(WIDTH - 16.0);
-            draw_header(ui, state);
+            draw_header(ui, state, &settings_open);
             ui.add_space(6.0);
             draw_body(ui, state);
             ui.add_space(6.0);
-            draw_footer(ui, confidence);
+            draw_footer(ui, confidence, &debug_open, &sync_open);
         });
 }
 
-fn draw_header(ui: &mut egui::Ui, state: &GameSessionState) {
+fn draw_header(ui: &mut egui::Ui, state: &GameSessionState, settings_open: &Arc<AtomicBool>) {
     Frame::new()
         .fill(Color32::from_rgb(30, 40, 62))
         .corner_radius(CornerRadius::same(10))
@@ -118,7 +81,11 @@ fn draw_header(ui: &mut egui::Ui, state: &GameSessionState) {
                         .strong(),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("⚙").color(Color32::from_rgb(80, 88, 112)));
+                    let btn = Button::new(RichText::new("⚙").color(Color32::from_rgb(80, 88, 112))).frame(false);
+                    if ui.add(btn).clicked() {
+                        let v = settings_open.load(Ordering::Relaxed);
+                        settings_open.store(!v, Ordering::Relaxed);
+                    }
                 });
             });
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
@@ -210,13 +177,26 @@ fn draw_recommend_placeholder(ui: &mut egui::Ui) {
         });
 }
 
-fn draw_footer(ui: &mut egui::Ui, confidence: f32) {
+fn draw_footer(
+    ui: &mut egui::Ui,
+    confidence: f32,
+    debug_open: &Arc<AtomicBool>,
+    sync_open: &Arc<AtomicBool>,
+) {
     Frame::new()
         .fill(Color32::from_rgb(22, 30, 48))
         .corner_radius(CornerRadius::same(8))
         .inner_margin(Margin::symmetric(10, 5))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
+                if ui.small_button("debug").clicked() {
+                    let v = debug_open.load(Ordering::Relaxed);
+                    debug_open.store(!v, Ordering::Relaxed);
+                }
+                if ui.small_button("sync").clicked() {
+                    let v = sync_open.load(Ordering::Relaxed);
+                    sync_open.store(!v, Ordering::Relaxed);
+                }
                 ui.label(RichText::new("유사 구간 평균").color(Color32::from_rgb(80, 88, 112)));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(

@@ -18,6 +18,8 @@ pub struct Song {
     pub title: String, // Actually song_id
     pub name: String,
     pub composer: String,
+    #[serde(default, rename = "dlcCode")]
+    pub dlc_code: String,
     #[serde(default)]
     pub patterns: HashMap<String, HashMap<String, PatternInfo>>,
 }
@@ -148,6 +150,7 @@ mod tests {
             title: title.to_string(),
             name: name.to_string(),
             composer: composer.to_string(),
+            dlc_code: String::new(),
             patterns: HashMap::new(),
         }
     }
