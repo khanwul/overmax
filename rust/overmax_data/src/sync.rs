@@ -77,14 +77,9 @@ fn merge_record_entries(
         let Some(title) = rec.get("title") else {
             continue;
         };
-        let song_id = match title {
-            Value::Number(n) => n.as_i64().unwrap_or(0) as i32,
-            Value::String(s) => s.parse().unwrap_or(0),
-            _ => 0,
-        };
-        if song_id == 0 {
+        let Some(song_id) = parse_song_id(title) else {
             continue;
-        }
+        };
         let Some(diff) = rec.get("pattern").and_then(|v| v.as_str()) else {
             continue;
         };
@@ -102,6 +97,14 @@ fn merge_record_entries(
             (song_id, button_mode.to_string(), diff.to_string()),
             (rate, is_max_combo),
         );
+    }
+}
+
+fn parse_song_id(title: &Value) -> Option<i32> {
+    match title {
+        Value::Number(n) => n.as_i64().and_then(|v| i32::try_from(v).ok()),
+        Value::String(s) => s.parse().ok(),
+        _ => None,
     }
 }
 
@@ -258,6 +261,24 @@ mod tests {
 
         let m = load_varchive_record_cache(&dir, "765611");
         assert_eq!(m.get(&(42, "4B".into(), "MX".into())), Some(&(99.5, true)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn keeps_song_id_zero_from_varchive_cache() {
+        let dir = std::env::temp_dir().join(format!("varch-cache-zero-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("765611")).unwrap();
+        let payload = json!({
+            "records": [
+                {"title": "0", "pattern": "NM", "score": 88.0, "maxCombo": false}
+            ]
+        });
+        std::fs::write(dir.join("765611").join("4.json"), payload.to_string()).unwrap();
+
+        let m = load_varchive_record_cache(&dir, "765611");
+        assert_eq!(m.get(&(0, "4B".into(), "NM".into())), Some(&(88.0, false)));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

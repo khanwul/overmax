@@ -32,7 +32,7 @@ impl NativeApp {
         song.name
     }
 
-    fn refresh_overlay_data(&mut self) {
+    pub(crate) fn refresh_overlay_data(&mut self) {
         self.pattern_tabs = self.pattern_tabs_for_state(&self.session);
         self.recommendations = self.recommend_for_state(&self.session);
     }
@@ -41,7 +41,7 @@ impl NativeApp {
         if !state.is_valid() {
             return RecommendResult::empty();
         }
-        let recommender = Recommender::new(self.varchive_db.as_ref(), self.record_db.as_ref());
+        let recommender = Recommender::new(self.varchive_db.as_ref(), self.record_manager.as_ref());
         recommender.recommend(
             state.song_id.unwrap_or_default() as i32,
             state.mode.as_deref().unwrap_or_default(),

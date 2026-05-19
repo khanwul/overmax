@@ -1,4 +1,4 @@
-use crate::record_db::RecordDB;
+use crate::record_manager::RecordSource;
 use crate::varchive::VArchiveDB;
 use std::cmp::Ordering;
 
@@ -44,13 +44,13 @@ impl RecommendResult {
     }
 }
 
-pub struct Recommender<'a> {
+pub struct Recommender<'a, R: RecordSource> {
     vdb: &'a VArchiveDB,
-    rdb: &'a RecordDB,
+    rdb: &'a R,
 }
 
-impl<'a> Recommender<'a> {
-    pub fn new(vdb: &'a VArchiveDB, rdb: &'a RecordDB) -> Self {
+impl<'a, R: RecordSource> Recommender<'a, R> {
+    pub fn new(vdb: &'a VArchiveDB, rdb: &'a R) -> Self {
         Self { vdb, rdb }
     }
 
@@ -235,7 +235,7 @@ impl<'a> Recommender<'a> {
     }
 
     fn merge_record_rates(&self, candidates: &mut Vec<RecommendEntry>) {
-        if !self.rdb.is_ready {
+        if !self.rdb.is_ready() {
             return;
         }
 

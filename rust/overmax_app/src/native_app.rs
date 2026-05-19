@@ -4,8 +4,8 @@ use eframe::egui::{self, Color32, ViewportBuilder};
 use overmax_core::GameSessionState;
 use overmax_data::{
     build_candidates, load_base_settings, load_merged_settings, normalize_settings,
-    upsert_varchive_cache_record, DataCompatibility, RecommendResult, RecordDB, SyncCandidate,
-    VArchiveDB,
+    upsert_varchive_cache_record, DataCompatibility, RecommendResult, RecordDB, RecordManager,
+    SyncCandidate, VArchiveDB,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -137,6 +137,7 @@ pub struct NativeApp {
     pub(crate) pattern_tabs: Vec<crate::overlay_recommend_ui::PatternTabInfo>,
     pub(crate) prev_settings_open: bool,
     pub(crate) record_db: Arc<RecordDB>,
+    pub(crate) record_manager: Arc<RecordManager>,
     pub(crate) game_found_rx: Receiver<()>,
     pub(crate) overlay_visible: Arc<AtomicBool>,
     pub(crate) exit_requested: Arc<AtomicBool>,
@@ -174,6 +175,11 @@ impl NativeApp {
         let mut record_db = RecordDB::new(root.join(compat.record_db), recent_steam.as_deref());
         record_db.initialize();
         let record_db = Arc::new(record_db);
+        let record_manager = Arc::new(RecordManager::new(
+            record_db.clone(),
+            root.join("cache").join("varchive"),
+        ));
+        record_manager.refresh();
 
         let mut varchive_db = VArchiveDB::new();
         let songs_path = root.join(compat.songs_json);
@@ -251,6 +257,7 @@ impl NativeApp {
             pattern_tabs: Vec::new(),
             prev_settings_open: false,
             record_db,
+            record_manager,
             game_found_rx,
             overlay_visible: overlay_visible.clone(),
             exit_requested: exit_requested.clone(),
@@ -349,27 +356,37 @@ impl NativeApp {
         }
     }
 
-    pub(crate) fn drain_upload_results(&self) {
+    pub(crate) fn drain_upload_results(&mut self) {
+        let mut refreshed = false;
         while let Ok((idx, status, msg)) = self.upload_res_rx.try_recv() {
+            let success = status == "success";
             if let Ok(mut list) = self.sync_candidates.lock() {
                 if let Some(c) = list.get_mut(idx) {
                     c.upload_status = status;
                     c.upload_message = msg;
                 }
             }
+            if success {
+                self.record_manager.refresh();
+                refreshed = true;
+            }
+        }
+        if refreshed {
+            self.refresh_overlay_data();
         }
     }
 
-    pub(crate) fn drain_game_found_refresh_steam(&self) {
+    pub(crate) fn drain_game_found_refresh_steam(&mut self) {
         while self.game_found_rx.try_recv().is_ok() {
             let sid = steam_session::most_recent_steam_id();
-            let (changed, before, after) = self.record_db.set_steam_id(sid.as_deref());
+            let (changed, before, after) = self.record_manager.set_steam_id(sid.as_deref());
             if changed {
                 debug_ui::push_log(
                     &self.log_lines,
                     self.max_log_lines(),
                     format!("[Main] Steam 세션 갱신 (게임 창 발견): {before} -> {after}"),
                 );
+                self.refresh_overlay_data();
             } else if sid.is_some() {
                 debug_ui::push_log(
                     &self.log_lines,
