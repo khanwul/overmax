@@ -104,7 +104,7 @@ fn draw_recommend_content(
     recommendations: &RecommendResult,
     scale: f32,
 ) {
-    if state.song_id.is_none() || state.mode.is_none() || state.diff.is_none() {
+    if state.context.is_none() {
         draw_empty_recommend(ui, "패턴을 감지하는 중...", scale);
     } else if recommendations.entries.is_empty() {
         draw_empty_recommend(ui, "추천 결과 없음", scale);
@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn badge_rect_is_vertically_centered_in_row() {
         let cell = Rect::from_min_size(Pos2::ZERO, Vec2::new(36.0, RECOMMEND_ROW_HEIGHT));
-        let badge = centered_badge_rect(cell, 36.0);
+        let badge = centered_badge_rect(cell, 36.0, 1.0);
 
         assert_eq!(badge.height(), BADGE_HEIGHT);
         assert_eq!(badge.center().y, cell.center().y);

@@ -24,12 +24,12 @@ impl NativeApp {
             }
 
             if output.state.is_valid() {
-                if let Some(rate) = output.state.rate {
+                if let (Some(ctx), Some(rate)) = (&output.state.context, output.state.rate) {
                     if rate > 0.0 {
                         let key = (
-                            output.state.song_id.unwrap_or_default(),
-                            output.state.mode.clone().unwrap_or_default(),
-                            output.state.diff.clone().unwrap_or_default(),
+                            ctx.song_id,
+                            ctx.mode.clone(),
+                            ctx.diff.clone(),
                         );
                         if !self.recorded_states.contains(&key) {
                             debug_ui::push_log(
@@ -63,11 +63,11 @@ impl NativeApp {
     }
 
     pub(crate) fn current_song_label(&self) -> String {
-        let Some(song_id) = self.session.song_id else {
+        let Some(ctx) = &self.session.context else {
             return "곡을 선택하세요".into();
         };
-        let Some(song) = self.varchive_db.search_by_id(song_id as i32) else {
-            return format!("Song #{song_id}");
+        let Some(song) = self.varchive_db.search_by_id(ctx.song_id as i32) else {
+            return format!("Song #{}", ctx.song_id);
         };
         song.name
     }
@@ -78,14 +78,14 @@ impl NativeApp {
     }
 
     fn recommend_for_state(&self, state: &GameSessionState) -> RecommendResult {
-        if !state.is_valid() {
+        let Some(ctx) = &state.context else {
             return RecommendResult::empty();
-        }
+        };
         let recommender = Recommender::new(self.varchive_db.as_ref(), self.record_manager.as_ref());
         recommender.recommend(
-            state.song_id.unwrap_or_default() as i32,
-            state.mode.as_deref().unwrap_or_default(),
-            state.diff.as_deref().unwrap_or_default(),
+            ctx.song_id as i32,
+            &ctx.mode,
+            &ctx.diff,
             0.0,
             6,
             true,
@@ -93,13 +93,13 @@ impl NativeApp {
     }
 
     fn pattern_tabs_for_state(&self, state: &GameSessionState) -> Vec<PatternTabInfo> {
-        let Some(song_id) = state.song_id else {
+        let Some(ctx) = &state.context else {
             return Vec::new();
         };
-        let Some(song) = self.varchive_db.search_by_id(song_id as i32) else {
+        let Some(song) = self.varchive_db.search_by_id(ctx.song_id as i32) else {
             return Vec::new();
         };
-        let mode = state.mode.as_deref().unwrap_or_default();
+        let mode = &ctx.mode;
         let Some(patterns) = song.patterns.get(mode) else {
             return Vec::new();
         };

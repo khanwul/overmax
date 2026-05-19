@@ -306,7 +306,7 @@ mod tests {
         let output = pipeline.process_frame_with_logo(&frame, false, 10.0);
 
         assert!(output.is_song_select);
-        assert!(output.state.song_id.is_none());
+        assert!(output.state.context.is_none());
     }
 
     #[test]

@@ -1,10 +1,15 @@
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct PlayContext {
+    pub song_id: u32,
+    pub mode: String,
+    pub diff: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct GameSessionState {
-    pub song_id: Option<u32>,
-    pub mode: Option<String>,
-    pub diff: Option<String>,
+    pub context: Option<PlayContext>,
     pub is_stable: bool,
     pub is_max_combo: bool,
     pub rate: Option<f32>,
@@ -13,9 +18,7 @@ pub struct GameSessionState {
 impl GameSessionState {
     pub fn detecting() -> Self {
         Self {
-            song_id: None,
-            mode: None,
-            diff: None,
+            context: None,
             is_stable: false,
             is_max_combo: false,
             rate: None,
@@ -23,10 +26,7 @@ impl GameSessionState {
     }
 
     pub fn is_valid(&self) -> bool {
-        self.song_id.is_some()
-            && self.mode.as_ref().is_some_and(|value| !value.is_empty())
-            && self.diff.as_ref().is_some_and(|value| !value.is_empty())
-            && self.is_stable
+        self.context.is_some() && self.is_stable
     }
 
     pub fn should_store_rate(&self) -> bool {
@@ -44,29 +44,30 @@ impl fmt::Display for GameSessionState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let status = if self.is_stable { "STABLE" } else { "DETECTING" };
         let mc_status = if self.is_max_combo { " (MAX COMBO)" } else { "" };
-        let song_id = self
-            .song_id
-            .map_or_else(|| "None".to_string(), |value| value.to_string());
-        let mode = self.mode.as_deref().unwrap_or("None");
-        let diff = self.diff.as_deref().unwrap_or("None");
-
-        write!(
-            f,
-            "[{status}] {song_id} | {mode} | {diff}{mc_status}"
-        )
+        
+        match &self.context {
+            Some(ctx) => write!(
+                f,
+                "[{status}] {} | {} | {}{mc_status}",
+                ctx.song_id, ctx.mode, ctx.diff
+            ),
+            None => write!(f, "[{status}] None | None | None{mc_status}"),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::GameSessionState;
+    use super::{GameSessionState, PlayContext};
 
     #[test]
     fn song_id_zero_is_valid_when_state_is_stable() {
         let state = GameSessionState {
-            song_id: Some(0),
-            mode: Some("4B".to_string()),
-            diff: Some("MX".to_string()),
+            context: Some(PlayContext {
+                song_id: 0,
+                mode: "4B".to_string(),
+                diff: "MX".to_string(),
+            }),
             is_stable: true,
             is_max_combo: false,
             rate: None,
@@ -78,9 +79,11 @@ mod tests {
     #[test]
     fn unstable_state_is_not_valid() {
         let state = GameSessionState {
-            song_id: Some(1),
-            mode: Some("4B".to_string()),
-            diff: Some("MX".to_string()),
+            context: Some(PlayContext {
+                song_id: 1,
+                mode: "4B".to_string(),
+                diff: "MX".to_string(),
+            }),
             is_stable: false,
             is_max_combo: false,
             rate: Some(99.1),

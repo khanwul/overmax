@@ -164,7 +164,7 @@ fn draw_header(
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = px.header_row_gap();
                 draw_status_lamp(ui, state.is_stable, px);
-                draw_mode_badge(ui, state.mode.as_deref(), px);
+                draw_mode_badge(ui, state.context.as_ref().map(|ctx| ctx.mode.as_str()), px);
                 ui.add(
                     Label::new(
                         RichText::new(song_label)
@@ -269,7 +269,7 @@ fn draw_body(
         Layout::left_to_right(Align::Min),
         |ui| {
             ui.spacing_mut().item_spacing.x = px.body_gap();
-            draw_diff_tabs(ui, state.diff.as_deref(), pattern_tabs, px.scale);
+            draw_diff_tabs(ui, state.context.as_ref().map(|ctx| ctx.diff.as_str()), pattern_tabs, px.scale);
             draw_recommendations(ui, state, recommendations, px.scale);
         },
     );
@@ -317,10 +317,11 @@ fn draw_footer(
 }
 
 fn meta_text(state: &GameSessionState, pattern_tabs: &[PatternTabInfo]) -> String {
-    let Some(diff) = state.diff.as_deref() else {
+    let Some(ctx) = &state.context else {
         return "—".to_string();
     };
-    let Some(pattern) = pattern_tabs.iter().find(|pattern| pattern.diff == diff) else {
+    let diff = &ctx.diff;
+    let Some(pattern) = pattern_tabs.iter().find(|pattern| &pattern.diff == diff) else {
         return "—".to_string();
     };
     let mut badges = Vec::new();
@@ -355,7 +356,7 @@ mod tests {
     use super::{diff_color, load_windows_korean_font, meta_text};
     use crate::overlay_recommend_ui::PatternTabInfo;
     use eframe::egui::Color32;
-    use overmax_core::GameSessionState;
+    use overmax_core::{GameSessionState, PlayContext};
 
     #[test]
     fn formats_empty_meta_like_pyqt_header() {
@@ -365,9 +366,11 @@ mod tests {
     #[test]
     fn formats_sheet_meta_like_pyqt_header() {
         let state = GameSessionState {
-            song_id: Some(1),
-            mode: Some("5B".into()),
-            diff: Some("SC".into()),
+            context: Some(PlayContext {
+                song_id: 1,
+                mode: "5B".into(),
+                diff: "SC".into(),
+            }),
             is_stable: true,
             is_max_combo: false,
             rate: None,

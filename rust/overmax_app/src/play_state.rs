@@ -3,7 +3,7 @@ use crate::frame_utils::region_mean_bgr;
 use crate::ocr_engine::OcrDetector;
 use crate::roi::RoiManager;
 use crate::screen_capture::CapturedFrame;
-use overmax_core::GameSessionState;
+use overmax_core::{GameSessionState, PlayContext};
 use std::collections::VecDeque;
 
 const BTN_MODE_MAX_DIST: f32 = 60.0;
@@ -13,9 +13,7 @@ const DIFFICULTIES: [&str; 4] = ["NM", "HD", "MX", "SC"];
 
 #[derive(Clone, Debug, PartialEq)]
 struct RawPlayState {
-    song_id: Option<u32>,
-    mode: Option<String>,
-    diff: Option<String>,
+    context: Option<PlayContext>,
     is_max_combo: bool,
 }
 
@@ -52,13 +50,26 @@ impl PlayStateDetector {
         let mode = detect_button_mode(frame, rois);
         let (diff, confident) = detect_difficulty(frame, rois);
         let is_max_combo = detect_max_combo(frame, rois);
+
+        let context = if let (Some(sid), Some(m), Some(d)) = (song_id, mode, diff) {
+            if confident {
+                Some(PlayContext {
+                    song_id: sid,
+                    mode: m,
+                    diff: d,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let raw = RawPlayState {
-            song_id,
-            mode,
-            diff,
+            context,
             is_max_combo,
         };
-        self.push_raw(raw.clone(), confident);
+        self.push_raw(raw.clone());
 
         if let Some(stable) = self.stable_raw() {
             let stable = stable.clone();
@@ -69,21 +80,18 @@ impl PlayStateDetector {
         }
 
         GameSessionState {
-            song_id: raw.song_id,
-            mode: raw.mode,
-            diff: raw.diff,
+            context: raw.context,
             is_stable: false,
             is_max_combo: raw.is_max_combo,
             rate: None,
         }
     }
 
-    fn push_raw(&mut self, raw: RawPlayState, confident: bool) {
+    fn push_raw(&mut self, raw: RawPlayState) {
         if self.history.len() == self.history_size {
             self.history.pop_front();
         }
-        let valid = raw.song_id.is_some() && raw.mode.is_some() && raw.diff.is_some() && confident;
-        self.history.push_back(valid.then_some(raw));
+        self.history.push_back(raw.context.is_some().then_some(raw));
     }
 
     fn stable_raw(&self) -> Option<&RawPlayState> {
@@ -165,9 +173,7 @@ pub fn detect_max_combo(frame: &CapturedFrame, rois: &RoiManager) -> bool {
 
 fn stable_state(raw: &RawPlayState, rate: Option<f32>) -> GameSessionState {
     GameSessionState {
-        song_id: raw.song_id,
-        mode: raw.mode.clone(),
-        diff: raw.diff.clone(),
+        context: raw.context.clone(),
         is_stable: true,
         is_max_combo: raw.is_max_combo,
         rate,
@@ -175,7 +181,8 @@ fn stable_state(raw: &RawPlayState, rate: Option<f32>) -> GameSessionState {
 }
 
 fn state_key(raw: &RawPlayState) -> Option<(u32, String, String)> {
-    Some((raw.song_id?, raw.mode.clone()?, raw.diff.clone()?))
+    let ctx = raw.context.as_ref()?;
+    Some((ctx.song_id, ctx.mode.clone(), ctx.diff.clone()))
 }
 
 fn button_colors() -> [(&'static str, &'static [(u8, u8, u8)]); 4] {

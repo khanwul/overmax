@@ -1,4 +1,4 @@
-use overmax_core::GameSessionState;
+use overmax_core::{GameSessionState, PlayContext};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -45,10 +45,18 @@ fn game_state_matches_python_reference_fixture() {
 }
 
 fn build_state(input: FixtureState) -> GameSessionState {
+    let context = if let (Some(song_id), Some(mode), Some(diff)) = (input.song_id, input.mode, input.diff) {
+        Some(PlayContext {
+            song_id,
+            mode,
+            diff,
+        })
+    } else {
+        None
+    };
+
     GameSessionState {
-        song_id: input.song_id,
-        mode: input.mode,
-        diff: input.diff,
+        context,
         is_stable: input.is_stable,
         is_max_combo: input.is_max_combo,
         rate: input.rate,
