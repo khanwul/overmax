@@ -176,8 +176,10 @@ impl eframe::App for NativeApp {
         }
         self.poll_scan_requests();
         self.poll_upload_requests();
+        self.poll_fetch_requests();
         self.drain_sync_scan();
         self.drain_upload_results();
+        self.drain_fetch_results();
         self.drain_game_found_refresh_steam();
         self.apply_overlay_visual(ctx);
         ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));

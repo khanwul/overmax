@@ -70,7 +70,7 @@ OpenCV 제거 이력은 `docs/opencv-to-rust-plan.md`, 전체 Rust 전환 계획
 - [x] 오버레이 위치 저장/복원 포팅
   - Python 기준: `overlay.controller._on_overlay_user_moved`, `_restore_window_position`
   - Rust 현황: 드래그 이동은 가능하지만 `settings.user.json` 저장/시작 복원 경로가 없음
-- [ ] V-Archive 기록 fetch / auto refresh 포팅
+- [x] V-Archive 기록 fetch / auto refresh 포팅
   - Python 기준: `VArchiveRecordClient.fetch_records`, `OverlayController._handle_auto_refresh`
   - Rust 현황: cache 읽기, 추천 병합, 업로드 후 cache 갱신은 있으나 fetch 실행 경로가 없음
 

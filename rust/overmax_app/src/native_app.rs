@@ -143,6 +143,10 @@ pub struct NativeApp {
     pub(crate) upload_req_tx: Sender<usize>,
     pub(crate) upload_res_rx: Receiver<(usize, String, String)>,
     pub(crate) upload_res_tx: Sender<(usize, String, String)>,
+    pub(crate) fetch_req_rx: Receiver<(String, String, i32)>,
+    pub(crate) fetch_req_tx: Sender<(String, String, i32)>,
+    pub(crate) fetch_res_rx: Receiver<(String, i32, Result<usize, String>)>,
+    pub(crate) fetch_res_tx: Sender<(String, i32, Result<usize, String>)>,
     pub(crate) detection_rx: Receiver<DetectionOutput>,
     pub(crate) ui_cmd_rx: Receiver<UiCommand>,
     pub(crate) varchive_db: Arc<VArchiveDB>,
@@ -238,6 +242,8 @@ impl NativeApp {
         let (upload_req_tx, upload_req_rx) = mpsc::channel();
         let (upload_res_tx, upload_res_rx) = mpsc::channel();
         let (ui_cmd_tx, ui_cmd_rx) = mpsc::channel();
+        let (fetch_req_tx, fetch_req_rx) = mpsc::channel();
+        let (fetch_res_tx, fetch_res_rx) = mpsc::channel();
         detection_worker::spawn(
             (*root).clone(),
             merged_settings
@@ -249,7 +255,7 @@ impl NativeApp {
             detection_tx,
         );
 
-        Ok(Self {
+        let mut app = Self {
             root,
             defaults,
             base_settings,
@@ -273,6 +279,10 @@ impl NativeApp {
             upload_req_tx,
             upload_res_rx,
             upload_res_tx,
+            fetch_req_rx,
+            fetch_req_tx,
+            fetch_res_rx,
+            fetch_res_tx,
             detection_rx,
             ui_cmd_rx,
             varchive_db,
@@ -288,7 +298,10 @@ impl NativeApp {
             _hotkey,
             #[cfg(target_os = "windows")]
             _tray: Some(TrayIcon::spawn(ui_cmd_tx)),
-        })
+        };
+
+        app.handle_auto_refresh();
+        Ok(app)
     }
 
     pub(crate) fn max_log_lines(&self) -> usize {
@@ -504,6 +517,108 @@ impl NativeApp {
                 }
             } else {
                 let _ = tx.send((index, "error".into(), res.message));
+            }
+        });
+    }
+
+    pub(crate) fn handle_auto_refresh(&mut self) {
+        let merged = match self.merged_settings.lock() {
+            Ok(g) => g.clone(),
+            Err(_) => return,
+        };
+        let auto_refresh = merged.get("varchive").and_then(|v| v.get("auto_refresh")).and_then(|v| v.as_bool()).unwrap_or(false);
+        if !auto_refresh {
+            return;
+        }
+
+        let sid = steam_session::most_recent_steam_id().unwrap_or_default();
+        if sid.is_empty() {
+            return;
+        }
+
+        let user_map = merged.get("varchive").and_then(|v| v.get("user_map")).and_then(|v| v.as_object());
+        let entry = user_map.and_then(|m| m.get(&sid));
+        let v_id = match entry {
+            Some(Value::Object(o)) => o.get("v_id").and_then(|v| v.as_str()).unwrap_or(""),
+            Some(Value::String(s)) => s.as_str(),
+            _ => "",
+        };
+
+        if !v_id.is_empty() {
+            debug_ui::push_log(
+                &self.log_lines,
+                self.max_log_lines(),
+                format!("[VArchive] 자동 갱신 시작 (SteamID: {}, V-ID: {})", sid, v_id),
+            );
+            let _ = self.fetch_req_tx.send((sid, v_id.to_string(), 0));
+        }
+    }
+
+    pub(crate) fn poll_fetch_requests(&mut self) {
+        while let Ok((steam_id, v_id, button)) = self.fetch_req_rx.try_recv() {
+            self.spawn_fetch(steam_id, v_id, button);
+        }
+    }
+
+    pub(crate) fn drain_fetch_results(&mut self) {
+        let mut refreshed = false;
+        while let Ok((v_id, btn, res)) = self.fetch_res_rx.try_recv() {
+            match res {
+                Ok(_) => {
+                    refreshed = true;
+                }
+                Err(e) => {
+                    debug_ui::push_log(
+                        &self.log_lines,
+                        self.max_log_lines(),
+                        format!("[VArchiveClient] {} ({}B) API 요청 실패: {}", v_id, btn, e),
+                    );
+                }
+            }
+        }
+        if refreshed {
+            self.record_manager.refresh();
+            self.refresh_overlay_data();
+        }
+    }
+
+    fn spawn_fetch(&self, steam_id: String, v_id: String, button: i32) {
+        let tx = self.fetch_res_tx.clone();
+        let cache_root = self.root.join("cache").join("varchive");
+        let log_lines = self.log_lines.clone();
+        let max_lines = self.max_log_lines();
+        
+        std::thread::spawn(move || {
+            let buttons = if button == 0 { vec![4, 5, 6, 8] } else { vec![button] };
+            for b in buttons {
+                debug_ui::push_log(
+                    &log_lines,
+                    max_lines,
+                    format!("[VArchiveClient] 기록 요청 중: {} ({}B)", v_id, b),
+                );
+                
+                match varchive_upload::fetch_records_blocking(&v_id, b) {
+                    Ok(data) => {
+                        if let Err(e) = overmax_data::save_fetched_records_to_cache(&cache_root, &steam_id, &v_id, b, &data) {
+                            debug_ui::push_log(
+                                &log_lines,
+                                max_lines,
+                                format!("[VArchiveClient] 캐시 저장 실패: {}", e),
+                            );
+                            let _ = tx.send((v_id.clone(), b, Err(e)));
+                        } else {
+                            debug_ui::push_log(
+                                &log_lines,
+                                max_lines,
+                                format!("[VArchiveClient] 캐시 저장 완료 ({}B)", b),
+                            );
+                            let _ = tx.send((v_id.clone(), b, Ok(1)));
+                        }
+                    },
+                    Err(e) => {
+                        let _ = tx.send((v_id.clone(), b, Err(e)));
+                    }
+                }
             }
         });
     }

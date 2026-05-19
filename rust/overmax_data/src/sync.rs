@@ -242,6 +242,35 @@ pub fn upsert_varchive_cache_record(
     fs::write(&path, text).map_err(|e| e.to_string())
 }
 
+pub fn save_fetched_records_to_cache(
+    cache_root: &Path,
+    steam_id: &str,
+    v_id: &str,
+    button: i32,
+    data: &Value,
+) -> Result<(), String> {
+    let user_dir = cache_root.join(steam_id);
+    fs::create_dir_all(&user_dir).map_err(|e| e.to_string())?;
+    let path = user_dir.join(format!("{button}.json"));
+
+    let records = data.get("records").cloned().unwrap_or_else(|| json!([]));
+    let updated_at = data
+        .get("user")
+        .and_then(|u| u.get("updated_at"))
+        .cloned()
+        .unwrap_or_else(|| json!(null));
+
+    let cache_data = json!({
+        "v_id": v_id,
+        "button": button,
+        "records": records,
+        "updated_at": updated_at,
+    });
+
+    let text = serde_json::to_string_pretty(&cache_data).map_err(|e| e.to_string())?;
+    fs::write(&path, text).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
