@@ -1,5 +1,5 @@
 use eframe::egui::{
-    self, Align, Color32, CornerRadius, FontId, Frame, Label, Layout, Margin, RichText, Vec2,
+    self, Align, Color32, CornerRadius, FontId, Frame, Label, Layout, Margin, Rect, RichText, Vec2,
 };
 use overmax_core::GameSessionState;
 use overmax_data::{RecommendEntry, RecommendResult};
@@ -8,10 +8,15 @@ const TAB_WIDTH: f32 = 52.0;
 const TAB_HEIGHT: f32 = 46.0;
 const TAB_GAP: f32 = 4.0;
 const TAB_PAD_Y: f32 = 6.0;
-const BODY_HEIGHT: f32 = TAB_PAD_Y * 2.0 + TAB_HEIGHT * 4.0 + TAB_GAP * 3.0;
 const RECOMMEND_WIDTH: f32 = 286.0;
 const RECOMMEND_PAD_Y: f32 = 8.0;
-const RECOMMEND_ROW_GAP: f32 = 4.0;
+const RECOMMEND_ROW_HEIGHT: f32 = 30.0;
+const RECOMMEND_ROW_MARGIN_X: f32 = 8.0;
+const BADGE_HEIGHT: f32 = 18.0;
+const SONG_LABEL_WIDTH: f32 = 140.0;
+const RECOMMEND_ROW_GAP: f32 = 3.0;
+pub(crate) const RECOMMEND_BODY_HEIGHT: f32 =
+    RECOMMEND_PAD_Y * 2.0 + RECOMMEND_ROW_HEIGHT * 6.0 + RECOMMEND_ROW_GAP * 5.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PatternTabInfo {
@@ -38,7 +43,7 @@ pub fn draw_recommendations(
     recommendations: &RecommendResult,
 ) {
     ui.allocate_ui_with_layout(
-        Vec2::new(RECOMMEND_WIDTH, BODY_HEIGHT),
+        Vec2::new(RECOMMEND_WIDTH, RECOMMEND_BODY_HEIGHT),
         Layout::top_down(Align::Min),
         |ui| {
             ui.add_space(RECOMMEND_PAD_Y);
@@ -111,12 +116,13 @@ fn draw_recommend_row(ui: &mut egui::Ui, entry: &RecommendEntry) {
     Frame::new()
         .fill(Color32::from_rgb(36, 46, 70))
         .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(8, 0))
+        .inner_margin(Margin::symmetric(RECOMMEND_ROW_MARGIN_X as i8, 0))
         .show(ui, |ui| {
-            ui.set_min_size(Vec2::new(RECOMMEND_WIDTH, 30.0));
+            ui.set_min_size(Vec2::new(recommend_row_inner_width(), RECOMMEND_ROW_HEIGHT));
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
                 draw_entry_badge(ui, entry);
-                ui.label(song_name_text(entry));
+                draw_song_name(ui, entry);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     draw_rate(ui, entry)
                 });
@@ -131,7 +137,9 @@ fn draw_entry_badge(ui: &mut egui::Ui, entry: &RecommendEntry) {
     } else {
         36.0
     };
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 18.0), egui::Sense::hover());
+    let (cell, _) =
+        ui.allocate_exact_size(Vec2::new(width, RECOMMEND_ROW_HEIGHT), egui::Sense::hover());
+    let rect = centered_badge_rect(cell, width);
     ui.painter()
         .rect_filled(rect, CornerRadius::same(4), diff_color(&entry.difficulty));
     ui.painter().text(
@@ -140,6 +148,20 @@ fn draw_entry_badge(ui: &mut egui::Ui, entry: &RecommendEntry) {
         text,
         FontId::proportional(10.0),
         Color32::WHITE,
+    );
+}
+
+fn draw_song_name(ui: &mut egui::Ui, entry: &RecommendEntry) {
+    ui.allocate_ui_with_layout(
+        Vec2::new(SONG_LABEL_WIDTH, RECOMMEND_ROW_HEIGHT),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.add(
+                Label::new(song_name_text(entry))
+                    .truncate()
+                    .selectable(false),
+            );
+        },
     );
 }
 
@@ -261,9 +283,21 @@ fn rate_color(rate: f64) -> Color32 {
     }
 }
 
+fn recommend_row_inner_width() -> f32 {
+    RECOMMEND_WIDTH - RECOMMEND_ROW_MARGIN_X * 2.0
+}
+
+fn centered_badge_rect(cell: Rect, width: f32) -> Rect {
+    Rect::from_center_size(cell.center(), Vec2::new(width, BADGE_HEIGHT))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{pattern_label, PatternTabInfo};
+    use super::{
+        centered_badge_rect, pattern_label, recommend_row_inner_width, PatternTabInfo,
+        BADGE_HEIGHT, RECOMMEND_BODY_HEIGHT, RECOMMEND_ROW_GAP, RECOMMEND_ROW_HEIGHT,
+    };
+    use eframe::egui::{Pos2, Rect, Vec2};
 
     #[test]
     fn formats_pattern_tab_label() {
@@ -274,5 +308,27 @@ mod tests {
         };
 
         assert_eq!(pattern_label(Some(&pattern)), "12.3");
+    }
+
+    #[test]
+    fn recommendation_body_height_matches_pyqt_six_rows() {
+        assert_eq!(
+            RECOMMEND_BODY_HEIGHT,
+            8.0 * 2.0 + RECOMMEND_ROW_HEIGHT * 6.0 + RECOMMEND_ROW_GAP * 5.0
+        );
+    }
+
+    #[test]
+    fn recommendation_row_width_keeps_pyqt_margins_inside_row() {
+        assert_eq!(recommend_row_inner_width(), 270.0);
+    }
+
+    #[test]
+    fn badge_rect_is_vertically_centered_in_row() {
+        let cell = Rect::from_min_size(Pos2::ZERO, Vec2::new(36.0, RECOMMEND_ROW_HEIGHT));
+        let badge = centered_badge_rect(cell, 36.0);
+
+        assert_eq!(badge.height(), BADGE_HEIGHT);
+        assert_eq!(badge.center().y, cell.center().y);
     }
 }

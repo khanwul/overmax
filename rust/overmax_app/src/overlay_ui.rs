@@ -1,5 +1,6 @@
 use crate::overlay_recommend_ui::{
     avg_rate_text, draw_diff_tabs, draw_recommendations, pattern_count_text, PatternTabInfo,
+    RECOMMEND_BODY_HEIGHT,
 };
 use crate::ui_command::UiCommand;
 use eframe::egui::{
@@ -239,7 +240,7 @@ fn draw_body(
     recommendations: &RecommendResult,
 ) {
     ui.allocate_ui_with_layout(
-        Vec2::new(Px::INNER_WIDTH, Px::BODY_HEIGHT),
+        Vec2::new(Px::INNER_WIDTH, Px::BODY_HEIGHT.max(RECOMMEND_BODY_HEIGHT)),
         Layout::left_to_right(Align::Min),
         |ui| {
             ui.spacing_mut().item_spacing.x = Px::BODY_GAP;
