@@ -260,6 +260,7 @@ pub fn save_settings_to_disk(
 pub fn close_if_requested(ctx: &egui::Context, open: &Arc<AtomicBool>) {
     if ctx.input(|i| i.viewport().close_requested()) {
         open.store(false, Ordering::Relaxed);
+        ctx.request_repaint_of(ctx.parent_viewport_id());
     }
 }
 

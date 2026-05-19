@@ -63,16 +63,7 @@ pub fn run_native_app() -> eframe::Result<()> {
         }
     }
 
-    let options = eframe::NativeOptions {
-        viewport: ViewportBuilder::default()
-            .with_title("Overmax")
-            .with_inner_size([overlay_ui::WIDTH, overlay_ui::HEIGHT])
-            .with_resizable(false)
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_always_on_top(),
-        ..Default::default()
-    };
+    let options = native_options();
 
     eframe::run_native(
         "Overmax",
@@ -88,6 +79,32 @@ pub fn run_native_app() -> eframe::Result<()> {
                 })
         }),
     )
+}
+
+fn native_options() -> eframe::NativeOptions {
+    eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_title("Overmax")
+            .with_inner_size([overlay_ui::WIDTH, overlay_ui::HEIGHT])
+            .with_resizable(false)
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_taskbar(false)
+            .with_always_on_top(),
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_options;
+
+    #[test]
+    fn main_overlay_stays_out_of_taskbar() {
+        let options = native_options();
+
+        assert_eq!(options.viewport.taskbar, Some(false));
+    }
 }
 
 pub struct NativeApp {

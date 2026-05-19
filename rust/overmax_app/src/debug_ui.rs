@@ -57,6 +57,7 @@ fn log_scroll(ui: &mut egui::Ui, lines: &Arc<Mutex<VecDeque<String>>>) {
 pub fn close_if_requested(ctx: &egui::Context, open: &Arc<AtomicBool>) {
     if ctx.input(|i| i.viewport().close_requested()) {
         open.store(false, Ordering::Relaxed);
+        ctx.request_repaint_of(ctx.parent_viewport_id());
     }
 }
 

@@ -10,7 +10,25 @@ use crate::overlay_ui;
 use crate::settings_ui;
 use crate::sync_ui;
 
+fn overlay_mouse_passthrough(overlay_on: bool, auxiliary_open: bool) -> bool {
+    !overlay_on || auxiliary_open
+}
+
 impl NativeApp {
+    fn auxiliary_open(&self) -> bool {
+        self.debug_open.load(Ordering::Relaxed)
+            || self.settings_open.load(Ordering::Relaxed)
+            || self.sync_open.load(Ordering::Relaxed)
+    }
+
+    fn auxiliary_viewport(title: &str, size: [f32; 2]) -> ViewportBuilder {
+        ViewportBuilder::default()
+            .with_title(title)
+            .with_inner_size(size)
+            .with_visible(true)
+            .with_taskbar(false)
+    }
+
     fn show_debug_viewport(&self, ctx: &egui::Context) {
         if !self.debug_open.load(Ordering::Relaxed) {
             return;
@@ -20,13 +38,8 @@ impl NativeApp {
         let title = self.debug_title();
         ctx.show_viewport_deferred(
             native_helpers::vp_debug(),
-            ViewportBuilder::default()
-                .with_title(&title)
-                .with_inner_size([720.0, 420.0])
-                .with_active(true)
-                .with_always_on_top(),
+            Self::auxiliary_viewport(&title, [720.0, 420.0]),
             move |ctx, class| {
-                ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
                 debug_ui::render_debug(ctx, class, &title, &lines);
                 debug_ui::close_if_requested(ctx, &open);
             },
@@ -55,13 +68,8 @@ impl NativeApp {
         };
         ctx.show_viewport_deferred(
             native_helpers::vp_settings(),
-            ViewportBuilder::default()
-                .with_title("Overmax 설정")
-                .with_inner_size([520.0, 560.0])
-                .with_active(true)
-                .with_always_on_top(),
+            Self::auxiliary_viewport("Overmax 설정", [520.0, 560.0]),
             move |ctx, class| {
-                ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
                 let mut local_draft = draft.lock().map(|g| g.clone()).unwrap_or_default();
                 egui::TopBottomPanel::bottom("sett_actions").show(ctx, |ui| {
                     ui.horizontal(|ui| {
@@ -81,6 +89,7 @@ impl NativeApp {
                         }
                         if ui.button("닫기").clicked() {
                             open.store(false, Ordering::Relaxed);
+                            ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
                         }
                     });
                 });
@@ -111,13 +120,8 @@ impl NativeApp {
         let upload_tx = self.upload_req_tx.clone();
         ctx.show_viewport_deferred(
             native_helpers::vp_sync(),
-            ViewportBuilder::default()
-                .with_title("V-Archive 동기화")
-                .with_inner_size([520.0, 560.0])
-                .with_active(true)
-                .with_always_on_top(),
+            Self::auxiliary_viewport("V-Archive 동기화", [520.0, 560.0]),
             move |ctx, class| {
-                ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
                 let list = candidates.lock().map(|g| g.clone()).unwrap_or_default();
                 let mut steam_g = steam.lock().unwrap_or_else(|e| e.into_inner());
                 let status_s = status.lock().map(|g| g.clone()).unwrap_or_default();
@@ -170,10 +174,13 @@ impl eframe::App for NativeApp {
         ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
 
         let overlay_on = self.overlay_visible.load(Ordering::Relaxed);
+        let auxiliary_open = self.auxiliary_open();
         let hidden_size = Vec2::new(1.0, 1.0);
         let visible_size = Vec2::new(overlay_ui::WIDTH, overlay_ui::HEIGHT);
 
-        ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(!overlay_on));
+        ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(
+            overlay_mouse_passthrough(overlay_on, auxiliary_open),
+        ));
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(if overlay_on {
             visible_size
         } else {
@@ -211,5 +218,31 @@ impl eframe::App for NativeApp {
                     ctx.request_repaint();
                 }
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NativeApp;
+    use eframe::egui;
+
+    #[test]
+    fn auxiliary_viewports_stay_out_of_taskbar() {
+        let builder = NativeApp::auxiliary_viewport("debug", [720.0, 420.0]);
+
+        assert_eq!(builder.taskbar, Some(false));
+        assert_eq!(builder.visible, Some(true));
+        assert_ne!(
+            builder.window_level,
+            Some(egui::viewport::WindowLevel::AlwaysOnTop)
+        );
+        assert_ne!(builder.active, Some(true));
+    }
+
+    #[test]
+    fn overlay_passes_mouse_through_while_auxiliary_is_open() {
+        assert!(super::overlay_mouse_passthrough(true, true));
+        assert!(super::overlay_mouse_passthrough(false, false));
+        assert!(!super::overlay_mouse_passthrough(true, false));
     }
 }

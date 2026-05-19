@@ -7,7 +7,7 @@ use crate::screen_capture::CapturedFrame;
 use overmax_core::GameSessionState;
 use overmax_data::ImageIndexDb;
 
-const JACKET_MATCH_INTERVAL: f64 = 0.8;
+const JACKET_MATCH_INTERVAL: f64 = 0.0;
 const JACKET_CHANGE_THRESHOLD: f32 = 2.5;
 const JACKET_FORCE_RECHECK_SEC: f64 = 2.0;
 const JACKET_STABLE_HITS: u8 = 2;
@@ -168,8 +168,7 @@ impl DetectionPipeline {
             self.last_jacket_thumb.as_deref(),
             JACKET_CHANGE_THRESHOLD,
         );
-        let force_recheck = now - self.last_jacket_match_ts >= JACKET_FORCE_RECHECK_SEC;
-        if !(image_changed || force_recheck) {
+        if !self.should_match_jacket(image_changed, now) {
             return JacketMatchStatus::Unchanged;
         }
 
@@ -242,6 +241,12 @@ impl DetectionPipeline {
         self.current_song_id = None;
         self.pending_jacket_match = None;
         self.play_state.reset();
+    }
+
+    fn should_match_jacket(&self, image_changed: bool, now: f64) -> bool {
+        image_changed
+            || self.pending_jacket_match.is_some()
+            || now - self.last_jacket_match_ts >= JACKET_FORCE_RECHECK_SEC
     }
 
     fn output(
@@ -332,6 +337,24 @@ mod tests {
             }
         );
         assert_eq!(pipeline.current_song_id, Some(8));
+    }
+
+    #[test]
+    fn pending_jacket_match_rechecks_even_when_thumbnail_is_unchanged() {
+        let mut pipeline = DetectionPipeline::new(ImageIndexDb::new("missing.db", 0.6));
+
+        pipeline.pending_jacket_match = Some(super::PendingJacketMatch {
+            song_id: 7,
+            hits: 1,
+        });
+        pipeline.last_jacket_match_ts = 1.0;
+
+        assert!(pipeline.should_match_jacket(false, 1.12));
+    }
+
+    #[test]
+    fn jacket_match_uses_active_frame_cadence() {
+        assert_eq!(super::JACKET_MATCH_INTERVAL, 0.0);
     }
 
     fn blank_frame() -> CapturedFrame {
