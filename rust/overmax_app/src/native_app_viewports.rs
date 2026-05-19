@@ -275,6 +275,7 @@ impl eframe::App for NativeApp {
                     ctx.send_viewport_cmd(ViewportCommand::StartDrag);
                 }
                 if actions.restore_game_focus {
+                    let max_log_lines = self.max_log_lines();
                     if let Ok(mut settings) = self.merged_settings.lock() {
                         window_tracker::restore_foreground_by_title(game_window_title(&settings));
                         
@@ -300,7 +301,7 @@ impl eframe::App for NativeApp {
                                 );
                                 debug_ui::push_log(
                                     &self.log_lines,
-                                    self.max_log_lines(),
+                                    max_log_lines,
                                     format!("[Overlay] 오버레이 위치 저장 (user.json): ({},{})", rect.min.x as i32, rect.min.y as i32),
                                 );
                             }
