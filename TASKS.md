@@ -55,6 +55,50 @@ OpenCV 제거 이력은 `docs/opencv-to-rust-plan.md`, 전체 Rust 전환 계획
 - [ ] 병렬 런타임 검증 harness 작성
 - [ ] Rust 앱 전환 및 Python 제거 절차 진행
 
+## 현재 단계: Python/Rust parity 감사 후속
+
+2026-05-19 기준 Python reference 구현과 Rust 네이티브 앱을 비교한 결과,
+핵심 파이프라인은 대부분 포팅되었지만 사용자 기록 저장, 설정 UX, 디버그 보조 기능에
+남은 차이가 있다. 아래 항목은 Python 구현을 기준으로 Rust 쪽 동작을 맞춘 뒤
+실제 앱 smoke로 확인한다.
+
+### 우선 처리
+
+- [ ] stable `GameSessionState`의 rate / max combo를 `cache/record.db`에 저장하는 런타임 경로 포팅
+  - Python 기준: `capture/screen_capture.py::_try_record_result`
+  - Rust 현황: `RecordDB::upsert`는 있으나 감지 결과에서 호출되는 경로가 없음
+- [ ] 오버레이 위치 저장/복원 포팅
+  - Python 기준: `overlay.controller._on_overlay_user_moved`, `_restore_window_position`
+  - Rust 현황: 드래그 이동은 가능하지만 `settings.user.json` 저장/시작 복원 경로가 없음
+- [ ] V-Archive 기록 fetch / auto refresh 포팅
+  - Python 기준: `VArchiveRecordClient.fetch_records`, `OverlayController._handle_auto_refresh`
+  - Rust 현황: cache 읽기, 추천 병합, 업로드 후 cache 갱신은 있으나 fetch 실행 경로가 없음
+
+### 기능 보강
+
+- [ ] V-Archive 동기화 창의 로컬 기록 삭제 기능 포팅
+  - Python 기준: `SyncWindow._on_delete_requested`, `RecordManager.delete`
+  - Rust 현황: 후보 스캔과 업로드는 있으나 삭제 액션이 없음
+- [ ] 설정창 V-Archive 계정 UX 보강
+  - Python 기준: 계정별 V-Archive ID, account.txt browse, 모드별 fetch 버튼
+  - Rust 현황: 기본 입력과 sync 열기는 있으나 browse/fetch 버튼 및 상태 UX가 단순화됨
+- [ ] DebugWindow ROI 표시 오버레이 포팅
+  - Python 기준: `overlay.ui.navigation.RoiOverlayWindow`, DebugWindow ROI 토글
+  - Rust 현황: ROI 계산은 있으나 게임 화면 위 ROI 시각화 창이 없음
+- [ ] DebugWindow 로그 편의 기능 보강
+  - Python 기준: 색상 카테고리, 일시정지, 지우기, ROI 토글
+  - Rust 현황: 로그 표시 중심의 단순 창
+
+### 확인된 포팅 완료 항목
+
+- [x] 앱 단일 인스턴스, updater, tray, hotkey
+- [x] `songs.json`, `pattern_meta.json`, `image_index.db` cache 갱신 정책
+- [x] V-Archive songs 검색, sheet meta 표시, RecordDB + V-Archive cache 병합
+- [x] window tracking, screen capture, ROI 변환, hysteresis, jacket 인식
+- [x] mode / diff / max combo / rate OCR 감지
+- [x] overlay / settings / sync / debug 보조창 기본 구조
+- [x] 보조창 taskbar 제외, overlay drag 후 게임 foreground 복원
+
 ## 완료: Rust HOG 검증
 
 - [x] `rust/overmax_cv` PyO3 확장 골격 유지
