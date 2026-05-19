@@ -64,7 +64,7 @@ OpenCV 제거 이력은 `docs/opencv-to-rust-plan.md`, 전체 Rust 전환 계획
 
 ### 우선 처리
 
-- [ ] stable `GameSessionState`의 rate / max combo를 `cache/record.db`에 저장하는 런타임 경로 포팅
+- [x] stable `GameSessionState`의 rate / max combo를 `cache/record.db`에 저장하는 런타임 경로 포팅
   - Python 기준: `capture/screen_capture.py::_try_record_result`
   - Rust 현황: `RecordDB::upsert`는 있으나 감지 결과에서 호출되는 경로가 없음
 - [ ] 오버레이 위치 저장/복원 포팅

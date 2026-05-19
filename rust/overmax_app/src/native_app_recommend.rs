@@ -10,10 +10,47 @@ impl NativeApp {
     pub(crate) fn drain_detection_results(&mut self) {
         let mut changed = false;
         while let Ok(output) = self.detection_rx.try_recv() {
+            if !output.is_song_select {
+                self.recorded_states.clear();
+            }
+
             self.confidence = output.confidence;
             if self.session != output.state {
                 changed = true;
-                self.session = output.state;
+                self.session = output.state.clone();
+            }
+
+            if output.state.is_valid() {
+                if let Some(rate) = output.state.rate {
+                    if rate > 0.0 {
+                        let key = (
+                            output.state.song_id.unwrap_or_default(),
+                            output.state.mode.clone().unwrap_or_default(),
+                            output.state.diff.clone().unwrap_or_default(),
+                        );
+                        if !self.recorded_states.contains(&key) {
+                            debug_ui::push_log(
+                                &self.log_lines,
+                                self.max_log_lines(),
+                                format!(
+                                    "[Main] 기록 저장: {}, {}, {}, {}%, MaxCombo: {}",
+                                    key.0, key.1, key.2, rate, output.state.is_max_combo
+                                ),
+                            );
+                            if self.record_db.upsert(
+                                key.0 as i32,
+                                &key.1,
+                                &key.2,
+                                rate as f64,
+                                output.state.is_max_combo,
+                            ) {
+                                self.recorded_states.insert(key);
+                                self.record_manager.refresh();
+                                changed = true;
+                            }
+                        }
+                    }
+                }
             }
         }
         if changed {
