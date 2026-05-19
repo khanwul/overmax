@@ -223,8 +223,36 @@ impl eframe::App for NativeApp {
                     ctx.send_viewport_cmd(ViewportCommand::StartDrag);
                 }
                 if actions.restore_game_focus {
-                    if let Ok(settings) = self.merged_settings.lock() {
+                    if let Ok(mut settings) = self.merged_settings.lock() {
                         window_tracker::restore_foreground_by_title(game_window_title(&settings));
+                        
+                        if let Some(rect) = ctx.input(|i| i.viewport().outer_rect) {
+                            if let Ok(mut draft) = self.settings_draft.lock() {
+                                let mut overlay = settings.get("overlay").cloned().unwrap_or_else(|| serde_json::json!({}));
+                                if let Some(overlay_obj) = overlay.as_object_mut() {
+                                    overlay_obj.insert("position".to_string(), serde_json::json!({
+                                        "x": rect.min.x.max(0.0) as i32,
+                                        "y": rect.min.y.max(0.0) as i32
+                                    }));
+                                }
+                                settings["overlay"] = overlay.clone();
+                                draft["overlay"] = overlay;
+
+                                let base_g = self.base_settings.lock().map(|g| g.clone()).unwrap_or_default();
+                                let _ = settings_ui::save_settings_to_disk(
+                                    self.root.as_ref(),
+                                    self.defaults.as_ref(),
+                                    &base_g,
+                                    &mut draft,
+                                    &mut settings,
+                                );
+                                debug_ui::push_log(
+                                    &self.log_lines,
+                                    self.max_log_lines(),
+                                    format!("[Overlay] 오버레이 위치 저장 (user.json): ({},{})", rect.min.x as i32, rect.min.y as i32),
+                                );
+                            }
+                        }
                     }
                 }
                 if let Some(command) = actions.command {
