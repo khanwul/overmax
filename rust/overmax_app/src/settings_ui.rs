@@ -47,51 +47,35 @@ fn settings_tabs(ui: &mut egui::Ui) -> usize {
 
 fn ui_tab(ui: &mut egui::Ui, draft: &mut Value) {
     section_frame(ui, "오버레이", |ui| overlay_section(ui, draft));
-    ui.add_space(10.0);
-    section_frame(ui, "단축키", |ui| hotkey_section(ui, draft));
 }
 
 fn overlay_section(ui: &mut egui::Ui, draft: &mut Value) {
     let Some(Value::Object(overlay)) = draft.get_mut("overlay") else {
         return;
     };
-    let mut scale = overlay.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
-    if ui
-        .add(Slider::new(&mut scale, 0.75..=1.5).text("크기"))
-        .changed()
-    {
-        overlay.insert("scale".into(), serde_json::json!(scale));
-    }
+    
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("크기").color(Theme::TEXT));
+        let current_scale = overlay.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
+        for (label, val) in [("S", 0.75), ("M", 1.0), ("L", 1.25), ("XL", 1.5)] {
+            if ui.selectable_label((current_scale - val).abs() < 0.01, label).clicked() {
+                overlay.insert("scale".into(), serde_json::json!(val));
+            }
+        }
+    });
+
+    ui.add_space(8.0);
+
     let mut opacity = overlay
         .get("base_opacity")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.8);
     if ui
-        .add(Slider::new(&mut opacity, 0.1..=1.0).text("기본 투명도"))
+        .add(Slider::new(&mut opacity, 0.1..=1.0).step_by(0.1).text("기본 투명도"))
         .changed()
     {
         overlay.insert("base_opacity".into(), serde_json::json!(opacity));
     }
-}
-
-fn hotkey_section(ui: &mut egui::Ui, draft: &mut Value) {
-    let Some(Value::Object(overlay)) = draft.get_mut("overlay") else {
-        return;
-    };
-    let mut hotkey = overlay
-        .get("toggle_hotkey")
-        .and_then(Value::as_str)
-        .unwrap_or("F3")
-        .to_string();
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("표시/숨김").color(Theme::TEXT));
-        if ui
-            .add(TextEdit::singleline(&mut hotkey).desired_width(80.0))
-            .changed()
-        {
-            overlay.insert("toggle_hotkey".into(), json!(hotkey.trim()));
-        }
-    });
 }
 
 fn varchive_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
@@ -199,10 +183,6 @@ fn text_row(ui: &mut egui::Ui, entry: &mut Map<String, Value>, label: &str, key:
 
 fn system_tab(ui: &mut egui::Ui, draft: &mut Value) {
     section_frame(ui, "업데이트", |ui| update_section(ui, draft));
-    ui.add_space(10.0);
-    section_frame(ui, "디버그", |ui| debug_section(ui, draft));
-    ui.add_space(10.0);
-    section_frame(ui, "처리 주기", |ui| intervals_section(ui, draft));
 }
 
 fn update_section(ui: &mut egui::Ui, draft: &mut Value) {
@@ -215,59 +195,6 @@ fn update_section(ui: &mut egui::Ui, draft: &mut Value) {
         app_update.insert("enabled".into(), json!(enabled));
     }
     ui.label(RichText::new(format!("현재 버전: {}", env!("CARGO_PKG_VERSION"))).color(Theme::TEXT));
-}
-
-fn debug_section(ui: &mut egui::Ui, draft: &mut Value) {
-    let debug = object_section_mut(draft, "debug_window");
-    let mut title = debug
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or("Overmax Debug Log")
-        .to_string();
-    if ui.add(TextEdit::singleline(&mut title)).changed() {
-        debug.insert("title".into(), json!(title.trim()));
-    }
-    let mut max_lines = debug
-        .get("max_lines")
-        .and_then(Value::as_u64)
-        .unwrap_or(500) as f64;
-    if ui
-        .add(Slider::new(&mut max_lines, 100.0..=2000.0).text("로그 줄 수"))
-        .changed()
-    {
-        debug.insert("max_lines".into(), json!(max_lines.round() as u64));
-    }
-}
-
-fn intervals_section(ui: &mut egui::Ui, draft: &mut Value) {
-    interval_row(
-        ui,
-        draft,
-        "window_tracker",
-        "poll_interval_sec",
-        "게임 창 추적",
-    );
-    interval_row(ui, draft, "screen_capture", "ocr_interval_sec", "OCR");
-    interval_row(
-        ui,
-        draft,
-        "jacket_matcher",
-        "match_interval_sec",
-        "자켓 매칭",
-    );
-}
-
-fn interval_row(ui: &mut egui::Ui, draft: &mut Value, section: &str, key: &str, label: &str) {
-    let Some(Value::Object(sec)) = draft.get_mut(section) else {
-        return;
-    };
-    let mut v = sec.get(key).and_then(|x| x.as_f64()).unwrap_or(0.5);
-    if ui
-        .add(Slider::new(&mut v, 0.05..=5.0).text(format!("{label} (초)")))
-        .changed()
-    {
-        sec.insert(key.to_string(), serde_json::json!(v));
-    }
 }
 
 pub fn render_settings_deferred(

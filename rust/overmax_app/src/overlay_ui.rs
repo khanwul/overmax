@@ -12,8 +12,8 @@ use overmax_data::RecommendResult;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-pub const WIDTH: f32 = 360.0;
-pub const HEIGHT: f32 = 326.0;
+pub const BASE_WIDTH: f32 = 360.0;
+pub const BASE_HEIGHT: f32 = 326.0;
 
 #[derive(Default, Clone, Copy)]
 pub struct OverlayActions {
@@ -36,29 +36,35 @@ impl Theme {
     const WARN: Color32 = Color32::from_rgb(255, 75, 75);
 }
 
-struct Px;
+struct Px {
+    scale: f32,
+}
 
 impl Px {
-    const PANEL_MARGIN: i8 = 8;
-    const PANEL_GAP: f32 = 6.0;
-    const HEADER_RADIUS: u8 = 10;
-    const HEADER_MARGIN_X: i8 = 12;
-    const HEADER_MARGIN_Y: i8 = 8;
-    const HEADER_ROW_GAP: f32 = 8.0;
-    const HEADER_META_GAP: f32 = 4.0;
-    const STATUS_DOT: f32 = 7.0;
-    const MODE_BADGE_W: f32 = 28.0;
-    const MODE_BADGE_H: f32 = 22.0;
-    const SETTINGS_BTN: f32 = 24.0;
-    const BODY_GAP: f32 = 6.0;
-    const TAB_HEIGHT: f32 = 46.0;
-    const TAB_GAP: f32 = 4.0;
-    const TAB_PANEL_PAD_Y: f32 = 6.0;
-    const FOOTER_MARGIN_X: i8 = 10;
-    const FOOTER_MARGIN_Y: i8 = 5;
-    const INNER_WIDTH: f32 = WIDTH - 16.0;
-    const BODY_HEIGHT: f32 =
-        Self::TAB_PANEL_PAD_Y * 2.0 + Self::TAB_HEIGHT * 4.0 + Self::TAB_GAP * 3.0;
+    fn new(scale: f32) -> Self {
+        Self { scale }
+    }
+    fn panel_margin(&self) -> f32 { 8.0 * self.scale }
+    fn panel_gap(&self) -> f32 { 6.0 * self.scale }
+    fn header_radius(&self) -> f32 { 10.0 * self.scale }
+    fn header_margin_x(&self) -> f32 { 12.0 * self.scale }
+    fn header_margin_y(&self) -> f32 { 8.0 * self.scale }
+    fn header_row_gap(&self) -> f32 { 8.0 * self.scale }
+    fn header_meta_gap(&self) -> f32 { 4.0 * self.scale }
+    fn status_dot(&self) -> f32 { 7.0 * self.scale }
+    fn mode_badge_w(&self) -> f32 { 28.0 * self.scale }
+    fn mode_badge_h(&self) -> f32 { 22.0 * self.scale }
+    fn settings_btn(&self) -> f32 { 24.0 * self.scale }
+    fn body_gap(&self) -> f32 { 6.0 * self.scale }
+    fn inner_width(&self) -> f32 { (BASE_WIDTH - 16.0) * self.scale }
+    fn body_height(&self) -> f32 {
+        let tab_height = 46.0 * self.scale;
+        let tab_gap = 4.0 * self.scale;
+        let tab_panel_pad_y = 6.0 * self.scale;
+        tab_panel_pad_y * 2.0 + tab_height * 4.0 + tab_gap * 3.0
+    }
+    fn footer_margin_x(&self) -> f32 { 10.0 * self.scale }
+    fn footer_margin_y(&self) -> f32 { 5.0 * self.scale }
 }
 
 pub fn install_korean_font(ctx: &egui::Context) {
@@ -103,15 +109,17 @@ pub fn draw_overlay_panel(
     settings_open: Arc<AtomicBool>,
     debug_open: Arc<AtomicBool>,
     sync_open: Arc<AtomicBool>,
+    scale: f32,
 ) -> OverlayActions {
+    let px = Px::new(scale);
     let mut actions = OverlayActions::default();
     Frame::new()
         .fill(Theme::PANEL_BG)
-        .corner_radius(CornerRadius::same(14))
-        .inner_margin(Margin::same(Px::PANEL_MARGIN))
+        .corner_radius(CornerRadius::same((14.0 * scale) as u8))
+        .inner_margin(Margin::same(px.panel_margin() as i8))
         .stroke(egui::Stroke::new(1.0, Theme::PANEL_STROKE))
         .show(ui, |ui| {
-            ui.set_width(WIDTH - f32::from(Px::PANEL_MARGIN * 2));
+            ui.set_width(BASE_WIDTH * scale - px.panel_margin() * 2.0);
             draw_header(
                 ui,
                 state,
@@ -119,10 +127,11 @@ pub fn draw_overlay_panel(
                 pattern_tabs,
                 &settings_open,
                 &mut actions,
+                &px,
             );
-            ui.add_space(Px::PANEL_GAP);
-            draw_body(ui, state, pattern_tabs, recommendations);
-            ui.add_space(Px::PANEL_GAP);
+            ui.add_space(px.panel_gap());
+            draw_body(ui, state, pattern_tabs, recommendations, &px);
+            ui.add_space(px.panel_gap());
             draw_footer(
                 ui,
                 confidence,
@@ -130,6 +139,7 @@ pub fn draw_overlay_panel(
                 &debug_open,
                 &sync_open,
                 &mut actions,
+                &px,
             );
         });
 
@@ -143,22 +153,23 @@ fn draw_header(
     pattern_tabs: &[PatternTabInfo],
     settings_open: &Arc<AtomicBool>,
     actions: &mut OverlayActions,
+    px: &Px,
 ) {
     let mut settings_button_rect = None;
     let header = Frame::new()
         .fill(Theme::HEADER_BG)
-        .corner_radius(CornerRadius::same(Px::HEADER_RADIUS))
-        .inner_margin(Margin::symmetric(Px::HEADER_MARGIN_X, Px::HEADER_MARGIN_Y))
+        .corner_radius(CornerRadius::same(px.header_radius() as u8))
+        .inner_margin(Margin::symmetric(px.header_margin_x() as i8, px.header_margin_y() as i8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = Px::HEADER_ROW_GAP;
-                draw_status_lamp(ui, state.is_stable);
-                draw_mode_badge(ui, state.mode.as_deref());
+                ui.spacing_mut().item_spacing.x = px.header_row_gap();
+                draw_status_lamp(ui, state.is_stable, px);
+                draw_mode_badge(ui, state.mode.as_deref(), px);
                 ui.add(
                     Label::new(
                         RichText::new(song_label)
                             .color(Theme::TEXT_PRIMARY)
-                            .font(FontId::proportional(14.0))
+                            .font(FontId::proportional(14.0 * px.scale))
                             .strong(),
                     )
                     .selectable(false),
@@ -166,11 +177,11 @@ fn draw_header(
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let text = RichText::new("⚙")
                         .color(Theme::TEXT_PRIMARY)
-                        .font(FontId::proportional(15.0));
+                        .font(FontId::proportional(15.0 * px.scale));
                     let btn = Button::new(text)
                         .fill(Theme::SECTION_BG)
-                        .corner_radius(CornerRadius::same(6))
-                        .min_size(Vec2::splat(Px::SETTINGS_BTN));
+                        .corner_radius(CornerRadius::same((6.0 * px.scale) as u8))
+                        .min_size(Vec2::splat(px.settings_btn()));
                     let response = ui.add(btn).on_hover_text("설정");
                     settings_button_rect = Some(response.rect);
                     if response.clicked() {
@@ -179,13 +190,13 @@ fn draw_header(
                     }
                 });
             });
-            ui.add_space(Px::HEADER_META_GAP);
+            ui.add_space(px.header_meta_gap());
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 ui.add(
                     Label::new(
                         RichText::new(meta_text(state, pattern_tabs))
                             .color(Theme::TEXT_ACCENT)
-                            .font(FontId::proportional(10.0))
+                            .font(FontId::proportional(10.0 * px.scale))
                             .strong(),
                     )
                     .selectable(false),
@@ -216,13 +227,13 @@ fn drag_rect_excluding_button(header: Rect, button: Option<Rect>) -> Rect {
     rect
 }
 
-fn draw_status_lamp(ui: &mut egui::Ui, stable: bool) {
+fn draw_status_lamp(ui: &mut egui::Ui, stable: bool, px: &Px) {
     let color = if stable { Theme::OK } else { Theme::WARN };
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(Px::STATUS_DOT), egui::Sense::hover());
-    ui.painter().circle_filled(rect.center(), 3.5, color);
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(px.status_dot()), egui::Sense::hover());
+    ui.painter().circle_filled(rect.center(), 3.5 * px.scale, color);
 }
 
-fn draw_mode_badge(ui: &mut egui::Ui, mode: Option<&str>) {
+fn draw_mode_badge(ui: &mut egui::Ui, mode: Option<&str>, px: &Px) {
     let text = mode.unwrap_or("—");
     let color = match mode {
         Some("4B") => Color32::from_rgb(0x2D, 0x4F, 0x55),
@@ -233,15 +244,15 @@ fn draw_mode_badge(ui: &mut egui::Ui, mode: Option<&str>) {
     };
 
     let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(Px::MODE_BADGE_W, Px::MODE_BADGE_H),
+        Vec2::new(px.mode_badge_w(), px.mode_badge_h()),
         egui::Sense::hover(),
     );
-    ui.painter().rect_filled(rect, CornerRadius::same(3), color);
+    ui.painter().rect_filled(rect, CornerRadius::same((3.0 * px.scale) as u8), color);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         text,
-        FontId::proportional(12.0),
+        FontId::proportional(12.0 * px.scale),
         Theme::TEXT_PRIMARY,
     );
 }
@@ -251,14 +262,15 @@ fn draw_body(
     state: &GameSessionState,
     pattern_tabs: &[PatternTabInfo],
     recommendations: &RecommendResult,
+    px: &Px,
 ) {
     ui.allocate_ui_with_layout(
-        Vec2::new(Px::INNER_WIDTH, Px::BODY_HEIGHT.max(RECOMMEND_BODY_HEIGHT)),
+        Vec2::new(px.inner_width(), px.body_height().max(RECOMMEND_BODY_HEIGHT * px.scale)),
         Layout::left_to_right(Align::Min),
         |ui| {
-            ui.spacing_mut().item_spacing.x = Px::BODY_GAP;
-            draw_diff_tabs(ui, state.diff.as_deref(), pattern_tabs);
-            draw_recommendations(ui, state, recommendations);
+            ui.spacing_mut().item_spacing.x = px.body_gap();
+            draw_diff_tabs(ui, state.diff.as_deref(), pattern_tabs, px.scale);
+            draw_recommendations(ui, state, recommendations, px.scale);
         },
     );
 }
@@ -270,11 +282,12 @@ fn draw_footer(
     debug_open: &Arc<AtomicBool>,
     sync_open: &Arc<AtomicBool>,
     actions: &mut OverlayActions,
+    px: &Px,
 ) {
     Frame::new()
         .fill(Theme::SECTION_BG)
-        .corner_radius(CornerRadius::same(8))
-        .inner_margin(Margin::symmetric(Px::FOOTER_MARGIN_X, Px::FOOTER_MARGIN_Y))
+        .corner_radius(CornerRadius::same((8.0 * px.scale) as u8))
+        .inner_margin(Margin::symmetric(px.footer_margin_x() as i8, px.footer_margin_y() as i8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 if ui.small_button("debug").clicked() {
@@ -285,15 +298,17 @@ fn draw_footer(
                     sync_open.store(true, Ordering::Relaxed);
                     actions.command = Some(UiCommand::OpenSync);
                 }
-                ui.label(RichText::new("유사 구간 평균").color(Theme::TEXT_SECONDARY));
+                ui.label(RichText::new("유사 구간 평균").color(Theme::TEXT_SECONDARY).font(FontId::proportional(11.0 * px.scale)));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
                         RichText::new(pattern_count_text(recommendations))
-                            .color(Theme::TEXT_SECONDARY),
+                            .color(Theme::TEXT_SECONDARY)
+                            .font(FontId::proportional(11.0 * px.scale)),
                     );
                     ui.label(
                         RichText::new(avg_rate_text(recommendations, confidence))
                             .color(Theme::TEXT_SECONDARY)
+                            .font(FontId::proportional(11.0 * px.scale))
                             .strong(),
                     );
                 });

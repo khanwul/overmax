@@ -19,7 +19,7 @@ fn game_window_title(settings: &serde_json::Value) -> &str {
         .unwrap_or("DJMAX RESPECT V")
 }
 
-fn is_mouse_over_overlay(ctx: &egui::Context) -> bool {
+fn is_mouse_over_overlay(ctx: &egui::Context, scale: f32) -> bool {
     let Some(rect) = ctx.input(|i| i.viewport().outer_rect) else {
         return false;
     };
@@ -27,8 +27,10 @@ fn is_mouse_over_overlay(ctx: &egui::Context) -> bool {
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pos);
     }
-    let ppp = ctx.pixels_per_point();
-    let mouse_pos = egui::pos2(pos.x as f32 / ppp, pos.y as f32 / ppp);
+    // We no longer use pixels_per_point for scaling, so the mouse position 
+    // from Windows is in physical pixels, and rect from egui is also effectively in 
+    // physical pixels (since PPI=1.0).
+    let mouse_pos = egui::pos2(pos.x as f32, pos.y as f32);
     rect.contains(mouse_pos)
 }
 
@@ -126,6 +128,7 @@ impl NativeApp {
             native_helpers::vp_settings(),
             Self::auxiliary_viewport("Overmax 설정", [520.0, 560.0]),
             move |ctx, class| {
+                ctx.set_pixels_per_point(1.0);
                 let mut local_draft = draft.lock().map(|g| g.clone()).unwrap_or_default();
                 egui::TopBottomPanel::bottom("sett_actions").show(ctx, |ui| {
                     ui.horizontal(|ui| {
@@ -179,6 +182,7 @@ impl NativeApp {
             native_helpers::vp_sync(),
             Self::auxiliary_viewport("V-Archive 동기화", [520.0, 560.0]),
             move |ctx, class| {
+                ctx.set_pixels_per_point(1.0);
                 let list = candidates.lock().map(|g| g.clone()).unwrap_or_default();
                 let mut steam_g = steam.lock().unwrap_or_else(|e| e.into_inner());
                 let status_s = status.lock().map(|g| g.clone()).unwrap_or_default();
@@ -233,15 +237,21 @@ impl eframe::App for NativeApp {
         self.drain_fetch_results();
         self.poll_delete_requests();
         self.drain_game_found_refresh_steam();
-        self.apply_overlay_visual(ctx);
         ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
+
+        let scale = if let Ok(m) = self.merged_settings.lock() {
+
+            m.get("overlay").and_then(|o| o.get("scale")).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32
+        } else {
+            1.0
+        };
 
         let overlay_on = self.overlay_visible.load(Ordering::Relaxed);
         let hidden_size = Vec2::new(1.0, 1.0);
-        let visible_size = Vec2::new(overlay_ui::WIDTH, overlay_ui::HEIGHT);
+        let visible_size = Vec2::new(overlay_ui::BASE_WIDTH * scale, overlay_ui::BASE_HEIGHT * scale);
 
         // 마우스가 오버레이 영역 위에 있을 때만 상호작용 가능하게 함 (보조창 조작을 위해)
-        let is_over = is_mouse_over_overlay(ctx);
+        let is_over = is_mouse_over_overlay(ctx, scale);
         ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(!overlay_on || !is_over));
 
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(if overlay_on {
@@ -273,6 +283,7 @@ impl eframe::App for NativeApp {
                     self.settings_open.clone(),
                     self.debug_open.clone(),
                     self.sync_open.clone(),
+                    scale,
                 );
 
                 if actions.start_drag {

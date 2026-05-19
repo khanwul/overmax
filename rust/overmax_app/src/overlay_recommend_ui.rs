@@ -29,15 +29,20 @@ pub struct PatternTabInfo {
     pub assist_key: String,
 }
 
-pub fn draw_diff_tabs(ui: &mut egui::Ui, active: Option<&str>, patterns: &[PatternTabInfo]) {
-    ui.set_width(TAB_WIDTH);
+pub fn draw_diff_tabs(
+    ui: &mut egui::Ui,
+    active: Option<&str>,
+    patterns: &[PatternTabInfo],
+    scale: f32,
+) {
+    ui.set_width(TAB_WIDTH * scale);
     ui.vertical(|ui| {
-        ui.add_space(TAB_PAD_Y);
-        ui.spacing_mut().item_spacing.y = TAB_GAP;
+        ui.add_space(TAB_PAD_Y * scale);
+        ui.spacing_mut().item_spacing.y = TAB_GAP * scale;
         for diff in ["NM", "HD", "MX", "SC"] {
-            draw_diff_tab(ui, diff, active, patterns);
+            draw_diff_tab(ui, diff, active, patterns, scale);
         }
-        ui.add_space(TAB_PAD_Y);
+        ui.add_space(TAB_PAD_Y * scale);
     });
 }
 
@@ -45,14 +50,15 @@ pub fn draw_recommendations(
     ui: &mut egui::Ui,
     state: &GameSessionState,
     recommendations: &RecommendResult,
+    scale: f32,
 ) {
     ui.allocate_ui_with_layout(
-        Vec2::new(RECOMMEND_WIDTH, RECOMMEND_BODY_HEIGHT),
+        Vec2::new(RECOMMEND_WIDTH * scale, RECOMMEND_BODY_HEIGHT * scale),
         Layout::top_down(Align::Min),
         |ui| {
-            ui.add_space(RECOMMEND_PAD_Y);
-            draw_recommend_content(ui, state, recommendations);
-            ui.add_space(RECOMMEND_PAD_Y);
+            ui.add_space(RECOMMEND_PAD_Y * scale);
+            draw_recommend_content(ui, state, recommendations, scale);
+            ui.add_space(RECOMMEND_PAD_Y * scale);
         },
     );
 }
@@ -69,19 +75,25 @@ pub fn pattern_count_text(result: &RecommendResult) -> String {
     format!("{}/{}개 패턴", result.has_record_count, result.total_count)
 }
 
-fn draw_diff_tab(ui: &mut egui::Ui, diff: &str, active: Option<&str>, patterns: &[PatternTabInfo]) {
+fn draw_diff_tab(
+    ui: &mut egui::Ui,
+    diff: &str,
+    active: Option<&str>,
+    patterns: &[PatternTabInfo],
+    scale: f32,
+) {
     let pattern = patterns.iter().find(|item| item.diff == diff);
     let exists = pattern.is_some();
     Frame::new()
         .fill(tab_fill(active == Some(diff), exists))
-        .corner_radius(CornerRadius::same(6))
+        .corner_radius(CornerRadius::same((6.0 * scale) as u8))
         .inner_margin(Margin::same(0))
         .show(ui, |ui| {
-            ui.set_min_size(Vec2::new(TAB_WIDTH, TAB_HEIGHT));
+            ui.set_min_size(Vec2::new(TAB_WIDTH * scale, TAB_HEIGHT * scale));
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                ui.add_space(6.0);
-                ui.add(diff_label(diff));
-                ui.add(pattern_floor_label(pattern, active == Some(diff), exists));
+                ui.add_space(6.0 * scale);
+                ui.add(diff_label(diff, scale));
+                ui.add(pattern_floor_label(pattern, active == Some(diff), exists, scale));
             });
         });
 }
@@ -90,78 +102,87 @@ fn draw_recommend_content(
     ui: &mut egui::Ui,
     state: &GameSessionState,
     recommendations: &RecommendResult,
+    scale: f32,
 ) {
     if state.song_id.is_none() || state.mode.is_none() || state.diff.is_none() {
-        draw_empty_recommend(ui, "패턴을 감지하는 중...");
+        draw_empty_recommend(ui, "패턴을 감지하는 중...", scale);
     } else if recommendations.entries.is_empty() {
-        draw_empty_recommend(ui, "추천 결과 없음");
+        draw_empty_recommend(ui, "추천 결과 없음", scale);
     } else {
-        ui.spacing_mut().item_spacing.y = RECOMMEND_ROW_GAP;
+        ui.spacing_mut().item_spacing.y = RECOMMEND_ROW_GAP * scale;
         for entry in recommendations.entries.iter().take(6) {
-            draw_recommend_row(ui, entry);
+            draw_recommend_row(ui, entry, scale);
         }
     }
 }
 
-fn draw_empty_recommend(ui: &mut egui::Ui, text: &str) {
+fn draw_empty_recommend(ui: &mut egui::Ui, text: &str, scale: f32) {
     ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
         ui.add(
             Label::new(
                 RichText::new(text)
                     .color(Color32::from_rgb(80, 88, 112))
-                    .font(FontId::proportional(11.0)),
+                    .font(FontId::proportional(11.0 * scale)),
             )
             .selectable(false),
         );
     });
 }
 
-fn draw_recommend_row(ui: &mut egui::Ui, entry: &RecommendEntry) {
+fn draw_recommend_row(ui: &mut egui::Ui, entry: &RecommendEntry, scale: f32) {
     Frame::new()
         .fill(Color32::from_rgb(36, 46, 70))
-        .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(RECOMMEND_ROW_MARGIN_X as i8, 0))
+        .corner_radius(CornerRadius::same((6.0 * scale) as u8))
+        .inner_margin(Margin::symmetric((RECOMMEND_ROW_MARGIN_X * scale) as i8, 0))
         .show(ui, |ui| {
-            ui.set_min_size(Vec2::new(recommend_row_inner_width(), RECOMMEND_ROW_HEIGHT));
+            ui.set_min_size(Vec2::new(
+                recommend_row_inner_width() * scale,
+                RECOMMEND_ROW_HEIGHT * scale,
+            ));
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                draw_entry_badge(ui, entry);
-                draw_song_name(ui, entry);
+                ui.spacing_mut().item_spacing.x = 8.0 * scale;
+                draw_entry_badge(ui, entry, scale);
+                draw_song_name(ui, entry, scale);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    draw_rate(ui, entry)
+                    draw_rate(ui, entry, scale)
                 });
             });
         });
 }
 
-fn draw_entry_badge(ui: &mut egui::Ui, entry: &RecommendEntry) {
+fn draw_entry_badge(ui: &mut egui::Ui, entry: &RecommendEntry, scale: f32) {
     let text = badge_text(entry);
     let width = if entry.floor_name.is_none() {
-        28.0
+        28.0 * scale
     } else {
-        36.0
+        36.0 * scale
     };
-    let (cell, _) =
-        ui.allocate_exact_size(Vec2::new(width, RECOMMEND_ROW_HEIGHT), egui::Sense::hover());
-    let rect = centered_badge_rect(cell, width);
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(4), diff_color(&entry.difficulty));
+    let (cell, _) = ui.allocate_exact_size(
+        Vec2::new(width, RECOMMEND_ROW_HEIGHT * scale),
+        egui::Sense::hover(),
+    );
+    let rect = centered_badge_rect(cell, width, scale);
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same((4.0 * scale) as u8),
+        diff_color(&entry.difficulty),
+    );
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         text,
-        FontId::proportional(10.0),
+        FontId::proportional(10.0 * scale),
         Color32::WHITE,
     );
 }
 
-fn draw_song_name(ui: &mut egui::Ui, entry: &RecommendEntry) {
+fn draw_song_name(ui: &mut egui::Ui, entry: &RecommendEntry, scale: f32) {
     ui.allocate_ui_with_layout(
-        Vec2::new(SONG_LABEL_WIDTH, RECOMMEND_ROW_HEIGHT),
+        Vec2::new(SONG_LABEL_WIDTH * scale, RECOMMEND_ROW_HEIGHT * scale),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.add(
-                Label::new(song_name_text(entry))
+                Label::new(song_name_text(entry, scale))
                     .truncate()
                     .selectable(false),
             );
@@ -169,58 +190,67 @@ fn draw_song_name(ui: &mut egui::Ui, entry: &RecommendEntry) {
     );
 }
 
-fn draw_rate(ui: &mut egui::Ui, entry: &RecommendEntry) {
+fn draw_rate(ui: &mut egui::Ui, entry: &RecommendEntry, scale: f32) {
     let Some(rate) = entry.rate else {
-        ui.label(RichText::new("——").color(Color32::from_rgb(80, 88, 112)));
+        ui.label(
+            RichText::new("——")
+                .color(Color32::from_rgb(80, 88, 112))
+                .font(FontId::proportional(11.0 * scale)),
+        );
         return;
     };
     ui.label(
         RichText::new(format!("{rate:.2}%"))
             .color(rate_color(rate))
-            .font(FontId::proportional(11.0))
+            .font(FontId::proportional(11.0 * scale))
             .strong(),
     );
     if rate >= 100.0 {
-        draw_status_badge(ui, "P", Color32::from_rgb(160, 54, 210));
+        draw_status_badge(ui, "P", Color32::from_rgb(160, 54, 210), scale);
     } else if entry.is_max_combo {
-        draw_status_badge(ui, "M", Color32::from_rgb(48, 200, 255));
+        draw_status_badge(ui, "M", Color32::from_rgb(48, 200, 255), scale);
     }
 }
 
-fn draw_status_badge(ui: &mut egui::Ui, text: &str, color: Color32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::hover());
-    ui.painter().circle_filled(rect.center(), 8.0, color);
+fn draw_status_badge(ui: &mut egui::Ui, text: &str, color: Color32, scale: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0 * scale), egui::Sense::hover());
+    ui.painter().circle_filled(rect.center(), 8.0 * scale, color);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         text,
-        FontId::proportional(9.0),
+        FontId::proportional(9.0 * scale),
         Color32::WHITE,
     );
 }
 
-fn diff_label(diff: &str) -> Label {
+fn diff_label(diff: &str, scale: f32) -> Label {
     Label::new(
         RichText::new(diff.to_string())
             .color(diff_color(diff))
-            .font(FontId::proportional(11.0))
+            .font(FontId::proportional(11.0 * scale))
             .strong(),
     )
 }
 
-fn pattern_floor_label(pattern: Option<&PatternTabInfo>, active: bool, exists: bool) -> Label {
+fn pattern_floor_label(
+    pattern: Option<&PatternTabInfo>,
+    active: bool,
+    exists: bool,
+    scale: f32,
+) -> Label {
     Label::new(
         RichText::new(pattern_label(pattern))
             .color(pattern_text_color(active, exists))
-            .font(FontId::proportional(10.0))
+            .font(FontId::proportional(10.0 * scale))
             .strong(),
     )
 }
 
-fn song_name_text(entry: &RecommendEntry) -> RichText {
+fn song_name_text(entry: &RecommendEntry, scale: f32) -> RichText {
     RichText::new(&entry.song_name)
         .color(Color32::from_rgb(232, 238, 255))
-        .font(FontId::proportional(11.0))
+        .font(FontId::proportional(11.0 * scale))
         .strong()
 }
 
@@ -281,8 +311,8 @@ fn recommend_row_inner_width() -> f32 {
     RECOMMEND_WIDTH - RECOMMEND_ROW_MARGIN_X * 2.0
 }
 
-fn centered_badge_rect(cell: Rect, width: f32) -> Rect {
-    Rect::from_center_size(cell.center(), Vec2::new(width, BADGE_HEIGHT))
+fn centered_badge_rect(cell: Rect, width: f32, scale: f32) -> Rect {
+    Rect::from_center_size(cell.center(), Vec2::new(width, BADGE_HEIGHT * scale))
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 //! Single `eframe` app: overlay + deferred debug / settings / sync viewports.
 
-use eframe::egui::{self, Color32, ViewportBuilder};
+use eframe::egui::ViewportBuilder;
 use overmax_core::GameSessionState;
 use overmax_data::{
     build_candidates, load_base_settings, load_merged_settings, normalize_settings,
@@ -85,7 +85,7 @@ pub fn run_native_app() -> eframe::Result<()> {
 fn native_options(merged: &Value) -> eframe::NativeOptions {
     let mut builder = ViewportBuilder::default()
         .with_title("Overmax")
-        .with_inner_size([overlay_ui::WIDTH, overlay_ui::HEIGHT])
+        .with_inner_size([overlay_ui::BASE_WIDTH, overlay_ui::BASE_HEIGHT])
         .with_resizable(false)
         .with_decorations(false)
         .with_transparent(true)
@@ -389,31 +389,6 @@ impl NativeApp {
             .and_then(|v| v.as_str())
             .unwrap_or("Overmax Debug Log")
             .to_string()
-    }
-
-    pub(crate) fn apply_overlay_visual(&self, ctx: &egui::Context) {
-        let Ok(merged) = self.merged_settings.lock() else {
-            return;
-        };
-        let opacity = merged
-            .get("overlay")
-            .and_then(|o| o.get("base_opacity"))
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.8) as f32;
-        let scale = merged
-            .get("overlay")
-            .and_then(|o| o.get("scale"))
-            .and_then(|v| v.as_f64())
-            .unwrap_or(1.0) as f32;
-        ctx.set_pixels_per_point(scale);
-        ctx.style_mut(|s| {
-            s.visuals.widgets.noninteractive.bg_fill = Color32::from_rgba_unmultiplied(
-                18,
-                24,
-                38,
-                (255.0 * opacity.clamp(0.1, 1.0)) as u8,
-            );
-        });
     }
 
     pub(crate) fn poll_scan_requests(&mut self) {
