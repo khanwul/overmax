@@ -1,3 +1,4 @@
+use crate::overlay_ui::diff_color;
 use eframe::egui::{
     self, Align, Color32, CornerRadius, FontId, Frame, Label, Layout, Margin, Rect, RichText, Vec2,
 };
@@ -259,16 +260,6 @@ fn pattern_text_color(active: bool, exists: bool) -> Color32 {
         Color32::from_rgb(136, 145, 167)
     } else {
         Color32::from_rgb(80, 88, 112)
-    }
-}
-
-fn diff_color(diff: &str) -> Color32 {
-    match diff {
-        "NM" => Color32::from_rgb(0x4A, 0x90, 0xD9),
-        "HD" => Color32::from_rgb(0xF5, 0xA6, 0x23),
-        "MX" => Color32::from_rgb(0xD0, 0x02, 0x1B),
-        "SC" => Color32::from_rgb(0x9B, 0x59, 0xB6),
-        _ => Color32::WHITE,
     }
 }
 

@@ -132,6 +132,7 @@ pub fn draw_overlay_panel(
                 &mut actions,
             );
         });
+
     actions
 }
 

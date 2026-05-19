@@ -51,7 +51,18 @@ impl WindowTracker {
         let Some(hwnd) = self.find_hwnd() else {
             return false;
         };
-        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() == hwnd }
+        let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        if fg == hwnd {
+            return true;
+        }
+
+        // 보조창(설정, 동기화 등)이 활성화된 경우에도 오버레이 동작을 유지하도록 함
+        let mut fg_pid = 0u32;
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(fg, &mut fg_pid);
+            let my_pid = windows_sys::Win32::System::Threading::GetCurrentProcessId();
+            fg_pid == my_pid
+        }
     }
 
     fn find_hwnd(&self) -> Option<windows_sys::Win32::Foundation::HWND> {

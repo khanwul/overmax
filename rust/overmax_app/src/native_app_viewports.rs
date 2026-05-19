@@ -11,10 +11,6 @@ use crate::settings_ui;
 use crate::sync_ui;
 use crate::window_tracker;
 
-fn overlay_mouse_passthrough(overlay_on: bool, auxiliary_open: bool) -> bool {
-    !overlay_on || auxiliary_open
-}
-
 fn game_window_title(settings: &serde_json::Value) -> &str {
     settings
         .get("window_tracker")
@@ -23,13 +19,20 @@ fn game_window_title(settings: &serde_json::Value) -> &str {
         .unwrap_or("DJMAX RESPECT V")
 }
 
-impl NativeApp {
-    fn auxiliary_open(&self) -> bool {
-        self.debug_open.load(Ordering::Relaxed)
-            || self.settings_open.load(Ordering::Relaxed)
-            || self.sync_open.load(Ordering::Relaxed)
+fn is_mouse_over_overlay(ctx: &egui::Context) -> bool {
+    let Some(rect) = ctx.input(|i| i.viewport().outer_rect) else {
+        return false;
+    };
+    let mut pos = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pos);
     }
+    let ppp = ctx.pixels_per_point();
+    let mouse_pos = egui::pos2(pos.x as f32 / ppp, pos.y as f32 / ppp);
+    rect.contains(mouse_pos)
+}
 
+impl NativeApp {
     fn auxiliary_viewport(title: &str, size: [f32; 2]) -> ViewportBuilder {
         ViewportBuilder::default()
             .with_title(title)
@@ -234,13 +237,13 @@ impl eframe::App for NativeApp {
         ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
 
         let overlay_on = self.overlay_visible.load(Ordering::Relaxed);
-        let auxiliary_open = self.auxiliary_open();
         let hidden_size = Vec2::new(1.0, 1.0);
         let visible_size = Vec2::new(overlay_ui::WIDTH, overlay_ui::HEIGHT);
 
-        ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(
-            overlay_mouse_passthrough(overlay_on, auxiliary_open),
-        ));
+        // 마우스가 오버레이 영역 위에 있을 때만 상호작용 가능하게 함 (보조창 조작을 위해)
+        let is_over = is_mouse_over_overlay(ctx);
+        ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(!overlay_on || !is_over));
+
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(if overlay_on {
             visible_size
         } else {
@@ -271,6 +274,7 @@ impl eframe::App for NativeApp {
                     self.debug_open.clone(),
                     self.sync_open.clone(),
                 );
+
                 if actions.start_drag {
                     ctx.send_viewport_cmd(ViewportCommand::StartDrag);
                 }
@@ -332,13 +336,6 @@ mod tests {
             Some(egui::viewport::WindowLevel::AlwaysOnTop)
         );
         assert_ne!(builder.active, Some(true));
-    }
-
-    #[test]
-    fn overlay_passes_mouse_through_while_auxiliary_is_open() {
-        assert!(super::overlay_mouse_passthrough(true, true));
-        assert!(super::overlay_mouse_passthrough(false, false));
-        assert!(!super::overlay_mouse_passthrough(true, false));
     }
 
     #[test]
