@@ -67,7 +67,7 @@ fn render_controls(
         let is_paused = paused.load(Ordering::Relaxed);
         let pause_text = if is_paused { "▶ 재개" } else { "⏸ 일시정지" };
         let pause_btn = egui::Button::new(RichText::new(pause_text).size(Theme::FONT_SMALL))
-            .fill(if is_paused { Color32::from_rgb(90, 58, 26) } else { Theme::CARD })
+            .fill(if is_paused { Theme::BTN_PAUSED } else { Theme::CARD })
             .stroke(Stroke::new(1.0, Theme::STROKE));
         if ui.add(pause_btn).clicked() {
             paused.store(!is_paused, Ordering::Relaxed);
@@ -173,16 +173,16 @@ pub fn close_if_requested(ctx: &egui::Context, open: &Arc<AtomicBool>) {
 
 fn get_line_color(line: &str) -> Color32 {
     if line.contains("[ScreenCapture]") {
-        Color32::from_rgb(126, 200, 227) // 하늘
+        Theme::LOG_CAPTURE
     } else if line.contains("[Overlay]") {
-        Color32::from_rgb(181, 234, 215) // 민트
+        Theme::LOG_OVERLAY
     } else if line.contains("[VArchive]") {
-        Color32::from_rgb(255, 214, 165) // 살구
+        Theme::LOG_VARCHIVE
     } else if line.contains("[WindowTracker]") {
-        Color32::from_rgb(201, 177, 255) // 보라
+        Theme::LOG_WINDOW
     } else if line.contains("[Main]") || line.contains("[UI]") {
-        Color32::from_rgb(255, 255, 181) // 노랑
+        Theme::LOG_MAIN
     } else {
-        Color32::from_rgb(204, 204, 204) // 기본 회색
+        Theme::LOG_DEFAULT
     }
 }

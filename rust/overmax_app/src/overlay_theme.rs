@@ -27,6 +27,17 @@ impl Theme {
     pub const OK: Color32 = Color32::from_rgb(0, 212, 255);
     pub const WARN: Color32 = Color32::from_rgb(255, 75, 75);
 
+    // Log Category Colors
+    pub const LOG_CAPTURE: Color32 = Color32::from_rgb(126, 200, 227);
+    pub const LOG_OVERLAY: Color32 = Color32::from_rgb(181, 234, 215);
+    pub const LOG_VARCHIVE: Color32 = Color32::from_rgb(255, 214, 165);
+    pub const LOG_WINDOW: Color32 = Color32::from_rgb(201, 177, 255);
+    pub const LOG_MAIN: Color32 = Color32::from_rgb(255, 255, 181);
+    pub const LOG_DEFAULT: Color32 = Color32::from_rgb(204, 204, 204);
+
+    // Button States
+    pub const BTN_PAUSED: Color32 = Color32::from_rgb(90, 58, 26);
+
     pub const CARD: Color32 = Color32::from_rgb(22, 30, 48); // SECTION_BG
     pub const STROKE: Color32 = Color32::from_rgb(28, 36, 54); // TAB_INACTIVE_BG
     
