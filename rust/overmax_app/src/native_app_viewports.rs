@@ -42,6 +42,7 @@ impl NativeApp {
             .with_title(title)
             .with_inner_size(size)
             .with_visible(true)
+            .with_resizable(true)
             .with_taskbar(false)
     }
 
@@ -391,6 +392,7 @@ mod tests {
 
         assert_eq!(builder.taskbar, Some(false));
         assert_eq!(builder.visible, Some(true));
+        assert_eq!(builder.resizable, Some(true));
         assert_ne!(
             builder.window_level,
             Some(egui::viewport::WindowLevel::AlwaysOnTop)
