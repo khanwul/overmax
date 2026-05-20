@@ -10,6 +10,8 @@ pub struct PatternSheetMetaItem {
     pub note: String,
     #[serde(default)]
     pub assist_key: String,
+    #[serde(default)]
+    pub keypart: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -54,6 +56,7 @@ mod tests {
                 gold: "O".into(),
                 note: "개인차".into(),
                 assist_key: "Y".into(),
+                keypart: false,
             },
         );
         let meta = PatternSheetMeta { items };
@@ -64,6 +67,7 @@ mod tests {
                 gold: "O".into(),
                 note: "개인차".into(),
                 assist_key: "Y".into(),
+                keypart: false,
             }
         );
     }

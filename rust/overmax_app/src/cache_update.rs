@@ -251,12 +251,51 @@ fn merge_sheet_meta(items: &mut serde_json::Map<String, Value>, mode: &str, csv:
 }
 
 fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> Value {
+    let raw_gold = pick(values, &["황배 여부", "황배여부"]);
+    let gold = if raw_gold.is_empty() {
+        String::new()
+    } else if raw_gold.contains("[H]") {
+        "핲랜".to_string()
+    } else if raw_gold.contains("[M]") {
+        "맥랜".to_string()
+    } else {
+        "랜덤".to_string()
+    };
+
+    let mut note = pick(values, &["비고", "Note"]);
+    let mut keypart = false;
+
+    if mode == "8B" {
+        let raw_keypart = pick(values, &["키파트 위주", "키파트위주"]);
+        if !raw_keypart.is_empty() {
+            keypart = true;
+            if note.is_empty() {
+                note = "키파트 위주 패턴".to_string();
+            } else {
+                note = format!("{} | 키파트 위주 패턴", note);
+            }
+        }
+    }
+
     let mut meta = json!({
-        "gold": pick(values, &["황배 여부", "황배여부"]),
-        "note": pick(values, &["비고", "Note"]),
+        "gold": gold,
+        "note": note,
+        "keypart": keypart,
     });
+
     if mode == "5B" {
-        meta["assist_key"] = json!(pick(values, &["보조 키 여부", "보조키여부"]));
+        let raw_assist = pick(values, &["보조 키 여부", "보조키여부"]);
+        if !raw_assist.is_empty() {
+            let assist = match raw_assist.as_str() {
+                "❌" => "사용",
+                "️️⚠️" | "⚠" => "주의",
+                "✅" => "미사용",
+                other => other,
+            };
+            meta["assist_key"] = json!(assist);
+        } else {
+            meta["assist_key"] = json!("");
+        }
     }
     meta
 }
@@ -334,12 +373,12 @@ mod tests {
         merge_sheet_meta(
             &mut items,
             "5B",
-            "곡명,난이도,황배 여부,비고,보조 키 여부\nLove ☆ Panic,SC,O,개인차,Y\n",
+            "곡명,난이도,황배 여부,비고,보조 키 여부\nLove ☆ Panic,SC,O,개인차,○\n",
         );
 
         assert_eq!(
             items.get("5B|love☆panic|sc").unwrap(),
-            &json!({"gold": "O", "note": "개인차", "assist_key": "Y"})
+            &json!({"gold": "정배", "note": "개인차", "keypart": false, "assist_key": "사용"})
         );
     }
 }
