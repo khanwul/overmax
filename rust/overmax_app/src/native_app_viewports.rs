@@ -58,6 +58,13 @@ impl NativeApp {
             native_helpers::vp_debug(),
             Self::auxiliary_viewport(&title, [720.0, 460.0]),
             move |ctx, class| {
+                ctx.style_mut(|s| {
+                    s.debug.show_expand_width = false;
+                    s.debug.show_expand_height = false;
+                    s.debug.show_resize = false;
+                    s.debug.show_unaligned = false;
+                    s.debug.debug_on_hover = false;
+                });
                 debug_ui::render_debug(
                     ctx,
                     class,
@@ -97,6 +104,13 @@ impl NativeApp {
             Self::auxiliary_viewport("Overmax 설정", [520.0, 560.0]),
             move |ctx, class| {
                 ctx.set_pixels_per_point(1.0);
+                ctx.style_mut(|s| {
+                    s.debug.show_expand_width = false;
+                    s.debug.show_expand_height = false;
+                    s.debug.show_resize = false;
+                    s.debug.show_unaligned = false;
+                    s.debug.debug_on_hover = false;
+                });
                 let mut local_draft = draft.lock().map(|g| g.clone()).unwrap_or_default();
                 egui::TopBottomPanel::bottom("sett_actions").show(ctx, |ui| {
                     ui.horizontal(|ui| {
@@ -151,6 +165,13 @@ impl NativeApp {
             Self::auxiliary_viewport("V-Archive 동기화", [520.0, 560.0]),
             move |ctx, class| {
                 ctx.set_pixels_per_point(1.0);
+                ctx.style_mut(|s| {
+                    s.debug.show_expand_width = false;
+                    s.debug.show_expand_height = false;
+                    s.debug.show_resize = false;
+                    s.debug.show_unaligned = false;
+                    s.debug.debug_on_hover = false;
+                });
                 let list = candidates.lock().map(|g| g.clone()).unwrap_or_default();
                 let mut steam_g = steam.lock().unwrap_or_else(|e| e.into_inner());
                 let status_s = status.lock().map(|g| g.clone()).unwrap_or_default();
@@ -178,6 +199,16 @@ impl NativeApp {
 
 impl eframe::App for NativeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 모든 레이아웃 디버그 시각화(노란 선 및 텍스트) 강제 비활성화
+        ctx.style_mut(|s| {
+            s.debug.show_expand_width = false;
+            s.debug.show_expand_height = false;
+            s.debug.show_resize = false;
+            s.debug.show_unaligned = false;
+            s.debug.debug_on_hover = false;
+        });
+        ctx.set_debug_on_hover(false);
+
         if self.exit_requested.load(Ordering::Relaxed) {
             ctx.send_viewport_cmd(ViewportCommand::Close);
             return;
@@ -223,38 +254,37 @@ impl eframe::App for NativeApp {
         let game_found = self.game_rect.lock().map(|r| r.is_some()).unwrap_or(false);
         let overlay_on = game_found && self.confidence > 0.1;
 
-        // 오버레이 상태 변화 감지 및 로그
-        static mut LAST_STATE: i8 = -1; // -1: 초기, 0: OFF, 1: ON
-        unsafe {
-            let current_state = if overlay_on { 1 } else { 0 };
-            if LAST_STATE != current_state {
-                debug_ui::push_log(
-                    &self.log_lines,
-                    1000,
-                    format!(
-                        "[Overlay] 상태 변경: {} -> {} (Game: {}, Conf: {:.2})",
-                        if LAST_STATE == 1 { "ON" } else if LAST_STATE == 0 { "OFF" } else { "INIT" },
-                        if current_state == 1 { "ON" } else { "OFF" },
-                        game_found,
-                        self.confidence
-                    ),
-                );
-                LAST_STATE = current_state;
-                
-                // 상태가 바뀔 때만 크기 조절 명령 전송
-                if overlay_on {
-                    ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(
-                        overlay_ui::BASE_WIDTH * scale,
-                        overlay_ui::BASE_HEIGHT * scale,
-                    )));
-                } else {
-                    ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(1.0, 1.0)));
-                }
+        if overlay_on != self.prev_overlay_on || (overlay_on && (scale - self.prev_scale).abs() > 0.001) {
+            debug_ui::push_log(
+                &self.log_lines,
+                1000,
+                format!(
+                    "[Overlay] 레이아웃 업데이트: ON={}->{}, Scale={:.2}->{:.2} (Game: {}, Conf: {:.2})",
+                    self.prev_overlay_on,
+                    overlay_on,
+                    self.prev_scale,
+                    scale,
+                    game_found,
+                    self.confidence
+                ),
+            );
+
+            if overlay_on {
+                ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(
+                    (overlay_ui::BASE_WIDTH * scale).ceil() + 2.0,
+                    (overlay_ui::BASE_HEIGHT * scale).ceil() + 2.0,
+                )));
+            } else {
+                ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(1.0, 1.0)));
             }
         }
 
-        let visible_size = Vec2::new(overlay_ui::BASE_WIDTH * scale, overlay_ui::BASE_HEIGHT * scale);
-        let hidden_size = Vec2::new(1.0, 1.0);
+        let mut_self = unsafe { &mut *(self as *const Self as *mut Self) };
+        mut_self.prev_overlay_on = overlay_on;
+        mut_self.prev_scale = scale;
+
+        let _visible_size = Vec2::new(overlay_ui::BASE_WIDTH * scale, overlay_ui::BASE_HEIGHT * scale);
+        let _hidden_size = Vec2::new(1.0, 1.0);
 
         // 마우스가 오버레이 영역 위에 있을 때만 상호작용 가능하게 함 (보조창 조작을 위해)
         let is_over = is_mouse_over_overlay(ctx, scale);
@@ -281,13 +311,11 @@ impl eframe::App for NativeApp {
         self.show_sync_viewport(ctx);
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::from_rgba_unmultiplied(0, 0, 0, 0)))
+            .frame(egui::Frame::NONE.fill(Color32::from_rgba_unmultiplied(0, 0, 0, 0)))
             .show(ctx, |ui| {
                 if !overlay_on {
-                    ui.set_min_size(hidden_size);
                     return;
                 }
-                ui.set_min_size(visible_size);
                 let actions = overlay_ui::draw_overlay_panel(
                     ui,
                     &self.session,
@@ -346,9 +374,9 @@ impl eframe::App for NativeApp {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        // [R, G, B, A] - 윈도우 버퍼를 불투명하게 유지한 상태에서 
-        // OS 레벨의 전역 투명도(Layered Window Alpha)를 적용함.
-        [0.0, 0.0, 0.0, 1.0]
+        // [R, G, B, A] - 윈도우 버퍼를 완전 투명하게 설정.
+        // OS 레벨의 전역 투명도(Layered Window Alpha)와 함께 작동함.
+        [0.0, 0.0, 0.0, 0.0]
     }
 }
 
@@ -405,9 +433,9 @@ fn apply_window_opacity(opacity: f32, log_lines: &Arc<Mutex<VecDeque<String>>>) 
 
     unsafe {
         extern "system" fn enum_callback(hwnd: HWND, lparam: isize) -> i32 {
-            let data = unsafe { &mut *(lparam as *mut EnumData) };
-            let mut pid = 0u32;
             unsafe {
+                let data = &mut *(lparam as *mut EnumData);
+                let mut pid = 0u32;
                 GetWindowThreadProcessId(hwnd, &mut pid);
                 if pid == data.target_pid {
                     let mut text = [0u16; 512];
@@ -426,8 +454,8 @@ fn apply_window_opacity(opacity: f32, log_lines: &Arc<Mutex<VecDeque<String>>>) 
                         data.found_hwnd = Some(hwnd);
                     }
                 }
+                1
             }
-            1
         }
 
         EnumWindows(Some(enum_callback), &mut data as *mut _ as isize);
@@ -435,11 +463,9 @@ fn apply_window_opacity(opacity: f32, log_lines: &Arc<Mutex<VecDeque<String>>>) 
         if let Some(hwnd) = data.found_hwnd {
             // 현재 투명도 값 추적 로그 (값 변화가 있을 때만)
             static mut LAST_OPACITY: f32 = -1.0;
-            unsafe {
-                if (opacity - LAST_OPACITY).abs() > 0.01 {
-                    debug_ui::push_log(&data.log, 1000, format!("[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})", opacity, hwnd));
-                    LAST_OPACITY = opacity;
-                }
+            if (opacity - LAST_OPACITY).abs() > 0.01 {
+                debug_ui::push_log(&data.log, 1000, format!("[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})", opacity, hwnd));
+                LAST_OPACITY = opacity;
             }
 
             let style = GetWindowLongW(hwnd, GWL_EXSTYLE);

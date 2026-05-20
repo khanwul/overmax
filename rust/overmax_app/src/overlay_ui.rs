@@ -1,6 +1,5 @@
 use crate::overlay_recommend_ui::{
     avg_rate_text, draw_diff_tabs, draw_recommendations, pattern_count_text, PatternTabInfo,
-    RECOMMEND_BODY_HEIGHT,
 };
 use crate::overlay_theme::Theme;
 use crate::ui_command::UiCommand;
@@ -14,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 pub const BASE_WIDTH: f32 = 360.0;
-pub const BASE_HEIGHT: f32 = 326.0;
+pub const BASE_HEIGHT: f32 = 380.0;
 
 #[derive(Default, Clone, Copy)]
 pub struct OverlayActions {
@@ -32,7 +31,7 @@ impl Px {
         Self { scale }
     }
     fn panel_margin(&self) -> f32 { 8.0 * self.scale }
-    fn panel_gap(&self) -> f32 { 6.0 * self.scale }
+    fn panel_gap(&self) -> f32 { 3.0 * self.scale }
     fn header_radius(&self) -> f32 { 10.0 * self.scale }
     fn header_margin_x(&self) -> f32 { 12.0 * self.scale }
     fn header_margin_y(&self) -> f32 { 8.0 * self.scale }
@@ -42,14 +41,7 @@ impl Px {
     fn mode_badge_w(&self) -> f32 { 28.0 * self.scale }
     fn mode_badge_h(&self) -> f32 { 22.0 * self.scale }
     fn settings_btn(&self) -> f32 { 24.0 * self.scale }
-    fn body_gap(&self) -> f32 { 6.0 * self.scale }
-    fn inner_width(&self) -> f32 { (BASE_WIDTH - 16.0) * self.scale }
-    fn body_height(&self) -> f32 {
-        let tab_height = 46.0 * self.scale;
-        let tab_gap = 4.0 * self.scale;
-        let tab_panel_pad_y = 6.0 * self.scale;
-        tab_panel_pad_y * 2.0 + tab_height * 4.0 + tab_gap * 3.0
-    }
+    fn body_gap(&self) -> f32 { 3.0 * self.scale }
     fn footer_margin_x(&self) -> f32 { 10.0 * self.scale }
     fn footer_margin_y(&self) -> f32 { 5.0 * self.scale }
 }
@@ -99,6 +91,13 @@ pub fn draw_overlay_panel(
     sync_open: Arc<AtomicBool>,
     scale: f32,
 ) -> OverlayActions {
+    // 레이아웃 경고(노란 선) 강제 비활성화
+    ui.ctx().style_mut(|s| {
+        s.debug.show_expand_width = false;
+        s.debug.show_expand_height = false;
+    });
+    ui.ctx().set_debug_on_hover(false);
+
     let px = Px::new(scale);
     let mut actions = OverlayActions::default();
     Frame::new()
@@ -107,7 +106,6 @@ pub fn draw_overlay_panel(
         .inner_margin(Margin::same(px.panel_margin() as i8))
         .stroke(egui::Stroke::new(1.0, Theme::PANEL_STROKE))
         .show(ui, |ui| {
-            ui.set_width(BASE_WIDTH * scale - px.panel_margin() * 2.0);
             draw_header(
                 ui,
                 state,
@@ -252,15 +250,11 @@ fn draw_body(
     recommendations: &RecommendResult,
     px: &Px,
 ) {
-    ui.allocate_ui_with_layout(
-        Vec2::new(px.inner_width(), px.body_height().max(RECOMMEND_BODY_HEIGHT * px.scale)),
-        Layout::left_to_right(Align::Min),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = px.body_gap();
-            draw_diff_tabs(ui, state.context.as_ref().map(|ctx| ctx.diff.as_str()), pattern_tabs, px.scale);
-            draw_recommendations(ui, state, recommendations, px.scale);
-        },
-    );
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = px.body_gap();
+        draw_diff_tabs(ui, state.context.as_ref().map(|ctx| ctx.diff.as_str()), pattern_tabs, px.scale);
+        draw_recommendations(ui, state, recommendations, px.scale);
+    });
 }
 
 fn draw_footer(

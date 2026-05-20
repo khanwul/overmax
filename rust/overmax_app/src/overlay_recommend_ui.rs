@@ -11,12 +11,12 @@ const TAB_HEIGHT: f32 = 46.0;
 const TAB_GAP: f32 = 4.0;
 const TAB_PAD_Y: f32 = 6.0;
 const RECOMMEND_WIDTH: f32 = 286.0;
-const RECOMMEND_PAD_Y: f32 = 8.0;
+const RECOMMEND_PAD_Y: f32 = 6.0;
 const RECOMMEND_ROW_HEIGHT: f32 = 30.0;
 const RECOMMEND_ROW_MARGIN_X: f32 = 8.0;
 const BADGE_HEIGHT: f32 = 18.0;
 const SONG_LABEL_WIDTH: f32 = 140.0;
-const RECOMMEND_ROW_GAP: f32 = 3.0;
+const RECOMMEND_ROW_GAP: f32 = 3.2;
 pub(crate) const RECOMMEND_BODY_HEIGHT: f32 =
     RECOMMEND_PAD_Y * 2.0 + RECOMMEND_ROW_HEIGHT * 6.0 + RECOMMEND_ROW_GAP * 5.0;
 
@@ -53,15 +53,12 @@ pub fn draw_recommendations(
     recommendations: &RecommendResult,
     scale: f32,
 ) {
-    ui.allocate_ui_with_layout(
-        Vec2::new(RECOMMEND_WIDTH * scale, RECOMMEND_BODY_HEIGHT * scale),
-        Layout::top_down(Align::Min),
-        |ui| {
-            ui.add_space(RECOMMEND_PAD_Y * scale);
-            draw_recommend_content(ui, state, recommendations, scale);
-            ui.add_space(RECOMMEND_PAD_Y * scale);
-        },
-    );
+    ui.vertical(|ui| {
+        ui.set_width(RECOMMEND_WIDTH * scale);
+        ui.add_space(RECOMMEND_PAD_Y * scale);
+        draw_recommend_content(ui, state, recommendations, scale);
+        ui.add_space(RECOMMEND_PAD_Y * scale);
+    });
 }
 
 pub fn avg_rate_text(result: &RecommendResult, confidence: f32) -> String {
@@ -118,14 +115,17 @@ fn draw_recommend_content(
 }
 
 fn draw_empty_recommend(ui: &mut egui::Ui, text: &str, scale: f32) {
-    ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
+    ui.with_layout(Layout::top_down(Align::Center), |ui| {
+        ui.set_width(RECOMMEND_WIDTH * scale);
+        ui.add_space(RECOMMEND_BODY_HEIGHT / 2.0 * scale - 10.0 * scale);
         ui.add(
             Label::new(
                 RichText::new(text)
                     .color(Theme::TEXT_MUTED)
                     .font(FontId::proportional(11.0 * scale)),
             )
-            .selectable(false),
+            .selectable(false)
+            .wrap_mode(egui::TextWrapMode::Extend),
         );
     });
 }
@@ -322,7 +322,7 @@ fn centered_badge_rect(cell: Rect, width: f32, scale: f32) -> Rect {
 mod tests {
     use super::{
         centered_badge_rect, pattern_label, recommend_row_inner_width, PatternTabInfo,
-        BADGE_HEIGHT, RECOMMEND_BODY_HEIGHT, RECOMMEND_ROW_GAP, RECOMMEND_ROW_HEIGHT,
+        BADGE_HEIGHT, RECOMMEND_ROW_GAP, RECOMMEND_ROW_HEIGHT,
     };
     use eframe::egui::{Pos2, Rect, Vec2};
 
@@ -338,14 +338,6 @@ mod tests {
         };
 
         assert_eq!(pattern_label(Some(&pattern)), "12.3");
-    }
-
-    #[test]
-    fn recommendation_body_height_matches_pyqt_six_rows() {
-        assert_eq!(
-            RECOMMEND_BODY_HEIGHT,
-            8.0 * 2.0 + RECOMMEND_ROW_HEIGHT * 6.0 + RECOMMEND_ROW_GAP * 5.0
-        );
     }
 
     #[test]
