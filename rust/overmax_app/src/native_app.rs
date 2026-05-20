@@ -85,7 +85,7 @@ fn native_options(merged: &Value) -> eframe::NativeOptions {
     let mut builder = ViewportBuilder::default()
         .with_title("Overmax")
         .with_inner_size([overlay_ui::BASE_WIDTH, overlay_ui::BASE_HEIGHT])
-        .with_resizable(false)
+        .with_resizable(true)
         .with_decorations(false)
         .with_transparent(true)
         .with_taskbar(false)
