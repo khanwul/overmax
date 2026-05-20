@@ -31,7 +31,7 @@ impl Px {
         Self { scale }
     }
     fn panel_margin(&self) -> f32 { 8.0 * self.scale }
-    fn panel_gap(&self) -> f32 { 3.0 * self.scale }
+    fn panel_gap(&self) -> f32 { 1.5 * self.scale }
     fn header_radius(&self) -> f32 { 10.0 * self.scale }
     fn header_margin_x(&self) -> f32 { 12.0 * self.scale }
     fn header_margin_y(&self) -> f32 { 8.0 * self.scale }
@@ -41,7 +41,7 @@ impl Px {
     fn mode_badge_w(&self) -> f32 { 28.0 * self.scale }
     fn mode_badge_h(&self) -> f32 { 22.0 * self.scale }
     fn settings_btn(&self) -> f32 { 24.0 * self.scale }
-    fn body_gap(&self) -> f32 { 3.0 * self.scale }
+    fn body_gap(&self) -> f32 { 6.0 * self.scale }
     fn footer_margin_x(&self) -> f32 { 10.0 * self.scale }
     fn footer_margin_y(&self) -> f32 { 5.0 * self.scale }
 }
@@ -161,6 +161,7 @@ pub fn draw_overlay_panel(
         .inner_margin(Margin::same(px.panel_margin() as i8))
         .stroke(egui::Stroke::new(1.0, Theme::PANEL_STROKE))
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             draw_header(
                 ui,
                 state,
