@@ -5,14 +5,14 @@ pub struct PlayContext {
     pub song_id: u32,
     pub mode: String,
     pub diff: String,
+    pub rate: f32,
+    pub is_max_combo: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameSessionState {
     pub context: Option<PlayContext>,
     pub is_stable: bool,
-    pub is_max_combo: bool,
-    pub rate: Option<f32>,
 }
 
 impl GameSessionState {
@@ -20,8 +20,6 @@ impl GameSessionState {
         Self {
             context: None,
             is_stable: false,
-            is_max_combo: false,
-            rate: None,
         }
     }
 
@@ -30,7 +28,7 @@ impl GameSessionState {
     }
 
     pub fn should_store_rate(&self) -> bool {
-        self.rate.is_some_and(|rate| rate > 0.0)
+        self.context.as_ref().is_some_and(|ctx| ctx.rate > 0.0)
     }
 }
 
@@ -43,15 +41,25 @@ impl Default for GameSessionState {
 impl fmt::Display for GameSessionState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let status = if self.is_stable { "STABLE" } else { "DETECTING" };
-        let mc_status = if self.is_max_combo { " (MAX COMBO)" } else { "" };
         
         match &self.context {
-            Some(ctx) => write!(
-                f,
-                "[{status}] {} | {} | {}{mc_status}",
-                ctx.song_id, ctx.mode, ctx.diff
-            ),
-            None => write!(f, "[{status}] None | None | None{mc_status}"),
+            Some(ctx) => {
+                let mc_status = if ctx.is_max_combo { " (MAX COMBO)" } else { "" };
+                if ctx.rate > 0.0 {
+                    write!(
+                        f,
+                        "[{status}] {} | {} | {} | {:.2}%{mc_status}",
+                        ctx.song_id, ctx.mode, ctx.diff, ctx.rate
+                    )
+                } else {
+                    write!(
+                        f,
+                        "[{status}] {} | {} | {}{mc_status}",
+                        ctx.song_id, ctx.mode, ctx.diff
+                    )
+                }
+            },
+            None => write!(f, "[{status}] None | None | None"),
         }
     }
 }
@@ -67,10 +75,10 @@ mod tests {
                 song_id: 0,
                 mode: "4B".to_string(),
                 diff: "MX".to_string(),
+                rate: 0.0,
+                is_max_combo: false,
             }),
             is_stable: true,
-            is_max_combo: false,
-            rate: None,
         };
 
         assert!(state.is_valid());
@@ -83,10 +91,10 @@ mod tests {
                 song_id: 1,
                 mode: "4B".to_string(),
                 diff: "MX".to_string(),
+                rate: 99.1,
+                is_max_combo: false,
             }),
             is_stable: false,
-            is_max_combo: false,
-            rate: Some(99.1),
         };
 
         assert!(!state.is_valid());
@@ -97,10 +105,18 @@ mod tests {
         let mut state = GameSessionState::detecting();
         assert!(!state.should_store_rate());
 
-        state.rate = Some(0.0);
+        state.context = Some(PlayContext {
+            song_id: 1,
+            mode: "4B".to_string(),
+            diff: "MX".to_string(),
+            rate: 0.0,
+            is_max_combo: false,
+        });
         assert!(!state.should_store_rate());
 
-        state.rate = Some(1.0);
+        if let Some(ctx) = state.context.as_mut() {
+            ctx.rate = 1.0;
+        }
         assert!(state.should_store_rate());
     }
 }

@@ -119,7 +119,7 @@ impl DetectionWorker {
         }
         match capturer.capture_bgra(rect) {
             Ok(frame) => {
-                let mut out = pipeline.process_frame(&frame, self.start.elapsed().as_secs_f64());
+                let mut out = pipeline.detect(&frame, self.start.elapsed().as_secs_f64());
                 out.game_rect = Some(rect);
                 self.log_detection_summary(&out);
                 let _ = self.detection_tx.send(out);
@@ -230,10 +230,6 @@ fn jacket_status_label(status: &JacketMatchStatus) -> String {
         JacketMatchStatus::ThumbnailMissing => "thumbnail-missing".into(),
         JacketMatchStatus::Unchanged => "unchanged".into(),
         JacketMatchStatus::NoMatch => "no-match".into(),
-        JacketMatchStatus::Pending {
-            song_id,
-            similarity,
-        } => format!("pending:{song_id}@{similarity:.4}"),
         JacketMatchStatus::InvalidId {
             image_id,
             similarity,

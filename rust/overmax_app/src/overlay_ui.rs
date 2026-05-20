@@ -408,10 +408,10 @@ mod tests {
                 song_id: 1,
                 mode: "5B".into(),
                 diff: "SC".into(),
+                rate: 0.0,
+                is_max_combo: false,
             }),
             is_stable: true,
-            is_max_combo: false,
-            rate: None,
         };
         let patterns = vec![PatternTabInfo {
             diff: "SC".into(),

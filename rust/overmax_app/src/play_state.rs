@@ -14,14 +14,12 @@ const DIFFICULTIES: [&str; 4] = ["NM", "HD", "MX", "SC"];
 #[derive(Clone, Debug, PartialEq)]
 struct RawPlayState {
     context: Option<PlayContext>,
-    is_max_combo: bool,
 }
 
 pub struct PlayStateDetector {
     history_size: usize,
     history: VecDeque<Option<RawPlayState>>,
     last_stable_state: Option<GameSessionState>,
-    ocr_done_for: Option<(u32, String, String)>,
 }
 
 impl PlayStateDetector {
@@ -30,14 +28,12 @@ impl PlayStateDetector {
             history_size: history_size.max(1),
             history: VecDeque::new(),
             last_stable_state: None,
-            ocr_done_for: None,
         }
     }
 
     pub fn reset(&mut self) {
         self.history.clear();
         self.last_stable_state = None;
-        self.ocr_done_for = None;
     }
 
     pub fn detect(
@@ -53,10 +49,19 @@ impl PlayStateDetector {
 
         let context = if let (Some(sid), Some(m), Some(d)) = (song_id, mode, diff) {
             if confident {
+                let mut rate = 0.0;
+                if let Some(rate_roi) = rois.get_roi("rate") {
+                    if let Some(rate_img) = crop_roi(frame, rate_roi) {
+                        rate = ocr.detect_rate(&rate_img).0.unwrap_or(0.0);
+                    }
+                }
+
                 Some(PlayContext {
                     song_id: sid,
                     mode: m,
                     diff: d,
+                    rate,
+                    is_max_combo,
                 })
             } else {
                 None
@@ -66,24 +71,22 @@ impl PlayStateDetector {
         };
 
         let raw = RawPlayState {
-            context,
-            is_max_combo,
+            context: context.clone(),
         };
-        self.push_raw(raw.clone());
+        self.push_raw(raw);
 
         if let Some(stable) = self.stable_raw() {
-            let stable = stable.clone();
-            let rate = self.detect_rate_once(frame, rois, &stable, ocr);
-            let state = stable_state(&stable, rate);
+            let state = GameSessionState {
+                context: stable.context.clone(),
+                is_stable: true,
+            };
             self.last_stable_state = Some(state.clone());
             return state;
         }
 
         GameSessionState {
-            context: raw.context,
+            context,
             is_stable: false,
-            is_max_combo: raw.is_max_combo,
-            rate: None,
         }
     }
 
@@ -103,23 +106,6 @@ impl PlayStateDetector {
             .iter()
             .all(|item| item.as_ref() == Some(first))
             .then_some(first)
-    }
-
-    fn detect_rate_once(
-        &mut self,
-        frame: &CapturedFrame,
-        rois: &RoiManager,
-        raw: &RawPlayState,
-        ocr: &OcrDetector,
-    ) -> Option<f32> {
-        let key = state_key(raw)?;
-        if self.ocr_done_for.as_ref() == Some(&key) {
-            return self.last_stable_state.as_ref().and_then(|state| state.rate);
-        }
-        self.ocr_done_for = Some(key);
-        let rate_roi = rois.get_roi("rate")?;
-        let rate_img = crop_roi(frame, rate_roi)?;
-        ocr.detect_rate(&rate_img).0
     }
 }
 
@@ -169,20 +155,6 @@ pub fn detect_max_combo(frame: &CapturedFrame, rois: &RoiManager) -> bool {
     };
     let (b, g, r) = region_mean_bgr(frame, roi);
     (f32::from(b) + f32::from(g) + f32::from(r)) / 3.0 >= 160.0
-}
-
-fn stable_state(raw: &RawPlayState, rate: Option<f32>) -> GameSessionState {
-    GameSessionState {
-        context: raw.context.clone(),
-        is_stable: true,
-        is_max_combo: raw.is_max_combo,
-        rate,
-    }
-}
-
-fn state_key(raw: &RawPlayState) -> Option<(u32, String, String)> {
-    let ctx = raw.context.as_ref()?;
-    Some((ctx.song_id, ctx.mode.clone(), ctx.diff.clone()))
 }
 
 fn button_colors() -> [(&'static str, &'static [(u8, u8, u8)]); 4] {

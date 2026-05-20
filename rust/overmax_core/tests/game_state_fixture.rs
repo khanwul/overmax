@@ -1,4 +1,4 @@
-use overmax_core::{GameSessionState, PlayContext};
+use overmax_core::game_state::{GameSessionState, PlayContext};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -50,6 +50,8 @@ fn build_state(input: FixtureState) -> GameSessionState {
             song_id,
             mode,
             diff,
+            rate: input.rate.unwrap_or(0.0),
+            is_max_combo: input.is_max_combo,
         })
     } else {
         None
@@ -58,7 +60,5 @@ fn build_state(input: FixtureState) -> GameSessionState {
     GameSessionState {
         context,
         is_stable: input.is_stable,
-        is_max_combo: input.is_max_combo,
-        rate: input.rate,
     }
 }

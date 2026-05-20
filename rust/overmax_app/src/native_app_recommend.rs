@@ -24,8 +24,8 @@ impl NativeApp {
             }
 
             if output.state.is_valid() {
-                if let (Some(ctx), Some(rate)) = (&output.state.context, output.state.rate) {
-                    if rate > 0.0 {
+                if let Some(ctx) = &output.state.context {
+                    if ctx.rate > 0.0 {
                         let key = (
                             ctx.song_id,
                             ctx.mode.clone(),
@@ -37,15 +37,15 @@ impl NativeApp {
                                 self.max_log_lines(),
                                 format!(
                                     "[Main] 기록 저장: {}, {}, {}, {}%, MaxCombo: {}",
-                                    key.0, key.1, key.2, rate, output.state.is_max_combo
+                                    key.0, key.1, key.2, ctx.rate, ctx.is_max_combo
                                 ),
                             );
                             if self.record_db.upsert(
                                 key.0 as i32,
                                 &key.1,
                                 &key.2,
-                                rate as f64,
-                                output.state.is_max_combo,
+                                ctx.rate as f64,
+                                ctx.is_max_combo,
                             ) {
                                 self.recorded_states.insert(key);
                                 self.record_manager.refresh();
