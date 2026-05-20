@@ -1,7 +1,9 @@
 //! Deferred viewports + `eframe::App` (split from `native_app.rs` for file-size limits).
 
 use eframe::egui::{self, Color32, Frame, Vec2, ViewportBuilder, ViewportCommand};
+use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 
 use crate::debug_ui;
 use crate::native_app::NativeApp;
@@ -246,7 +248,20 @@ impl eframe::App for NativeApp {
             1.0
         };
 
-        let overlay_on = self.overlay_visible.load(Ordering::Relaxed);
+        let overlay_hotkey_on = self.overlay_visible.load(Ordering::Relaxed);
+        let opacity = if let Ok(m) = self.merged_settings.lock() {
+            m.get("overlay").and_then(|o| o.get("base_opacity")).and_then(|v| v.as_f64()).unwrap_or(0.8) as f32
+        } else {
+            0.8
+        };
+
+        // 자동 숨김 로직: 
+        // 1. 게임 창이 없으면 숨김
+        // 2. 단축키로 껐으면 숨김
+        // 3. 신뢰도가 일정 수준(0.1) 이하이면 숨김 (곡 인식 중이 아닐 때)
+        let game_found = self.game_rect.lock().map(|r| r.is_some()).unwrap_or(false);
+        let overlay_on = overlay_hotkey_on && game_found && self.confidence > 0.1;
+
         let hidden_size = Vec2::new(1.0, 1.0);
         let visible_size = Vec2::new(overlay_ui::BASE_WIDTH * scale, overlay_ui::BASE_HEIGHT * scale);
 
@@ -260,13 +275,29 @@ impl eframe::App for NativeApp {
             hidden_size
         }));
 
+        // Windows 전용: 전체 창 투명도 적용
+        #[cfg(target_os = "windows")]
+        {
+            let found = apply_window_opacity(opacity, &self.log_lines);
+            if !found {
+                // 핸들을 못 찾았으면 로그에 한 번만 찍음
+                static mut LOGGED: bool = false;
+                unsafe {
+                    if !LOGGED {
+                        debug_ui::push_log(&self.log_lines, 1000, format!("[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})", opacity));
+                        LOGGED = true;
+                    }
+                }
+            }
+        }
+
         self.show_debug_viewport(ctx);
         self.show_roi_viewport(ctx);
         self.show_settings_viewport(ctx);
         self.show_sync_viewport(ctx);
 
         egui::CentralPanel::default()
-            .frame(Frame::NONE.fill(Color32::TRANSPARENT))
+            .frame(egui::Frame::none().fill(Color32::from_rgba_unmultiplied(0, 0, 0, 0)))
             .show(ctx, |ui| {
                 if !overlay_on {
                     ui.set_min_size(hidden_size);
@@ -329,6 +360,12 @@ impl eframe::App for NativeApp {
                 }
             });
     }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        // [R, G, B, A] - 윈도우 버퍼를 불투명하게 유지한 상태에서 
+        // OS 레벨의 전역 투명도(Layered Window Alpha)를 적용함.
+        [0.0, 0.0, 0.0, 1.0]
+    }
 }
 
 #[cfg(test)]
@@ -361,4 +398,75 @@ mod tests {
             "DJMAX RESPECT V"
         );
     }
+}
+
+#[cfg(target_os = "windows")]
+fn apply_window_opacity(opacity: f32, log_lines: &Arc<Mutex<VecDeque<String>>>) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::Foundation::HWND;
+
+    struct EnumData {
+        target_pid: u32,
+        found_hwnd: Option<HWND>,
+        log: Arc<Mutex<VecDeque<String>>>,
+    }
+
+    let target_pid = unsafe { GetCurrentProcessId() };
+    let mut data = EnumData {
+        target_pid,
+        found_hwnd: None,
+        log: log_lines.clone(),
+    };
+
+    unsafe {
+        extern "system" fn enum_callback(hwnd: HWND, lparam: isize) -> i32 {
+            let data = unsafe { &mut *(lparam as *mut EnumData) };
+            let mut pid = 0u32;
+            unsafe {
+                GetWindowThreadProcessId(hwnd, &mut pid);
+                if pid == data.target_pid {
+                    let mut text = [0u16; 512];
+                    let len = GetWindowTextW(hwnd, text.as_mut_ptr(), 512);
+                    let title = String::from_utf16_lossy(&text[..len as usize]);
+                    let visible = IsWindowVisible(hwnd) != 0;
+                    
+                    // 제목이 "Overmax"라면 가시성과 상관없이 최우선 타겟
+                    if title == "Overmax" {
+                        data.found_hwnd = Some(hwnd);
+                        return 0; // 즉시 중단
+                    }
+                    
+                    // 제목에 Overmax가 포함되거나, 가시적인 창을 차선책으로 저장
+                    if data.found_hwnd.is_none() && (title.contains("Overmax") || visible) {
+                        data.found_hwnd = Some(hwnd);
+                    }
+                }
+            }
+            1
+        }
+
+        EnumWindows(Some(enum_callback), &mut data as *mut _ as isize);
+
+        if let Some(hwnd) = data.found_hwnd {
+            // 현재 투명도 값 추적 로그 (값 변화가 있을 때만)
+            static mut LAST_OPACITY: f32 = -1.0;
+            unsafe {
+                if (opacity - LAST_OPACITY).abs() > 0.01 {
+                    debug_ui::push_log(&data.log, 1000, format!("[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})", opacity, hwnd));
+                    LAST_OPACITY = opacity;
+                }
+            }
+
+            let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+            if (style & WS_EX_LAYERED as i32) == 0 {
+                SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED as i32);
+            }
+            
+            if SetLayeredWindowAttributes(hwnd, 0, (opacity * 255.0) as u8, 0x00000002) != 0 {
+                return true;
+            }
+        }
+    }
+    false
 }
