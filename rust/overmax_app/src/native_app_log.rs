@@ -11,8 +11,8 @@ impl NativeApp {
         let Some(rx) = self.log_rx.take() else {
             return;
         };
-        let lines = self.log_lines.clone();
-        let paused = self.debug_paused.clone();
+        let lines = self.debug_state.log_lines.clone();
+        let paused = self.debug_state.paused.clone();
         let ctx = ctx.clone();
         let max = self.max_log_lines();
         std::thread::spawn(move || {

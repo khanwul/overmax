@@ -33,7 +33,7 @@ impl NativeApp {
                         );
                         if !self.recorded_states.contains(&key) {
                             debug_ui::push_log(
-                                &self.log_lines,
+                                &self.debug_state.log_lines,
                                 self.max_log_lines(),
                                 format!(
                                     "[Main] 기록 저장: {}, {}, {}, {}%, MaxCombo: {}",
@@ -122,7 +122,7 @@ impl NativeApp {
 
     fn log_overlay_state(&self) {
         debug_ui::push_log(
-            &self.log_lines,
+            &self.debug_state.log_lines,
             self.max_log_lines(),
             format!(
                 "[UI] overlay state <- {} / recs={}",

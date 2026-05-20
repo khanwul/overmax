@@ -254,6 +254,8 @@ fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> Value {
     let raw_gold = pick(values, &["황배 여부", "황배여부"]);
     let gold = if raw_gold.is_empty() {
         String::new()
+    } else if raw_gold == "O" {
+        "정배".to_string()
     } else if raw_gold.contains("[H]") {
         "핲랜".to_string()
     } else if raw_gold.contains("[M]") {
@@ -277,27 +279,23 @@ fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> Value {
         }
     }
 
-    let mut meta = json!({
+    let raw_assist = pick(values, &["보조 키 여부", "보조키여부"]);
+    let assist_key = if raw_assist == "❌" || raw_assist == "○" || raw_assist == "O" {
+        "사용".to_string()
+    } else if raw_assist == "️️⚠️" || raw_assist == "⚠" {
+        "주의".to_string()
+    } else if raw_assist == "✅" {
+        "미사용".to_string()
+    } else {
+        raw_assist
+    };
+
+    json!({
         "gold": gold,
         "note": note,
         "keypart": keypart,
-    });
-
-    if mode == "5B" {
-        let raw_assist = pick(values, &["보조 키 여부", "보조키여부"]);
-        if !raw_assist.is_empty() {
-            let assist = match raw_assist.as_str() {
-                "❌" => "사용",
-                "️️⚠️" | "⚠" => "주의",
-                "✅" => "미사용",
-                other => other,
-            };
-            meta["assist_key"] = json!(assist);
-        } else {
-            meta["assist_key"] = json!("");
-        }
-    }
-    meta
+        "assist_key": assist_key,
+    })
 }
 
 fn pick(values: &HashMap<String, String>, keys: &[&str]) -> String {
@@ -373,7 +371,7 @@ mod tests {
         merge_sheet_meta(
             &mut items,
             "5B",
-            "곡명,난이도,황배 여부,비고,보조 키 여부\nLove ☆ Panic,SC,O,개인차,○\n",
+            "곡명,난이도,황배 여부,비고,보조 키 여부\nLove ☆ Panic,SC,O,개인차,❌\n",
         );
 
         assert_eq!(

@@ -48,13 +48,13 @@ impl NativeApp {
     }
 
     fn show_debug_viewport(&self, ctx: &egui::Context) {
-        if !self.debug_open.load(Ordering::Relaxed) {
+        if !self.ui_state.debug_open.load(Ordering::Relaxed) {
             return;
         }
-        let open = self.debug_open.clone();
-        let lines = self.log_lines.clone();
-        let paused = self.debug_paused.clone();
-        let filters = self.debug_filters.clone();
+        let open = self.ui_state.debug_open.clone();
+        let lines = self.debug_state.log_lines.clone();
+        let paused = self.debug_state.paused.clone();
+        let filters = self.debug_state.filters.clone();
         let title = self.debug_title();
         ctx.show_viewport_deferred(
             native_helpers::vp_debug(),
@@ -81,24 +81,25 @@ impl NativeApp {
     }
 
     fn show_settings_viewport(&self, ctx: &egui::Context) {
-        if !self.settings_open.load(Ordering::Relaxed) {
+        if !self.ui_state.settings_open.load(Ordering::Relaxed) {
             return;
         }
-        let open = self.settings_open.clone();
-        let draft = self.settings_draft.clone();
+        let open = self.ui_state.settings_open.clone();
+        let draft = self.settings.draft.clone();
         let root = self.root.clone();
-        let defaults = self.defaults.clone();
-        let base = self.base_settings.clone();
-        let merged = self.merged_settings.clone();
+        let defaults = self.settings.defaults.clone();
+        let base = self.settings.base.clone();
+        let merged = self.settings.merged.clone();
         let settings_ctx = settings_ui::SettingsUiContext {
             current_steam_id: self
-                .sync_steam_id
+                .sync_state
+                .steam_id
                 .lock()
                 .map(|g| g.clone())
                 .unwrap_or_default(),
-            sync_open: self.sync_open.clone(),
-            scan_pending: self.scan_pending.clone(),
-            sync_steam_id: self.sync_steam_id.clone(),
+            sync_open: self.ui_state.sync_open.clone(),
+            scan_pending: self.ui_state.scan_pending.clone(),
+            sync_steam_id: self.sync_state.steam_id.clone(),
             fetch_tx: self.fetch_req_tx.clone(),
         };
         ctx.show_viewport_deferred(
@@ -167,14 +168,14 @@ impl NativeApp {
     }
 
     fn show_sync_viewport(&self, ctx: &egui::Context) {
-        if !self.sync_open.load(Ordering::Relaxed) {
+        if !self.ui_state.sync_open.load(Ordering::Relaxed) {
             return;
         }
-        let open = self.sync_open.clone();
-        let scan_pending = self.scan_pending.clone();
-        let steam = self.sync_steam_id.clone();
-        let status = self.sync_status.clone();
-        let candidates = self.sync_candidates.clone();
+        let open = self.ui_state.sync_open.clone();
+        let scan_pending = self.ui_state.scan_pending.clone();
+        let steam = self.sync_state.steam_id.clone();
+        let status = self.sync_state.status.clone();
+        let candidates = self.sync_state.candidates.clone();
         let upload_tx = self.upload_req_tx.clone();
         let delete_tx = self.delete_req_tx.clone();
         ctx.show_viewport_deferred(
@@ -233,9 +234,9 @@ impl eframe::App for NativeApp {
             return;
         }
 
-        let settings_on = self.settings_open.load(Ordering::Relaxed);
+        let settings_on = self.ui_state.settings_open.load(Ordering::Relaxed);
         if settings_on && !self.prev_settings_open {
-            if let (Ok(m), Ok(mut d)) = (self.merged_settings.lock(), self.settings_draft.lock()) {
+            if let (Ok(m), Ok(mut d)) = (self.settings.merged.lock(), self.settings.draft.lock()) {
                 *d = m.clone();
             }
         }
@@ -257,14 +258,14 @@ impl eframe::App for NativeApp {
         self.drain_game_found_refresh_steam();
         ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
 
-        let scale = if let Ok(m) = self.merged_settings.lock() {
+        let scale = if let Ok(m) = self.settings.merged.lock() {
 
             m.get("overlay").and_then(|o| o.get("scale")).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32
         } else {
             1.0
         };
 
-        let opacity = if let Ok(m) = self.merged_settings.lock() {
+        let opacity = if let Ok(m) = self.settings.merged.lock() {
             m.get("overlay").and_then(|o| o.get("base_opacity")).and_then(|v| v.as_f64()).unwrap_or(0.8) as f32
         } else {
             0.8
@@ -275,7 +276,7 @@ impl eframe::App for NativeApp {
 
         if overlay_on != self.prev_overlay_on || (overlay_on && (scale - self.prev_scale).abs() > 0.001) {
             debug_ui::push_log(
-                &self.log_lines,
+                &self.debug_state.log_lines,
                 1000,
                 format!(
                     "[Overlay] 레이아웃 업데이트: ON={}->{}, Scale={:.2}->{:.2} (Game: {}, Conf: {:.2})",
@@ -312,13 +313,13 @@ impl eframe::App for NativeApp {
         // Windows 전용: 전체 창 투명도 적용
         #[cfg(target_os = "windows")]
         {
-            let found = apply_window_opacity(opacity, &self.log_lines);
+            let found = apply_window_opacity(opacity, &self.debug_state.log_lines);
             if !found {
                 // 핸들을 못 찾았으면 로그에 한 번만 찍음
                 static mut LOGGED: bool = false;
                 unsafe {
                     if !LOGGED {
-                        debug_ui::push_log(&self.log_lines, 1000, format!("[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})", opacity));
+                        debug_ui::push_log(&self.debug_state.log_lines, 1000, format!("[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})", opacity));
                         LOGGED = true;
                     }
                 }
@@ -343,9 +344,9 @@ impl eframe::App for NativeApp {
                         song_label: &self.current_song_label(),
                         pattern_tabs: &self.pattern_tabs,
                         recommendations: &self.recommendations,
-                        settings_open: self.settings_open.clone(),
-                        debug_open: self.debug_open.clone(),
-                        sync_open: self.sync_open.clone(),
+                        settings_open: self.ui_state.settings_open.clone(),
+                        debug_open: self.ui_state.debug_open.clone(),
+                        sync_open: self.ui_state.sync_open.clone(),
                         scale,
                     },
                 );
@@ -355,11 +356,11 @@ impl eframe::App for NativeApp {
                 }
                 if actions.restore_game_focus {
                     let max_log_lines = self.max_log_lines();
-                    if let Ok(mut settings) = self.merged_settings.lock() {
+                    if let Ok(mut settings) = self.settings.merged.lock() {
                         window_tracker::restore_foreground_by_title(game_window_title(&settings));
                         
                         if let Some(rect) = ctx.input(|i| i.viewport().outer_rect) {
-                            if let Ok(mut draft) = self.settings_draft.lock() {
+                            if let Ok(mut draft) = self.settings.draft.lock() {
                                 let mut overlay = settings.get("overlay").cloned().unwrap_or_else(|| serde_json::json!({}));
                                 if let Some(overlay_obj) = overlay.as_object_mut() {
                                     overlay_obj.insert("position".to_string(), serde_json::json!({
@@ -370,16 +371,16 @@ impl eframe::App for NativeApp {
                                 settings["overlay"] = overlay.clone();
                                 draft["overlay"] = overlay;
 
-                                let base_g = self.base_settings.lock().map(|g| g.clone()).unwrap_or_default();
+                                let base_g = self.settings.base.lock().map(|g| g.clone()).unwrap_or_default();
                                 let _ = settings_ui::save_settings_to_disk(
                                     self.root.as_ref(),
-                                    self.defaults.as_ref(),
+                                    self.settings.defaults.as_ref(),
                                     &base_g,
                                     &mut draft,
                                     &mut settings,
                                 );
                                 debug_ui::push_log(
-                                    &self.log_lines,
+                                    &self.debug_state.log_lines,
                                     max_log_lines,
                                     format!("[Overlay] 오버레이 위치 저장 (user.json): ({},{})", rect.min.x as i32, rect.min.y as i32),
                                 );

@@ -105,27 +105,43 @@ fn native_options(merged: &Value) -> eframe::NativeOptions {
     }
 }
 
+pub struct SharedSettings {
+    pub defaults: Arc<Value>,
+    pub base: Arc<Mutex<Value>>,
+    pub merged: Arc<Mutex<Value>>,
+    pub draft: Arc<Mutex<Value>>,
+}
+
+pub struct SharedUiState {
+    pub debug_open: Arc<AtomicBool>,
+    pub settings_open: Arc<AtomicBool>,
+    pub sync_open: Arc<AtomicBool>,
+    pub scan_pending: Arc<AtomicBool>,
+}
+
+pub struct SharedDebugState {
+    pub log_lines: Arc<Mutex<VecDeque<String>>>,
+    pub paused: Arc<AtomicBool>,
+    pub filters: Arc<Mutex<std::collections::HashMap<String, bool>>>,
+}
+
+pub struct SharedSyncState {
+    pub steam_id: Arc<Mutex<String>>,
+    pub status: Arc<Mutex<String>>,
+    pub candidates: Arc<Mutex<Vec<SyncCandidate>>>,
+}
+
 pub struct NativeApp {
     pub(crate) root: Arc<std::path::PathBuf>,
-    pub(crate) defaults: Arc<Value>,
-    pub(crate) base_settings: Arc<Mutex<Value>>,
-    pub(crate) merged_settings: Arc<Mutex<Value>>,
-    pub(crate) settings_draft: Arc<Mutex<Value>>,
-    pub(crate) debug_open: Arc<AtomicBool>,
-    pub(crate) settings_open: Arc<AtomicBool>,
-    pub(crate) sync_open: Arc<AtomicBool>,
-    pub(crate) scan_pending: Arc<AtomicBool>,
-    pub(crate) log_lines: Arc<Mutex<VecDeque<String>>>,
+    pub(crate) settings: SharedSettings,
+    pub(crate) ui_state: SharedUiState,
+    pub(crate) debug_state: SharedDebugState,
+    pub(crate) sync_state: SharedSyncState,
     pub(crate) log_rx: Option<Receiver<String>>,
-    pub(crate) debug_paused: Arc<AtomicBool>,
     pub(crate) game_rect: Arc<Mutex<Option<crate::window_tracker::WindowRect>>>,
-    pub(crate) debug_filters: Arc<Mutex<std::collections::HashMap<String, bool>>>,
     pub(crate) session: GameSessionState,
     pub(crate) confidence: f32,
     pub(crate) recorded_states: std::collections::HashSet<(u32, String, String)>,
-    pub(crate) sync_steam_id: Arc<Mutex<String>>,
-    pub(crate) sync_status: Arc<Mutex<String>>,
-    pub(crate) sync_candidates: Arc<Mutex<Vec<SyncCandidate>>>,
     pub(crate) sync_rx: Receiver<Result<Vec<SyncCandidate>, String>>,
     pub(crate) sync_tx: Sender<Result<Vec<SyncCandidate>, String>>,
     pub(crate) upload_req_rx: Receiver<usize>,
@@ -265,27 +281,43 @@ impl NativeApp {
         filters.insert("[WindowTracker]".to_string(), true);
         filters.insert("[Main]".to_string(), true);
 
-        let mut app = Self {
-            root,
-            defaults,
-            base_settings,
-            merged_settings,
-            settings_draft,
+        let settings = SharedSettings {
+            defaults: defaults.clone(),
+            base: base_settings.clone(),
+            merged: merged_settings.clone(),
+            draft: settings_draft.clone(),
+        };
+
+        let ui_state = SharedUiState {
             debug_open: debug_open.clone(),
             settings_open: settings_open.clone(),
             sync_open: sync_open.clone(),
             scan_pending: Arc::new(AtomicBool::new(false)),
+        };
+
+        let debug_state = SharedDebugState {
             log_lines: Arc::new(Mutex::new(VecDeque::new())),
+            paused: Arc::new(AtomicBool::new(false)),
+            filters: Arc::new(Mutex::new(filters)),
+        };
+
+        let sync_state = SharedSyncState {
+            steam_id: Arc::new(Mutex::new(steam0)),
+            status: Arc::new(Mutex::new(String::new())),
+            candidates: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        let mut app = Self {
+            root,
+            settings,
+            ui_state,
+            debug_state,
+            sync_state,
             log_rx: Some(log_rx),
-            debug_paused: Arc::new(AtomicBool::new(false)),
             game_rect: Arc::new(Mutex::new(None)),
-            debug_filters: Arc::new(Mutex::new(filters)),
             session: GameSessionState::detecting(),
             confidence: 0.0,
             recorded_states: std::collections::HashSet::new(),
-            sync_steam_id: Arc::new(Mutex::new(steam0)),
-            sync_status: Arc::new(Mutex::new(String::new())),
-            sync_candidates: Arc::new(Mutex::new(Vec::new())),
             sync_rx,
             sync_tx,
             upload_req_rx,
@@ -321,15 +353,13 @@ impl NativeApp {
 
     pub(crate) fn poll_delete_requests(&mut self) {
         while let Ok(idx) = self.delete_req_rx.try_recv() {
-            let cand = self
-                .sync_candidates
-                .lock()
+            let cand = self.sync_state.candidates.lock()
                 .ok()
                 .and_then(|g| g.get(idx).cloned());
             if let Some(c) = cand {
                 if self.record_manager.delete(c.song_id, &c.button_mode, &c.difficulty) {
                     debug_ui::push_log(
-                        &self.log_lines,
+                        &self.debug_state.log_lines,
                         self.max_log_lines(),
                         format!("[Sync] 로컬 기록 삭제 완료: {} ({} {})", c.song_name, c.button_mode, c.difficulty),
                     );
@@ -337,7 +367,7 @@ impl NativeApp {
                     self.refresh_overlay_data();
                 } else {
                     debug_ui::push_log(
-                        &self.log_lines,
+                        &self.debug_state.log_lines,
                         self.max_log_lines(),
                         format!("[Sync] 로컬 기록 삭제 실패: {} ({} {})", c.song_name, c.button_mode, c.difficulty),
                     );
@@ -347,7 +377,7 @@ impl NativeApp {
     }
 
     pub(crate) fn max_log_lines(&self) -> usize {
-        let Ok(m) = self.merged_settings.lock() else {
+        let Ok(m) = self.settings.merged.lock() else {
             return 500;
         };
         m.get("debug_window")
@@ -357,7 +387,7 @@ impl NativeApp {
     }
 
     pub(crate) fn debug_title(&self) -> String {
-        let Ok(m) = self.merged_settings.lock() else {
+        let Ok(m) = self.settings.merged.lock() else {
             return "Overmax Debug Log".into();
         };
         m.get("debug_window")
@@ -368,8 +398,8 @@ impl NativeApp {
     }
 
     pub(crate) fn poll_scan_requests(&mut self) {
-        if self.scan_pending.swap(false, Ordering::Relaxed) {
-            if let Ok(mut s) = self.sync_status.lock() {
+        if self.ui_state.scan_pending.swap(false, Ordering::Relaxed) {
+            if let Ok(mut s) = self.sync_state.status.lock() {
                 *s = "스캔 중…".into();
             }
             self.spawn_scan();
@@ -378,9 +408,7 @@ impl NativeApp {
 
     pub(crate) fn poll_upload_requests(&mut self) {
         while let Ok(idx) = self.upload_req_rx.try_recv() {
-            let cand = self
-                .sync_candidates
-                .lock()
+            let cand = self.sync_state.candidates.lock()
                 .ok()
                 .and_then(|g| g.get(idx).cloned());
             if let Some(c) = cand {
@@ -394,15 +422,15 @@ impl NativeApp {
             match res {
                 Ok(list) => {
                     let n = list.len();
-                    if let Ok(mut g) = self.sync_candidates.lock() {
+                    if let Ok(mut g) = self.sync_state.candidates.lock() {
                         *g = list;
                     }
-                    if let Ok(mut s) = self.sync_status.lock() {
+                    if let Ok(mut s) = self.sync_state.status.lock() {
                         *s = format!("후보 {n}건");
                     }
                 }
                 Err(msg) => {
-                    if let Ok(mut s) = self.sync_status.lock() {
+                    if let Ok(mut s) = self.sync_state.status.lock() {
                         *s = msg;
                     }
                 }
@@ -414,7 +442,7 @@ impl NativeApp {
         let mut refreshed = false;
         while let Ok((idx, status, msg)) = self.upload_res_rx.try_recv() {
             let success = status == "success";
-            if let Ok(mut list) = self.sync_candidates.lock() {
+            if let Ok(mut list) = self.sync_state.candidates.lock() {
                 if let Some(c) = list.get_mut(idx) {
                     c.upload_status = status;
                     c.upload_message = msg;
@@ -436,14 +464,14 @@ impl NativeApp {
             let (changed, before, after) = self.record_manager.set_steam_id(sid.as_deref());
             if changed {
                 debug_ui::push_log(
-                    &self.log_lines,
+                    &self.debug_state.log_lines,
                     self.max_log_lines(),
                     format!("[Main] Steam 세션 갱신 (게임 창 발견): {before} -> {after}"),
                 );
                 self.refresh_overlay_data();
             } else if sid.is_some() {
                 debug_ui::push_log(
-                    &self.log_lines,
+                    &self.debug_state.log_lines,
                     self.max_log_lines(),
                     format!("[Main] Steam 세션 유지 (게임 창 발견): {after}"),
                 );
@@ -452,9 +480,7 @@ impl NativeApp {
     }
 
     fn spawn_scan(&self) {
-        let steam = self
-            .sync_steam_id
-            .lock()
+        let steam = self.sync_state.steam_id.lock()
             .map(|g| g.clone())
             .unwrap_or_default();
         let tx = self.sync_tx.clone();
@@ -475,13 +501,11 @@ impl NativeApp {
     }
 
     fn spawn_upload(&self, index: usize, candidate: SyncCandidate) {
-        let merged = match self.merged_settings.lock() {
+        let merged = match self.settings.merged.lock() {
             Ok(g) => g.clone(),
             Err(_) => return,
         };
-        let steam = self
-            .sync_steam_id
-            .lock()
+        let steam = self.sync_state.steam_id.lock()
             .map(|g| g.clone())
             .unwrap_or_default();
         let account_path = account_path_for_steam(&merged, &steam);
@@ -539,7 +563,7 @@ impl NativeApp {
     }
 
     pub(crate) fn handle_auto_refresh(&mut self) {
-        let merged = match self.merged_settings.lock() {
+        let merged = match self.settings.merged.lock() {
             Ok(g) => g.clone(),
             Err(_) => return,
         };
@@ -563,7 +587,7 @@ impl NativeApp {
 
         if !v_id.is_empty() {
             debug_ui::push_log(
-                &self.log_lines,
+                &self.debug_state.log_lines,
                 self.max_log_lines(),
                 format!("[VArchive] 자동 갱신 시작 (SteamID: {}, V-ID: {})", sid, v_id),
             );
@@ -586,7 +610,7 @@ impl NativeApp {
                 }
                 Err(e) => {
                     debug_ui::push_log(
-                        &self.log_lines,
+                        &self.debug_state.log_lines,
                         self.max_log_lines(),
                         format!("[VArchiveClient] {} ({}B) API 요청 실패: {}", v_id, btn, e),
                     );
@@ -602,7 +626,7 @@ impl NativeApp {
     fn spawn_fetch(&self, steam_id: String, v_id: String, button: i32) {
         let tx = self.fetch_res_tx.clone();
         let cache_root = self.root.join("cache").join("varchive");
-        let log_lines = self.log_lines.clone();
+        let log_lines = self.debug_state.log_lines.clone();
         let max_lines = self.max_log_lines();
         
         std::thread::spawn(move || {

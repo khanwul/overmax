@@ -24,27 +24,27 @@ impl NativeApp {
     }
 
     fn open_settings(&self) {
-        self.settings_open.store(true, Ordering::Relaxed);
+        self.ui_state.settings_open.store(true, Ordering::Relaxed);
         debug_ui::push_log(
-            &self.log_lines,
+            &self.debug_state.log_lines,
             self.max_log_lines(),
             "[UI] open settings".into(),
         );
     }
 
     fn open_debug(&self) {
-        self.debug_open.store(true, Ordering::Relaxed);
+        self.ui_state.debug_open.store(true, Ordering::Relaxed);
         debug_ui::push_log(
-            &self.log_lines,
+            &self.debug_state.log_lines,
             self.max_log_lines(),
             "[UI] open debug".into(),
         );
     }
 
     fn open_sync(&self) {
-        self.sync_open.store(true, Ordering::Relaxed);
+        self.ui_state.sync_open.store(true, Ordering::Relaxed);
         debug_ui::push_log(
-            &self.log_lines,
+            &self.debug_state.log_lines,
             self.max_log_lines(),
             "[UI] open sync".into(),
         );
