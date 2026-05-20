@@ -1,4 +1,4 @@
-use eframe::egui::Color32;
+use eframe::egui::{self, Color32};
 
 pub struct Theme;
 
@@ -26,4 +26,23 @@ impl Theme {
     // Status Colors
     pub const OK: Color32 = Color32::from_rgb(0, 212, 255);
     pub const WARN: Color32 = Color32::from_rgb(255, 75, 75);
+
+    pub const CARD: Color32 = Color32::from_rgb(22, 30, 48); // SECTION_BG
+    pub const STROKE: Color32 = Color32::from_rgb(28, 36, 54); // TAB_INACTIVE_BG
+    
+    // Font Sizes (unscaled)
+    pub const FONT_HEADING: f32 = 24.0;
+    pub const FONT_BODY: f32 = 15.0;
+    pub const FONT_SMALL: f32 = 13.0;
+    pub const FONT_TINY: f32 = 11.0;
+}
+
+pub fn apply_secondary_window_style(ctx: &egui::Context) {
+    ctx.style_mut(|s| {
+        s.visuals.widgets.inactive.bg_fill = Theme::TAB_INACTIVE_BG;
+        s.visuals.widgets.hovered.bg_fill = Theme::TAB_ACTIVE_BG;
+        s.visuals.selection.bg_fill = Theme::TAB_ACTIVE_BG;
+        s.visuals.window_corner_radius = 12.0.into();
+        s.visuals.window_shadow = egui::Shadow::NONE;
+    });
 }
