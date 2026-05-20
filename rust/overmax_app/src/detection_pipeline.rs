@@ -74,14 +74,6 @@ impl DetectionPipeline {
         self.ocr.is_available()
     }
 
-    pub fn set_image_db(&mut self, db: ImageIndexDb) {
-        self.image_db = db;
-    }
-
-    pub fn update_window_size(&mut self, width: u32, height: u32) {
-        self.rois.update_window_size(width as i32, height as i32);
-    }
-
     pub fn detect(&mut self, frame: &CapturedFrame, now: f64) -> DetectionOutput {
         let logo_detected = self.detect_logo_if_due(frame, now);
         self.process_frame_with_logo(frame, logo_detected, now)

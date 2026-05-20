@@ -134,17 +134,21 @@ fn get_platform_font_dirs() -> Vec<std::path::PathBuf> {
     dirs
 }
 
+pub struct OverlayProps<'a> {
+    pub state: &'a GameSessionState,
+    pub confidence: f32,
+    pub song_label: &'a str,
+    pub pattern_tabs: &'a [PatternTabInfo],
+    pub recommendations: &'a RecommendResult,
+    pub settings_open: Arc<AtomicBool>,
+    pub debug_open: Arc<AtomicBool>,
+    pub sync_open: Arc<AtomicBool>,
+    pub scale: f32,
+}
+
 pub fn draw_overlay_panel(
     ui: &mut egui::Ui,
-    state: &GameSessionState,
-    confidence: f32,
-    song_label: &str,
-    pattern_tabs: &[PatternTabInfo],
-    recommendations: &RecommendResult,
-    settings_open: Arc<AtomicBool>,
-    debug_open: Arc<AtomicBool>,
-    sync_open: Arc<AtomicBool>,
-    scale: f32,
+    props: &OverlayProps,
 ) -> OverlayActions {
     // 레이아웃 경고(노란 선) 강제 비활성화
     ui.ctx().style_mut(|s| {
@@ -153,33 +157,33 @@ pub fn draw_overlay_panel(
     });
     ui.ctx().set_debug_on_hover(false);
 
-    let px = Px::new(scale);
+    let px = Px::new(props.scale);
     let mut actions = OverlayActions::default();
     Frame::new()
         .fill(Theme::PANEL_BG)
-        .corner_radius(CornerRadius::same((14.0 * scale) as u8))
+        .corner_radius(CornerRadius::same((14.0 * props.scale) as u8))
         .inner_margin(Margin::same(px.panel_margin() as i8))
         .stroke(egui::Stroke::new(1.0, Theme::PANEL_STROKE))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             draw_header(
                 ui,
-                state,
-                song_label,
-                pattern_tabs,
-                &settings_open,
+                props.state,
+                props.song_label,
+                props.pattern_tabs,
+                &props.settings_open,
                 &mut actions,
                 &px,
             );
             ui.add_space(px.panel_gap());
-            draw_body(ui, state, pattern_tabs, recommendations, &px);
+            draw_body(ui, props.state, props.pattern_tabs, props.recommendations, &px);
             ui.add_space(px.panel_gap());
             draw_footer(
                 ui,
-                confidence,
-                recommendations,
-                &debug_open,
-                &sync_open,
+                props.confidence,
+                props.recommendations,
+                &props.debug_open,
+                &props.sync_open,
                 &mut actions,
                 &px,
             );

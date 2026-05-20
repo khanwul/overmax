@@ -8,16 +8,29 @@ use overmax_data::SyncCandidate;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-pub fn render_sync(
+pub struct SyncProps<'a, F1, F2, F3>
+where
+    F1: Fn(),
+    F2: Fn(usize) + Copy,
+    F3: Fn(usize) + Copy,
+{
+    pub steam_id: &'a mut String,
+    pub status: &'a str,
+    pub candidates: &'a [SyncCandidate],
+    pub on_scan: F1,
+    pub on_upload: F2,
+    pub on_delete: F3,
+}
+
+pub fn render_sync<F1, F2, F3>(
     ctx: &egui::Context,
     class: ViewportClass,
-    steam_id: &mut String,
-    status: &str,
-    candidates: &[SyncCandidate],
-    on_scan: impl Fn(),
-    on_upload: impl Fn(usize) + Copy,
-    on_delete: impl Fn(usize) + Copy,
-) {
+    props: SyncProps<F1, F2, F3>,
+) where
+    F1: Fn(),
+    F2: Fn(usize) + Copy,
+    F3: Fn(usize) + Copy,
+{
     let mut body = |ui: &mut egui::Ui| {
         apply_secondary_window_style(ui.ctx());
         
@@ -66,12 +79,12 @@ pub fn render_sync(
                             .corner_radius(egui::CornerRadius::same(Theme::R_SM));
 
                         if ui.add(scan_btn).clicked() {
-                            on_scan();
+                            (props.on_scan)();
                         }
                         
                         ui.add_space(8.0);
                         
-                        ui.add(egui::TextEdit::singleline(steam_id)
+                        ui.add(egui::TextEdit::singleline(props.steam_id)
                             .font(egui::FontId::proportional(Theme::FONT_BODY))
                             .vertical_align(egui::Align::Center)
                             .margin(egui::Margin::symmetric(8, 0))
@@ -79,9 +92,9 @@ pub fn render_sync(
                             .min_size(egui::vec2(0.0, Theme::CONTROL_HEIGHT)));
                     });
                 });
-                if !status.is_empty() {
+                if !props.status.is_empty() {
                     ui.add_space(12.0);
-                    ui.label(RichText::new(status).size(Theme::FONT_SMALL).color(Theme::TEXT_MUTED));
+                    ui.label(RichText::new(props.status).size(Theme::FONT_SMALL).color(Theme::TEXT_MUTED));
                 }
             });
 
@@ -95,7 +108,7 @@ pub fn render_sync(
             );
             ui.add_space(8.0);
             ui.label(
-                RichText::new(format!("{}", candidates.len()))
+                RichText::new(format!("{}", props.candidates.len()))
                     .color(Theme::TEXT_ACCENT)
                     .size(Theme::FONT_BODY)
                     .strong(),
@@ -107,8 +120,8 @@ pub fn render_sync(
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.style_mut().spacing.item_spacing.y = 12.0;
-                for (i, c) in candidates.iter().enumerate() {
-                    candidate_row(ui, i, c, on_upload, on_delete);
+                for (i, c) in props.candidates.iter().enumerate() {
+                    candidate_row(ui, i, c, props.on_upload, props.on_delete);
                 }
             });
     };

@@ -48,9 +48,7 @@ impl Theme {
 
     // Action Colors
     pub const PRIMARY: Color32 = Color32::from_rgb(255, 209, 102); // TEXT_ACCENT
-    pub const PRIMARY_HOVER: Color32 = Color32::from_rgb(255, 220, 140);
     pub const SECONDARY: Color32 = Color32::from_rgb(63, 80, 117); // TAB_ACTIVE_BG
-    pub const SECONDARY_HOVER: Color32 = Color32::from_rgb(80, 100, 140);
     pub const DANGER: Color32 = Color32::from_rgb(255, 75, 75); // WARN
 
     // Layout & Sizing

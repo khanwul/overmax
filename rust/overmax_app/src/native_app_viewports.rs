@@ -195,17 +195,19 @@ impl NativeApp {
                 sync_ui::render_sync(
                     ctx,
                     class,
-                    &mut *steam_g,
-                    &status_s,
-                    &list,
-                    || {
-                        scan_pending.store(true, Ordering::Relaxed);
-                    },
-                    |i| {
-                        let _ = upload_tx.send(i);
-                    },
-                    |i| {
-                        let _ = delete_tx.send(i);
+                    sync_ui::SyncProps {
+                        steam_id: &mut *steam_g,
+                        status: &status_s,
+                        candidates: &list,
+                        on_scan: || {
+                            scan_pending.store(true, Ordering::Relaxed);
+                        },
+                        on_upload: |i| {
+                            let _ = upload_tx.send(i);
+                        },
+                        on_delete: |i| {
+                            let _ = delete_tx.send(i);
+                        },
                     },
                 );
                 sync_ui::close_if_requested(ctx, &open);
@@ -335,15 +337,17 @@ impl eframe::App for NativeApp {
                 }
                 let actions = overlay_ui::draw_overlay_panel(
                     ui,
-                    &self.session,
-                    self.confidence,
-                    &self.current_song_label(),
-                    &self.pattern_tabs,
-                    &self.recommendations,
-                    self.settings_open.clone(),
-                    self.debug_open.clone(),
-                    self.sync_open.clone(),
-                    scale,
+                    &overlay_ui::OverlayProps {
+                        state: &self.session,
+                        confidence: self.confidence,
+                        song_label: &self.current_song_label(),
+                        pattern_tabs: &self.pattern_tabs,
+                        recommendations: &self.recommendations,
+                        settings_open: self.settings_open.clone(),
+                        debug_open: self.debug_open.clone(),
+                        sync_open: self.sync_open.clone(),
+                        scale,
+                    },
                 );
 
                 if actions.start_drag {
