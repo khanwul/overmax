@@ -1,11 +1,13 @@
 //! Debug log ring buffer and deferred viewport content.
 
 use eframe::egui::{
-    self, Color32, CornerRadius, FontId, Frame, Margin, RichText, ScrollArea, Stroke, ViewportClass,
+    self, Color32, CornerRadius, Frame, Margin, RichText, ScrollArea, Stroke, ViewportClass,
 };
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+use crate::overlay_theme::{apply_secondary_window_style, Theme};
 
 pub fn push_log(lines: &Arc<Mutex<VecDeque<String>>>, max_lines: usize, line: String) {
     let Ok(mut g) = lines.lock() else {
@@ -25,6 +27,8 @@ pub fn render_debug(
     paused: &Arc<AtomicBool>,
     filters: &Arc<Mutex<std::collections::HashMap<String, bool>>>,
 ) {
+    apply_secondary_window_style(ctx);
+
     if class == ViewportClass::Embedded {
         egui::Window::new(title).show(ctx, |ui| {
             render_controls(ui, lines, paused, filters);
@@ -33,13 +37,13 @@ pub fn render_debug(
         });
     } else {
         egui::CentralPanel::default()
-            .frame(Frame::new().fill(Theme::BG).inner_margin(Margin::same(18)))
+            .frame(Frame::new().fill(Theme::PANEL_BG).inner_margin(Margin::same(18)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading(RichText::new(title).color(Theme::TEXT).strong());
+                    ui.label(RichText::new(title).color(Theme::TEXT_PRIMARY).size(Theme::FONT_HEADING).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let total_lines = if let Ok(g) = lines.lock() { g.len() } else { 0 };
-                        ui.label(RichText::new(format!("총 {total_lines}줄")).color(Theme::MUTED).font(FontId::proportional(11.0)));
+                        ui.label(RichText::new(format!("총 {total_lines}줄")).color(Theme::TEXT_MUTED).size(Theme::FONT_TINY));
                     });
                 });
                 ui.add_space(8.0);
@@ -62,7 +66,7 @@ fn render_controls(
         // Pause Button
         let is_paused = paused.load(Ordering::Relaxed);
         let pause_text = if is_paused { "▶ 재개" } else { "⏸ 일시정지" };
-        let pause_btn = egui::Button::new(pause_text)
+        let pause_btn = egui::Button::new(RichText::new(pause_text).size(Theme::FONT_SMALL))
             .fill(if is_paused { Color32::from_rgb(90, 58, 26) } else { Theme::CARD })
             .stroke(Stroke::new(1.0, Theme::STROKE));
         if ui.add(pause_btn).clicked() {
@@ -70,7 +74,7 @@ fn render_controls(
         }
 
         // Clear Button
-        let clear_btn = egui::Button::new("🗑 지우기")
+        let clear_btn = egui::Button::new(RichText::new("🗑 지우기").size(Theme::FONT_SMALL))
             .fill(Theme::CARD)
             .stroke(Stroke::new(1.0, Theme::STROKE));
         if ui.add(clear_btn).clicked() {
@@ -84,7 +88,7 @@ fn render_controls(
 
     // Filters Row
     ui.horizontal(|ui| {
-        ui.label(RichText::new("필터:").color(Theme::MUTED).font(FontId::proportional(11.0)));
+        ui.label(RichText::new("필터:").color(Theme::TEXT_MUTED).size(Theme::FONT_SMALL));
         if let Ok(mut filters_lock) = filters.lock() {
             let tags = [
                 "[ScreenCapture]",
@@ -98,7 +102,7 @@ fn render_controls(
                 if let Some(val) = filters_lock.get_mut(*tag) {
                     let color = get_line_color(tag);
                     let mut checked = *val;
-                    let cb = egui::Checkbox::new(&mut checked, RichText::new(tag_name).color(color).font(FontId::proportional(11.0)));
+                    let cb = egui::Checkbox::new(&mut checked, RichText::new(tag_name).color(color).size(Theme::FONT_SMALL));
                     if ui.add(cb).changed() {
                         *val = checked;
                     }
@@ -154,7 +158,7 @@ fn log_scroll(
                     for idx in range {
                         let line = &filtered_lines[idx];
                         let color = get_line_color(line);
-                        ui.monospace(RichText::new(line).color(color));
+                        ui.label(RichText::new(line).color(color).monospace().size(Theme::FONT_TINY));
                     }
                 });
         });
@@ -181,14 +185,4 @@ fn get_line_color(line: &str) -> Color32 {
     } else {
         Color32::from_rgb(204, 204, 204) // 기본 회색
     }
-}
-
-struct Theme;
-
-impl Theme {
-    const BG: Color32 = Color32::from_rgb(26, 26, 46);
-    const CARD: Color32 = Color32::from_rgb(13, 13, 26);
-    const STROKE: Color32 = Color32::from_rgb(51, 51, 51);
-    const TEXT: Color32 = Color32::from_rgb(204, 204, 204);
-    const MUTED: Color32 = Color32::from_rgb(102, 102, 102);
 }
