@@ -19,7 +19,6 @@ impl NativeApp {
             UiCommand::OpenSettings => self.open_settings(),
             UiCommand::OpenDebug => self.open_debug(),
             UiCommand::OpenSync => self.open_sync(),
-            UiCommand::ToggleOverlay => self.toggle_overlay(),
             UiCommand::Exit => self.exit_requested.store(true, Ordering::Relaxed),
         }
     }
@@ -48,16 +47,6 @@ impl NativeApp {
             &self.log_lines,
             self.max_log_lines(),
             "[UI] open sync".into(),
-        );
-    }
-
-    fn toggle_overlay(&self) {
-        let current = self.overlay_visible.load(Ordering::Relaxed);
-        self.overlay_visible.store(!current, Ordering::Relaxed);
-        debug_ui::push_log(
-            &self.log_lines,
-            self.max_log_lines(),
-            "[UI] toggle overlay".into(),
         );
     }
 }

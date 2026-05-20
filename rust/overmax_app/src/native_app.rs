@@ -18,9 +18,8 @@ use crate::cache_update;
 use crate::debug_ui;
 use crate::detection_pipeline::DetectionOutput;
 use crate::detection_worker;
-use crate::global_hotkey::GlobalHotkey;
 use crate::native_helpers::{
-    account_path_for_steam, button_num, first_steam_from_settings, toggle_hotkey_from_settings,
+    account_path_for_steam, button_num, first_steam_from_settings,
 };
 use crate::overlay_ui;
 use crate::single_instance::SingleInstanceGuard;
@@ -132,7 +131,6 @@ pub struct NativeApp {
     pub(crate) log_lines: Arc<Mutex<VecDeque<String>>>,
     pub(crate) log_rx: Option<Receiver<String>>,
     pub(crate) debug_paused: Arc<AtomicBool>,
-    pub(crate) debug_roi: Arc<AtomicBool>,
     pub(crate) game_rect: Arc<Mutex<Option<crate::window_tracker::WindowRect>>>,
     pub(crate) debug_filters: Arc<Mutex<std::collections::HashMap<String, bool>>>,
     pub(crate) session: GameSessionState,
@@ -163,9 +161,7 @@ pub struct NativeApp {
     pub(crate) record_db: Arc<RecordDB>,
     pub(crate) record_manager: Arc<RecordManager>,
     pub(crate) game_found_rx: Receiver<()>,
-    pub(crate) overlay_visible: Arc<AtomicBool>,
     pub(crate) exit_requested: Arc<AtomicBool>,
-    pub(crate) _hotkey: Option<GlobalHotkey>,
     #[cfg(target_os = "windows")]
     pub(crate) _tray: Option<TrayIcon>,
 }
@@ -231,18 +227,10 @@ impl NativeApp {
             sid
         };
 
-        let overlay_visible = Arc::new(AtomicBool::new(true));
         let exit_requested = Arc::new(AtomicBool::new(false));
         let settings_open = Arc::new(AtomicBool::new(false));
         let sync_open = Arc::new(AtomicBool::new(false));
         let debug_open = Arc::new(AtomicBool::new(false));
-        let hk_key = {
-            let mg = merged_settings
-                .lock()
-                .map_err(|_| "settings lock poisoned")?;
-            toggle_hotkey_from_settings(&mg)
-        };
-        let _hotkey = GlobalHotkey::spawn_toggle(&hk_key, overlay_visible.clone());
 
         let (sync_tx, sync_rx) = mpsc::channel();
         let (upload_req_tx, upload_req_rx) = mpsc::channel();
@@ -301,7 +289,6 @@ impl NativeApp {
             log_lines: Arc::new(Mutex::new(VecDeque::new())),
             log_rx: Some(log_rx),
             debug_paused: Arc::new(AtomicBool::new(false)),
-            debug_roi: Arc::new(AtomicBool::new(false)),
             game_rect: Arc::new(Mutex::new(None)),
             debug_filters: Arc::new(Mutex::new(filters)),
             session: GameSessionState::detecting(),
@@ -332,9 +319,7 @@ impl NativeApp {
             record_db,
             record_manager,
             game_found_rx,
-            overlay_visible: overlay_visible.clone(),
             exit_requested: exit_requested.clone(),
-            _hotkey,
             #[cfg(target_os = "windows")]
             _tray: Some(TrayIcon::spawn(ui_cmd_tx)),
         };

@@ -3,6 +3,5 @@ pub enum UiCommand {
     OpenSettings,
     OpenDebug,
     OpenSync,
-    ToggleOverlay,
     Exit,
 }

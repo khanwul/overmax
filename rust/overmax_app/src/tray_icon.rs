@@ -18,13 +18,12 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetMessageW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassW,
     SetForegroundWindow, TrackPopupMenu, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
     HMENU, IDI_APPLICATION, MF_SEPARATOR, MF_STRING, MSG, TPM_NONOTIFY, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP,
+    TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP,
     WNDCLASSW,
 };
 
 const TRAY_ID: u32 = 1;
 const TRAY_CALLBACK: u32 = WM_APP + 1;
-const CMD_TOGGLE: usize = 1001;
 const CMD_SETTINGS: usize = 1002;
 const CMD_SYNC: usize = 1003;
 const CMD_DEBUG: usize = 1004;
@@ -169,7 +168,6 @@ unsafe fn delete_notify_icon(hwnd: HWND) {
 
 unsafe fn handle_tray_event(hwnd: HWND, event: u32) {
     match event {
-        WM_LBUTTONUP => handle_menu_command(CMD_TOGGLE),
         WM_RBUTTONUP => show_context_menu(hwnd),
         _ => {}
     }
@@ -180,7 +178,6 @@ unsafe fn show_context_menu(hwnd: HWND) {
     if menu.is_null() {
         return;
     }
-    append_item(menu, CMD_TOGGLE, "오버레이 표시/숨김");
     append_item(menu, CMD_SETTINGS, "설정");
     append_item(menu, CMD_SYNC, "V-Archive 동기화");
     append_item(menu, CMD_DEBUG, "디버그 로그");
@@ -215,7 +212,6 @@ fn handle_menu_command(cmd: usize) {
         return;
     };
     match cmd {
-        CMD_TOGGLE => send_command(actions, UiCommand::ToggleOverlay),
         CMD_SETTINGS => send_command(actions, UiCommand::OpenSettings),
         CMD_SYNC => send_command(actions, UiCommand::OpenSync),
         CMD_DEBUG => send_command(actions, UiCommand::OpenDebug),

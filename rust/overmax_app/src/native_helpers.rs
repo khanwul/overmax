@@ -46,12 +46,3 @@ pub fn button_num(mode: &str) -> i32 {
         _ => 4,
     }
 }
-
-pub fn toggle_hotkey_from_settings(merged: &Value) -> String {
-    merged
-        .get("overlay")
-        .and_then(|o| o.get("toggle_hotkey"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("F3")
-        .to_string()
-}

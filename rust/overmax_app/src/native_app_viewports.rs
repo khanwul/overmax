@@ -1,6 +1,6 @@
 //! Deferred viewports + `eframe::App` (split from `native_app.rs` for file-size limits).
 
-use eframe::egui::{self, Color32, Frame, Vec2, ViewportBuilder, ViewportCommand};
+use eframe::egui::{self, Color32, Vec2, ViewportBuilder, ViewportCommand};
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -52,7 +52,6 @@ impl NativeApp {
         let open = self.debug_open.clone();
         let lines = self.log_lines.clone();
         let paused = self.debug_paused.clone();
-        let roi = self.debug_roi.clone();
         let filters = self.debug_filters.clone();
         let title = self.debug_title();
         ctx.show_viewport_deferred(
@@ -65,42 +64,9 @@ impl NativeApp {
                     &title,
                     &lines,
                     &paused,
-                    &roi,
                     &filters,
                 );
                 debug_ui::close_if_requested(ctx, &open);
-            },
-        );
-    }
-
-    fn show_roi_viewport(&self, ctx: &egui::Context) {
-        if !self.debug_roi.load(Ordering::Relaxed) {
-            return;
-        }
-        let game_rect = {
-            if let Ok(g) = self.game_rect.lock() {
-                *g
-            } else {
-                None
-            }
-        };
-        let Some(rect) = game_rect else {
-            return;
-        };
-
-        ctx.show_viewport_deferred(
-            egui::ViewportId::from_hash_of("overmax_roi_vp"),
-            egui::ViewportBuilder::default()
-                .with_title("Overmax ROI Overlay")
-                .with_decorations(false)
-                .with_transparent(true)
-                .with_mouse_passthrough(true)
-                .with_inner_size([rect.width as f32, rect.height as f32])
-                .with_position(eframe::egui::pos2(rect.left as f32, rect.top as f32))
-                .with_always_on_top(),
-            move |ctx, class| {
-                ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(true));
-                crate::roi_overlay_ui::render_roi_overlay(ctx, class, rect);
             },
         );
     }
@@ -248,32 +214,51 @@ impl eframe::App for NativeApp {
             1.0
         };
 
-        let overlay_hotkey_on = self.overlay_visible.load(Ordering::Relaxed);
         let opacity = if let Ok(m) = self.merged_settings.lock() {
             m.get("overlay").and_then(|o| o.get("base_opacity")).and_then(|v| v.as_f64()).unwrap_or(0.8) as f32
         } else {
             0.8
         };
 
-        // 자동 숨김 로직: 
-        // 1. 게임 창이 없으면 숨김
-        // 2. 단축키로 껐으면 숨김
-        // 3. 신뢰도가 일정 수준(0.1) 이하이면 숨김 (곡 인식 중이 아닐 때)
         let game_found = self.game_rect.lock().map(|r| r.is_some()).unwrap_or(false);
-        let overlay_on = overlay_hotkey_on && game_found && self.confidence > 0.1;
+        let overlay_on = game_found && self.confidence > 0.1;
 
-        let hidden_size = Vec2::new(1.0, 1.0);
+        // 오버레이 상태 변화 감지 및 로그
+        static mut LAST_STATE: i8 = -1; // -1: 초기, 0: OFF, 1: ON
+        unsafe {
+            let current_state = if overlay_on { 1 } else { 0 };
+            if LAST_STATE != current_state {
+                debug_ui::push_log(
+                    &self.log_lines,
+                    1000,
+                    format!(
+                        "[Overlay] 상태 변경: {} -> {} (Game: {}, Conf: {:.2})",
+                        if LAST_STATE == 1 { "ON" } else if LAST_STATE == 0 { "OFF" } else { "INIT" },
+                        if current_state == 1 { "ON" } else { "OFF" },
+                        game_found,
+                        self.confidence
+                    ),
+                );
+                LAST_STATE = current_state;
+                
+                // 상태가 바뀔 때만 크기 조절 명령 전송
+                if overlay_on {
+                    ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(
+                        overlay_ui::BASE_WIDTH * scale,
+                        overlay_ui::BASE_HEIGHT * scale,
+                    )));
+                } else {
+                    ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(1.0, 1.0)));
+                }
+            }
+        }
+
         let visible_size = Vec2::new(overlay_ui::BASE_WIDTH * scale, overlay_ui::BASE_HEIGHT * scale);
+        let hidden_size = Vec2::new(1.0, 1.0);
 
         // 마우스가 오버레이 영역 위에 있을 때만 상호작용 가능하게 함 (보조창 조작을 위해)
         let is_over = is_mouse_over_overlay(ctx, scale);
         ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(!overlay_on || !is_over));
-
-        ctx.send_viewport_cmd(ViewportCommand::InnerSize(if overlay_on {
-            visible_size
-        } else {
-            hidden_size
-        }));
 
         // Windows 전용: 전체 창 투명도 적용
         #[cfg(target_os = "windows")]
@@ -292,7 +277,6 @@ impl eframe::App for NativeApp {
         }
 
         self.show_debug_viewport(ctx);
-        self.show_roi_viewport(ctx);
         self.show_settings_viewport(ctx);
         self.show_sync_viewport(ctx);
 

@@ -23,12 +23,11 @@ pub fn render_debug(
     title: &str,
     lines: &Arc<Mutex<VecDeque<String>>>,
     paused: &Arc<AtomicBool>,
-    roi: &Arc<AtomicBool>,
     filters: &Arc<Mutex<std::collections::HashMap<String, bool>>>,
 ) {
     if class == ViewportClass::Embedded {
         egui::Window::new(title).show(ctx, |ui| {
-            render_controls(ui, lines, paused, roi, filters);
+            render_controls(ui, lines, paused, filters);
             ui.add_space(8.0);
             log_scroll(ui, lines, filters);
         });
@@ -45,7 +44,7 @@ pub fn render_debug(
                 });
                 ui.add_space(8.0);
 
-                render_controls(ui, lines, paused, roi, filters);
+                render_controls(ui, lines, paused, filters);
                 ui.add_space(12.0);
 
                 log_scroll(ui, lines, filters);
@@ -57,7 +56,6 @@ fn render_controls(
     ui: &mut egui::Ui,
     lines: &Arc<Mutex<VecDeque<String>>>,
     paused: &Arc<AtomicBool>,
-    roi: &Arc<AtomicBool>,
     filters: &Arc<Mutex<std::collections::HashMap<String, bool>>>,
 ) {
     ui.horizontal(|ui| {
@@ -79,16 +77,6 @@ fn render_controls(
             if let Ok(mut g) = lines.lock() {
                 g.clear();
             }
-        }
-
-        // ROI Overlay Button
-        let is_roi = roi.load(Ordering::Relaxed);
-        let roi_text = if is_roi { "ROI 표시 ON" } else { "ROI 표시 OFF" };
-        let roi_btn = egui::Button::new(roi_text)
-            .fill(if is_roi { Color32::from_rgb(31, 90, 58) } else { Theme::CARD })
-            .stroke(Stroke::new(1.0, Theme::STROKE));
-        if ui.add(roi_btn).clicked() {
-            roi.store(!is_roi, Ordering::Relaxed);
         }
     });
 
