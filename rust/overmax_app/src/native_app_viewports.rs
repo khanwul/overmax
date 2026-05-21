@@ -60,6 +60,7 @@ impl NativeApp {
             native_helpers::vp_debug(),
             Self::auxiliary_viewport(&title, [720.0, 460.0]),
             move |ctx, class| {
+                #[cfg(debug_assertions)]
                 ctx.style_mut(|s| {
                     s.debug.show_expand_width = false;
                     s.debug.show_expand_height = false;
@@ -107,6 +108,7 @@ impl NativeApp {
             Self::auxiliary_viewport("Overmax 설정", [520.0, 560.0]),
             move |ctx, class| {
                 ctx.set_pixels_per_point(1.0);
+                #[cfg(debug_assertions)]
                 ctx.style_mut(|s| {
                     s.debug.show_expand_width = false;
                     s.debug.show_expand_height = false;
@@ -183,6 +185,7 @@ impl NativeApp {
             Self::auxiliary_viewport("V-Archive 동기화", [520.0, 560.0]),
             move |ctx, class| {
                 ctx.set_pixels_per_point(1.0);
+                #[cfg(debug_assertions)]
                 ctx.style_mut(|s| {
                     s.debug.show_expand_width = false;
                     s.debug.show_expand_height = false;
@@ -220,14 +223,17 @@ impl NativeApp {
 impl eframe::App for NativeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 모든 레이아웃 디버그 시각화(노란 선 및 텍스트) 강제 비활성화
-        ctx.style_mut(|s| {
-            s.debug.show_expand_width = false;
-            s.debug.show_expand_height = false;
-            s.debug.show_resize = false;
-            s.debug.show_unaligned = false;
-            s.debug.debug_on_hover = false;
-        });
-        ctx.set_debug_on_hover(false);
+        #[cfg(debug_assertions)]
+        {
+            ctx.style_mut(|s| {
+                s.debug.show_expand_width = false;
+                s.debug.show_expand_height = false;
+                s.debug.show_resize = false;
+                s.debug.show_unaligned = false;
+                s.debug.debug_on_hover = false;
+            });
+            ctx.set_debug_on_hover(false);
+        }
 
         if self.exit_requested.load(Ordering::Relaxed) {
             ctx.send_viewport_cmd(ViewportCommand::Close);

@@ -151,11 +151,14 @@ pub fn draw_overlay_panel(
     props: &OverlayProps,
 ) -> OverlayActions {
     // 레이아웃 경고(노란 선) 강제 비활성화
-    ui.ctx().style_mut(|s| {
-        s.debug.show_expand_width = false;
-        s.debug.show_expand_height = false;
-    });
-    ui.ctx().set_debug_on_hover(false);
+    #[cfg(debug_assertions)]
+    {
+        ui.ctx().style_mut(|s| {
+            s.debug.show_expand_width = false;
+            s.debug.show_expand_height = false;
+        });
+        ui.ctx().set_debug_on_hover(false);
+    }
 
     let px = Px::new(props.scale);
     let mut actions = OverlayActions::default();
