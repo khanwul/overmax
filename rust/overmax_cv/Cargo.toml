@@ -6,8 +6,3 @@ edition = "2021"
 [lib]
 name = "overmax_cv"
 crate-type = ["rlib"]
-
-[profile.release]
-lto = "thin"
-codegen-units = 1
-strip = true
