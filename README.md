@@ -63,8 +63,7 @@ cargo build --release -p overmax-app
 
 ### 빌드 스크립트
 
-- `build.bat`: 전체 빌드 및 패키징 자동화
-- `scripts/package-rust.ps1`: 배포용 zip 파일 생성 스크립트
+- `scripts/package-rust.ps1`: 전체 빌드 및 배포용 zip 파일 생성 자동화 스크립트 (기존 Python의 `build.bat` 레이아웃과 호환되는 패키지 생성)
 
 ---
 
