@@ -4,7 +4,7 @@ use crate::ocr_engine::OcrDetector;
 use crate::play_state::PlayStateDetector;
 use crate::roi::RoiManager;
 use crate::screen_capture::CapturedFrame;
-use overmax_core::GameSessionState;
+use overmax_core::{GameSessionState, SceneType};
 use overmax_data::ImageIndexDb;
 
 const JACKET_MATCH_INTERVAL: f64 = 0.0;
@@ -86,6 +86,11 @@ impl DetectionPipeline {
         now: f64,
     ) -> DetectionOutput {
         self.rois.update_window_size(frame.width, frame.height);
+        
+        // 씬 결정 로직 (간단한 예시: 로고 감지 여부나 다른 정보로 씬 추론)
+        let scene = if logo_detected { SceneType::Freestyle } else { SceneType::Online };
+        self.rois.set_scene(scene);
+
         let (is_song_select, is_leaving, confidence) = self.hysteresis.update(logo_detected);
 
         if !is_song_select {

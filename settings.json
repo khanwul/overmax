@@ -4,7 +4,6 @@
     "poll_interval_sec": 0.5
   },
   "screen_capture": {
-    "logo_ocr_keyword": "FREESTYLE",
     "logo_ocr_cooldown_sec": 1.0,
     "idle_sleep_sec": 0.5
   },

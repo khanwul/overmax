@@ -1,4 +1,12 @@
 use std::fmt;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SceneType {
+    Unknown,
+    Freestyle,
+    Online,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayContext {

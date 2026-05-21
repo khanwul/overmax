@@ -1,3 +1,6 @@
+use overmax_core::SceneType;
+use overmax_data::{GlobalRoiConfig, RoiRect as DataRoiRect};
+
 const REF_WIDTH: i32 = 1920;
 const REF_HEIGHT: i32 = 1080;
 const REF_ASPECT: f32 = REF_WIDTH as f32 / REF_HEIGHT as f32;
@@ -10,13 +13,15 @@ pub struct RoiRect {
     pub y2: i32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct RoiManager {
     width: i32,
     height: i32,
     scale: f32,
     offset_x: i32,
     offset_y: i32,
+    current_scene: SceneType,
+    config: GlobalRoiConfig,
 }
 
 impl RoiManager {
@@ -27,9 +32,15 @@ impl RoiManager {
             scale: 1.0,
             offset_x: 0,
             offset_y: 0,
+            current_scene: SceneType::Unknown,
+            config: GlobalRoiConfig::default(),
         };
         manager.calculate_transform();
         manager
+    }
+
+    pub fn set_scene(&mut self, scene: SceneType) {
+        self.current_scene = scene;
     }
 
     pub fn update_window_size(&mut self, width: i32, height: i32) {
@@ -42,43 +53,14 @@ impl RoiManager {
     }
 
     pub fn get_roi(&self, name: &str) -> Option<RoiRect> {
+        // 임시: 씬 설정 로딩 전까지는 하드코딩 유지하거나 Default 사용
         let roi = match name {
-            "logo" => RoiRect {
-                x1: 167,
-                y1: 23,
-                x2: 303,
-                y2: 49,
-            },
-            "jacket" => RoiRect {
-                x1: 710,
-                y1: 534,
-                x2: 768,
-                y2: 592,
-            },
-            "rate" => RoiRect {
-                x1: 176,
-                y1: 583,
-                x2: 270,
-                y2: 605,
-            },
-            "btn_mode" => RoiRect {
-                x1: 80,
-                y1: 130,
-                x2: 85,
-                y2: 135,
-            },
-            "max_combo_badge" => RoiRect {
-                x1: 409,
-                y1: 587,
-                x2: 445,
-                y2: 620,
-            },
-            "diff_panel" => RoiRect {
-                x1: 98,
-                y1: 488,
-                x2: 208,
-                y2: 516,
-            },
+            "logo" => RoiRect { x1: 167, y1: 23, x2: 303, y2: 49 },
+            "jacket" => RoiRect { x1: 710, y1: 534, x2: 768, y2: 592 },
+            "rate" => RoiRect { x1: 176, y1: 583, x2: 270, y2: 605 },
+            "btn_mode" => RoiRect { x1: 80, y1: 130, x2: 85, y2: 135 },
+            "max_combo_badge" => RoiRect { x1: 409, y1: 587, x2: 445, y2: 620 },
+            "diff_panel" => RoiRect { x1: 98, y1: 488, x2: 208, y2: 516 },
             _ => return None,
         };
         Some(self.transform_roi(roi))
