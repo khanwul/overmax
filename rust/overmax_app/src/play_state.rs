@@ -180,12 +180,14 @@ mod tests {
     use super::{detect_button_mode, PlayStateDetector};
     use crate::roi::RoiManager;
     use crate::screen_capture::CapturedFrame;
+    use overmax_core::SceneType;
 
     #[test]
     fn detects_button_mode_from_reference_color() {
         let mut frame = blank_frame();
         paint_rect(&mut frame, 80, 130, 85, 135, (0x55, 0x4F, 0x2D));
-        let rois = RoiManager::new(1920, 1080);
+        let mut rois = RoiManager::new(1920, 1080);
+        rois.set_scene(SceneType::Freestyle);
         assert_eq!(detect_button_mode(&frame, &rois), Some("4B".to_string()));
     }
 
@@ -195,7 +197,8 @@ mod tests {
         let mut frame = blank_frame();
         paint_rect(&mut frame, 80, 130, 85, 135, (0x55, 0x4F, 0x2D));
         paint_rect(&mut frame, 98, 488, 208, 516, (220, 220, 220));
-        let rois = RoiManager::new(1920, 1080);
+        let mut rois = RoiManager::new(1920, 1080);
+        rois.set_scene(SceneType::Freestyle);
 
         let ocr = crate::ocr_engine::OcrDetector::new();
         assert!(!detector.detect(&frame, &rois, Some(7), &ocr).is_stable);

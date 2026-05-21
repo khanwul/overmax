@@ -65,7 +65,7 @@ impl RoiManager {
 
     pub fn get_roi(&self, name: &str) -> Option<RoiRect> {
         if name == "logo" {
-            return Some(self.transform_roi(RoiRect { x1: 167, y1: 23, x2: 303, y2: 49 }));
+            return Some(self.transform_roi(RoiRect { x1: 120, y1: 23, x2: 320, y2: 53 }));
         }
         let roi = self.config.scenes.get(&self.current_scene)?.rois.get(name)?;
         Some(self.transform_roi(RoiRect::from(roi.clone())))
@@ -79,11 +79,12 @@ impl RoiManager {
             "SC" => 360,
             _ => return None,
         };
+        let roi = self.config.scenes.get(&self.current_scene)?.rois.get("diff_panel")?;
         Some(self.transform_roi(RoiRect {
-            x1: 98 + offset,
-            y1: 488,
-            x2: 208 + offset,
-            y2: 516,
+            x1: roi.x + offset,
+            y1: roi.y,
+            x2: roi.x + roi.width + offset,
+            y2: roi.y + roi.height,
         }))
     }
 

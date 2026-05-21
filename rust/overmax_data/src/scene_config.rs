@@ -23,10 +23,25 @@ pub struct GlobalRoiConfig {
 impl Default for GlobalRoiConfig {
     fn default() -> Self {
         let mut scenes = HashMap::new();
-        // TODO: 기존 ROI 데이터를 여기에 마이그레이션하거나, 
-        // 외부 JSON 설정 파일에서 로드하도록 확장 가능합니다.
-        scenes.insert(SceneType::Freestyle, SceneRoiConfig { rois: HashMap::new() });
-        scenes.insert(SceneType::Online, SceneRoiConfig { rois: HashMap::new() });
+        
+        // Freestyle ROI
+        let mut freestyle_rois = HashMap::new();
+        freestyle_rois.insert("jacket".to_string(), RoiRect { x: 710, y: 534, width: 58, height: 58 });
+        freestyle_rois.insert("rate".to_string(), RoiRect { x: 176, y: 583, width: 94, height: 22 });
+        freestyle_rois.insert("btn_mode".to_string(), RoiRect { x: 80, y: 130, width: 5, height: 5 });
+        freestyle_rois.insert("max_combo_badge".to_string(), RoiRect { x: 409, y: 587, width: 36, height: 33 });
+        freestyle_rois.insert("diff_panel".to_string(), RoiRect { x: 98, y: 488, width: 110, height: 28 });
+        scenes.insert(SceneType::Freestyle, SceneRoiConfig { rois: freestyle_rois });
+
+        // Online ROI
+        let mut online_rois = HashMap::new();
+        online_rois.insert("jacket".to_string(), RoiRect { x: 664, y: 534, width: 60, height: 58 });
+        online_rois.insert("rate".to_string(), RoiRect { x: 176, y: 553, width: 109, height: 26 });
+        online_rois.insert("btn_mode".to_string(), RoiRect { x: 60, y: 130, width: 5, height: 5 });
+        online_rois.insert("max_combo_badge".to_string(), RoiRect { x: 318, y: 548, width: 36, height: 32 });
+        online_rois.insert("diff_panel".to_string(), RoiRect { x: 82, y: 467, width: 116, height: 31 });
+        scenes.insert(SceneType::Online, SceneRoiConfig { rois: online_rois });
+        
         Self { scenes }
     }
 }
