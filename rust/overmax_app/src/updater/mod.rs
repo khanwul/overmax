@@ -157,7 +157,13 @@ pub fn check_and_apply_update_blocking(
     if !cfg.enabled {
         return Ok(true);
     }
-    let release = fetch_latest_release(cfg).map_err(|e| e.to_string())?;
+    let release = match fetch_latest_release(cfg) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[AppUpdater] 업데이트 확인 실패: {}", e);
+            return Ok(true);
+        }
+    };
     let Some(tag) = release.tag else {
         return Ok(true);
     };
