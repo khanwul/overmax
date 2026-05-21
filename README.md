@@ -1,6 +1,11 @@
-# Overmax (Rust)
+# Overmax
 
-DJMAX RESPECT V 선곡 화면에서 V-Archive 기반 비공식 난이도 정보를 실시간으로 보여주는 **네이티브 Rust** 오버레이 도구입니다.
+DJMAX RESPECT V 선곡 화면에서 V-Archive 기반 비공식 난이도 정보를 실시간으로 보여주는 오버레이 도구입니다.
+
+> **🚀 v0.2.0 업데이트**: Overmax가 기존 Python에서 **Rust 네이티브 앱**으로 완전히 새롭게 재작성되었습니다!
+> - **가볍고 빠른 성능**: 메모리 사용량과 실행 파일 크기(약 3.5MB)가 획기적으로 줄었으며, 전반적인 런타임 성능이 대폭 향상되었습니다.
+> - **외부 의존성 최소화**: 무거운 OpenCV 라이브러리를 제거하고, 순수 Rust 기반 HOG 이미지 처리와 Windows 내장 OCR을 활용합니다.
+> - **완벽한 하위 호환성**: 기존 사용자의 설정(`settings.json`) 및 로컬 기록(`record.db`)과 호환되며, 기존의 포터블(Portable) 환경을 그대로 유지합니다.
 
 ---
 
@@ -61,9 +66,9 @@ cargo build --release -p overmax-app
 - `rust/overmax_data`: 설정, DB(SQLite), V-Archive API 연동
 - `rust/overmax_cv`: 이미지 처리 핵심 알고리즘 (HOG, OCR 전처리 등)
 
-### 빌드 스크립트
+### 빌드 및 배포 스크립트
 
-- `scripts/package-rust.ps1`: 전체 빌드 및 배포용 zip 파일 생성 자동화 스크립트 (기존 Python의 `build.bat` 레이아웃과 호환되는 패키지 생성)
+- `scripts/package-rust.ps1`: 전체 빌드 및 배포용 `overmax.zip`, `release_manifest.json` 생성 자동화 스크립트 (기존 배포 레이아웃과 동일한 규격 유지)
 
 ---
 
