@@ -56,8 +56,6 @@ pub fn install_cjk_fonts(ctx: &egui::Context) {
         ("msyh", "msyh.ttc"),
         ("meiryo", "meiryo.ttc"),
         ("gulim", "gulim.ttc"),
-        ("seguiemj", "seguiemj.ttf"), // Segoe UI Emoji
-        ("seguisym", "seguisym.ttf"), // Segoe UI Symbol
     ];
 
     let font_dirs = get_platform_font_dirs();
