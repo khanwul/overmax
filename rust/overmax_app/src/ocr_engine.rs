@@ -1,9 +1,11 @@
 use crate::frame_utils::ImageRegion;
+use overmax_core::SceneType;
 use windows::Graphics::Imaging::BitmapDecoder;
 use windows::Media::Ocr::OcrEngine;
 use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 
-const LOGO_KEYWORD: &str = "FREESTYLE";
+const KEYWORD_FREESTYLE: &str = "FREESTYLE";
+const KEYWORD_ONLINE: &str = "ONLINE";
 
 pub struct OcrDetector {
     engine: WindowsOcrEngine,
@@ -20,15 +22,17 @@ impl OcrDetector {
         self.engine.is_available()
     }
 
-    pub fn detect_logo(&self, logo: &ImageRegion) -> (bool, String, String) {
+    pub fn detect_logo(&self, logo: &ImageRegion) -> (SceneType, String, String) {
         let text = self.engine.recognize(logo, false).unwrap_or_default();
         let normalized = normalize_alnum(&text);
-        let keyword = normalize_alnum(LOGO_KEYWORD);
-        (
-            is_logo_keyword_match(&keyword, &normalized),
-            text,
-            normalized,
-        )
+
+        if is_logo_keyword_match(&normalize_alnum(KEYWORD_FREESTYLE), &normalized) {
+            (SceneType::Freestyle, text, normalized)
+        } else if is_logo_keyword_match(&normalize_alnum(KEYWORD_ONLINE), &normalized) {
+            (SceneType::Online, text, normalized)
+        } else {
+            (SceneType::Unknown, text, normalized)
+        }
     }
 
     pub fn detect_rate(&self, rate: &ImageRegion) -> (Option<f32>, String) {
@@ -195,6 +199,8 @@ mod tests {
         assert!(is_logo_keyword_match("FREESTYLE", "DJMAXFREESTYLE"));
         assert!(is_logo_keyword_match("FREESTYLE", "FREEST"));
         assert!(is_logo_keyword_match("FREESTYLE", "FREESTY1E"));
+        assert!(is_logo_keyword_match("ONLINE", "DJMAXONLINE"));
+        assert!(is_logo_keyword_match("ONLINE", "ONL1NE"));
         assert!(!is_logo_keyword_match("FREESTYLE", "MISSION"));
     }
 }

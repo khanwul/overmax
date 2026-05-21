@@ -47,7 +47,7 @@ pub struct DetectionPipeline {
     ocr: OcrDetector,
     current_song_id: Option<u32>,
     last_logo_ocr_ts: f64,
-    last_logo_ocr_ok: bool,
+    last_logo_scene: SceneType,
     last_jacket_ts: f64,
     last_jacket_match_ts: f64,
     last_jacket_thumb: Option<Vec<u8>>,
@@ -63,7 +63,7 @@ impl DetectionPipeline {
             ocr: OcrDetector::new(),
             current_song_id: None,
             last_logo_ocr_ts: 0.0,
-            last_logo_ocr_ok: false,
+            last_logo_scene: SceneType::Unknown,
             last_jacket_ts: 0.0,
             last_jacket_match_ts: 0.0,
             last_jacket_thumb: None,
@@ -75,21 +75,22 @@ impl DetectionPipeline {
     }
 
     pub fn detect(&mut self, frame: &CapturedFrame, now: f64) -> DetectionOutput {
-        let logo_detected = self.detect_logo_if_due(frame, now);
-        self.process_frame_with_logo(frame, logo_detected, now)
+        let scene = self.detect_logo_if_due(frame, now);
+        self.process_frame_with_logo(frame, scene, now)
     }
 
     pub fn process_frame_with_logo(
         &mut self,
         frame: &CapturedFrame,
-        logo_detected: bool,
+        scene: SceneType,
         now: f64,
     ) -> DetectionOutput {
         self.rois.update_window_size(frame.width, frame.height);
         
-        // 씬 결정 로직 (간단한 예시: 로고 감지 여부나 다른 정보로 씬 추론)
-        let scene = if logo_detected { SceneType::Freestyle } else { SceneType::Online };
-        self.rois.set_scene(scene);
+        let logo_detected = scene != SceneType::Unknown;
+        if logo_detected {
+            self.rois.set_scene(scene);
+        }
 
         let (is_song_select, is_leaving, confidence) = self.hysteresis.update(logo_detected);
 
@@ -124,21 +125,21 @@ impl DetectionPipeline {
         self.output(logo_detected, true, false, confidence, state, jacket_status)
     }
 
-    fn detect_logo_if_due(&mut self, frame: &CapturedFrame, now: f64) -> bool {
+    fn detect_logo_if_due(&mut self, frame: &CapturedFrame, now: f64) -> SceneType {
         if now - self.last_logo_ocr_ts < LOGO_OCR_COOLDOWN_SEC {
-            return self.last_logo_ocr_ok;
+            return self.last_logo_scene;
         }
         let Some(logo) = self
             .rois
             .get_roi("logo")
             .and_then(|roi| crop_roi(frame, roi))
         else {
-            self.last_logo_ocr_ok = false;
-            return false;
+            self.last_logo_scene = SceneType::Unknown;
+            return SceneType::Unknown;
         };
-        self.last_logo_ocr_ok = self.ocr.detect_logo(&logo).0;
+        self.last_logo_scene = self.ocr.detect_logo(&logo).0;
         self.last_logo_ocr_ts = now;
-        self.last_logo_ocr_ok
+        self.last_logo_scene
     }
 
     fn update_song_id_from_jacket(&mut self, frame: &CapturedFrame, now: f64) -> JacketMatchStatus {
@@ -246,10 +247,11 @@ mod tests {
     fn stays_detecting_until_hysteresis_activates() {
         let mut pipeline = DetectionPipeline::new(ImageIndexDb::new("missing.db", 0.6));
         let frame = blank_frame();
+        use overmax_core::SceneType;
 
-        let first = pipeline.process_frame_with_logo(&frame, true, 1.0);
-        let second = pipeline.process_frame_with_logo(&frame, true, 2.0);
-        let third = pipeline.process_frame_with_logo(&frame, true, 3.0);
+        let first = pipeline.process_frame_with_logo(&frame, SceneType::Freestyle, 1.0);
+        let second = pipeline.process_frame_with_logo(&frame, SceneType::Freestyle, 2.0);
+        let third = pipeline.process_frame_with_logo(&frame, SceneType::Freestyle, 3.0);
 
         assert!(!first.is_song_select);
         assert_eq!(first.jacket_status, JacketMatchStatus::NotSongSelect);
@@ -262,11 +264,12 @@ mod tests {
     fn resets_state_when_song_select_is_lost() {
         let mut pipeline = DetectionPipeline::new(ImageIndexDb::new("missing.db", 0.6));
         let frame = blank_frame();
+        use overmax_core::SceneType;
 
         for idx in 0..3 {
-            pipeline.process_frame_with_logo(&frame, true, idx as f64);
+            pipeline.process_frame_with_logo(&frame, SceneType::Freestyle, idx as f64);
         }
-        let output = pipeline.process_frame_with_logo(&frame, false, 10.0);
+        let output = pipeline.process_frame_with_logo(&frame, SceneType::Unknown, 10.0);
 
         assert!(output.is_song_select);
         assert!(output.state.context.is_none());
