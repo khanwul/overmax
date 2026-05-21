@@ -13,6 +13,17 @@ pub struct RoiRect {
     pub y2: i32,
 }
 
+impl From<DataRoiRect> for RoiRect {
+    fn from(rect: DataRoiRect) -> Self {
+        Self {
+            x1: rect.x,
+            y1: rect.y,
+            x2: rect.x + rect.width,
+            y2: rect.y + rect.height,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RoiManager {
     width: i32,
@@ -53,17 +64,11 @@ impl RoiManager {
     }
 
     pub fn get_roi(&self, name: &str) -> Option<RoiRect> {
-        // 임시: 씬 설정 로딩 전까지는 하드코딩 유지하거나 Default 사용
-        let roi = match name {
-            "logo" => RoiRect { x1: 167, y1: 23, x2: 303, y2: 49 },
-            "jacket" => RoiRect { x1: 710, y1: 534, x2: 768, y2: 592 },
-            "rate" => RoiRect { x1: 176, y1: 583, x2: 270, y2: 605 },
-            "btn_mode" => RoiRect { x1: 80, y1: 130, x2: 85, y2: 135 },
-            "max_combo_badge" => RoiRect { x1: 409, y1: 587, x2: 445, y2: 620 },
-            "diff_panel" => RoiRect { x1: 98, y1: 488, x2: 208, y2: 516 },
-            _ => return None,
-        };
-        Some(self.transform_roi(roi))
+        if name == "logo" {
+            return Some(self.transform_roi(RoiRect { x1: 167, y1: 23, x2: 303, y2: 49 }));
+        }
+        let roi = self.config.scenes.get(&self.current_scene)?.rois.get(name)?;
+        Some(self.transform_roi(RoiRect::from(roi.clone())))
     }
 
     pub fn get_diff_panel_roi(&self, diff: &str) -> Option<RoiRect> {
@@ -119,11 +124,12 @@ impl RoiManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{RoiManager, RoiRect};
+    use super::{RoiManager, RoiRect, SceneType};
 
     #[test]
     fn keeps_1080p_reference_coordinates() {
-        let manager = RoiManager::new(1920, 1080);
+        let mut manager = RoiManager::new(1920, 1080);
+        manager.set_scene(SceneType::Freestyle);
         assert_eq!(
             manager.get_roi("jacket"),
             Some(RoiRect {
@@ -137,7 +143,8 @@ mod tests {
 
     #[test]
     fn applies_letterbox_offset_for_16_10() {
-        let manager = RoiManager::new(1920, 1200);
+        let mut manager = RoiManager::new(1920, 1200);
+        manager.set_scene(SceneType::Freestyle);
         assert_eq!(manager.get_roi("logo").unwrap().y1, 83);
     }
 }
