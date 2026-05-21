@@ -30,6 +30,20 @@ use crate::ui_command::UiCommand;
 use crate::updater::{self, AppUpdateConfig};
 use crate::varchive_upload;
 
+fn load_icon() -> Option<eframe::egui::IconData> {
+    let icon_bytes = include_bytes!("../../../assets/overmax.ico");
+    if let Ok(img) = image::load_from_memory(icon_bytes) {
+        let rgba = img.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        return Some(eframe::egui::IconData {
+            rgba: rgba.into_raw(),
+            width,
+            height,
+        });
+    }
+    None
+}
+
 pub fn run_native_app() -> eframe::Result<()> {
     let Some(_single) = SingleInstanceGuard::try_acquire() else {
         std::process::exit(0);
@@ -89,6 +103,10 @@ fn native_options(merged: &Value) -> eframe::NativeOptions {
         .with_transparent(true)
         .with_taskbar(false)
         .with_always_on_top();
+
+    if let Some(icon) = load_icon() {
+        builder = builder.with_icon(icon);
+    }
 
     if let Some(pos) = merged.get("overlay").and_then(|o| o.get("position")) {
         if let (Some(x), Some(y)) = (

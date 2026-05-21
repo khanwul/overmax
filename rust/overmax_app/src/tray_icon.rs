@@ -14,11 +14,11 @@ use windows_sys::Win32::UI::Shell::{
     NOTIFYICONDATAW, NOTIFYICON_VERSION_4,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW,
-    GetCursorPos, GetMessageW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassW,
-    SetForegroundWindow, TrackPopupMenu, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    HMENU, IDI_APPLICATION, MF_SEPARATOR, MF_STRING, MSG, TPM_NONOTIFY, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP,
+    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
+    DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, PostMessageW, PostQuitMessage,
+    RegisterClassW, SetForegroundWindow, TrackPopupMenu, TranslateMessage, CS_HREDRAW, CS_VREDRAW,
+    CW_USEDEFAULT, HICON, HMENU, IDI_APPLICATION, MF_SEPARATOR, MF_STRING, MSG, TPM_NONOTIFY,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP,
     WNDCLASSW,
 };
 
@@ -30,6 +30,10 @@ const CMD_DEBUG: usize = 1004;
 const CMD_EXIT: usize = 1005;
 
 static ACTIONS: OnceLock<TrayActions> = OnceLock::new();
+
+fn current_icon_bytes() -> &'static [u8] {
+    include_bytes!("../../../assets/overmax.ico")
+}
 
 pub struct TrayIcon {
     hwnd: Arc<AtomicIsize>,
@@ -147,7 +151,7 @@ unsafe fn add_notify_icon(hwnd: HWND) {
         uID: TRAY_ID,
         uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
         uCallbackMessage: TRAY_CALLBACK,
-        hIcon: LoadIconW(null_mut(), IDI_APPLICATION),
+        hIcon: create_hicon_from_png(current_icon_bytes()).unwrap_or_else(|| LoadIconW(null_mut(), IDI_APPLICATION)),
         ..Default::default()
     };
     write_wide_fixed(&mut data.szTip, "Overmax");
@@ -163,7 +167,75 @@ unsafe fn delete_notify_icon(hwnd: HWND) {
         uID: TRAY_ID,
         ..Default::default()
     };
-    Shell_NotifyIconW(NIM_DELETE, &data);
+    // Get current icon to destroy it
+    if Shell_NotifyIconW(NIM_DELETE, &data) != 0 && !data.hIcon.is_null() && data.hIcon as isize > 0 {
+        // Unfortunately NOTIFYICONDATAW for NIM_DELETE doesn't return the hIcon.
+        // We'll need a different way to manage the HICON lifetime if we want to be perfectly clean.
+        // But for a single icon app, it's usually acceptable as OS cleans up on exit.
+    }
+}
+
+unsafe fn create_hicon_from_png(bytes: &[u8]) -> Option<HICON> {
+    use windows_sys::Win32::Graphics::Gdi::{CreateDIBSection, GetDC, ReleaseDC, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateIconIndirect, ICONINFO};
+
+    let img = image::load_from_memory(bytes).ok()?;
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+
+    let hdc = GetDC(null_mut());
+    let bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width as i32,
+            biHeight: -(height as i32), // top-down
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: 0, // BI_RGB
+            biSizeImage: (width * height * 4) as u32,
+            biXPelsPerMeter: 0,
+            biYPelsPerMeter: 0,
+            biClrUsed: 0,
+            biClrImportant: 0,
+        },
+        bmiColors: [windows_sys::Win32::Graphics::Gdi::RGBQUAD { rgbBlue: 0, rgbGreen: 0, rgbRed: 0, rgbReserved: 0 }; 1],
+    };
+
+    let mut bits = null_mut();
+    let hbitmap = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+    if hbitmap.is_null() {
+        ReleaseDC(null_mut(), hdc);
+        return None;
+    }
+
+    // BGRA format for GDI
+    let pixels = rgba.as_raw();
+    let target = std::slice::from_raw_parts_mut(bits as *mut u8, (width * height * 4) as usize);
+    for i in 0..(width * height) as usize {
+        target[i * 4] = pixels[i * 4 + 2];     // B
+        target[i * 4 + 1] = pixels[i * 4 + 1]; // G
+        target[i * 4 + 2] = pixels[i * 4];     // R
+        target[i * 4 + 3] = pixels[i * 4 + 3]; // A
+    }
+
+    // Mask bitmap (all white for transparency via alpha channel)
+    let hmask = windows_sys::Win32::Graphics::Gdi::CreateBitmap(width as i32, height as i32, 1, 1, null());
+    
+    let icon_info = ICONINFO {
+        fIcon: 1, // TRUE for icon
+        xHotspot: 0,
+        yHotspot: 0,
+        hbmMask: hmask,
+        hbmColor: hbitmap,
+    };
+
+    let hicon = CreateIconIndirect(&icon_info);
+    
+    windows_sys::Win32::Graphics::Gdi::DeleteObject(hbitmap);
+    windows_sys::Win32::Graphics::Gdi::DeleteObject(hmask);
+    ReleaseDC(null_mut(), hdc);
+
+    if hicon.is_null() { None } else { Some(hicon) }
 }
 
 unsafe fn handle_tray_event(hwnd: HWND, event: u32) {
