@@ -1,20 +1,11 @@
-//! GitHub Releases app update (paths and filenames aligned with Python `app_updater.py`).
+//! GitHub Releases app update using `self_update` crate.
 
-pub mod paths;
-pub mod release;
-pub mod result_io;
 pub mod version;
-pub mod worker;
 
 use std::path::Path;
-
 use serde_json::Value;
 
-use paths::{applied_tag_path, update_root};
-use release::{download_and_verify, extract_zip, fetch_latest_release, resolve_payload_dir};
-use result_io::{cleanup_artifacts, consume_result, peek_result};
 use version::is_newer_version;
-use worker::spawn_update_worker;
 
 /// `settings.json` / merged `app_update` section defaults match Python `core/app.py`.
 #[derive(Debug, Clone)]
@@ -80,9 +71,9 @@ pub fn app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Main executable to restart after update (default `overmax-rs.exe`).
+/// Main executable to restart after update (default `overmax.exe`).
 pub fn main_exe_name() -> String {
-    std::env::var("OVERMAX_MAIN_EXE").unwrap_or_else(|_| "overmax-rs.exe".into())
+    std::env::var("OVERMAX_MAIN_EXE").unwrap_or_else(|_| "overmax.exe".into())
 }
 
 fn skip_auto_update_by_policy() -> bool {
@@ -94,60 +85,14 @@ fn skip_auto_update_by_policy() -> bool {
         .unwrap_or(false)
 }
 
-/// If another update is in progress, show message and return `false` (do not start GUI).
-pub fn notify_previous_update(app_dir: &Path) -> Result<bool, String> {
-    if let Some(p) = peek_result(app_dir) {
-        if p.get("status").map(|s| s.as_str()) == Some("started") {
-            show_message_mb_ok(
-                "Overmax Update",
-                "다른 업데이트 작업이 진행 중입니다.\n\n업데이트 완료 후 Overmax가 자동으로 시작됩니다.",
-            );
-            return Ok(false);
-        }
-    }
-    if let Some(r) = consume_result(app_dir) {
-        cleanup_artifacts(app_dir);
-        handle_consumed_result(r)?;
-    } else {
-        cleanup_artifacts(app_dir);
-    }
+/// Clean up any leftover artifacts from previous custom updater runs, if any.
+pub fn notify_previous_update(_app_dir: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
-fn handle_consumed_result(r: std::collections::HashMap<String, String>) -> Result<(), String> {
-    let status = r.get("status").map(String::as_str).unwrap_or("");
-    let from_ver = r.get("from").cloned().unwrap_or_else(|| "unknown".into());
-    let to_ver = r.get("to").cloned().unwrap_or_else(|| "unknown".into());
-    if status == "success" {
-        if is_newer_version(&to_ver, app_version()) {
-            show_message_mb_ok(
-                "Overmax Update Error",
-                &format!(
-                    "자동 패치를 적용했지만 현재 실행 버전이 갱신되지 않았습니다.\n\n\
-                     현재: v{}\n목표: {}\n\n\
-                     동일 태그에 대한 자동 재시도는 건너뜁니다. 릴리즈 패키지를 확인해 주세요.",
-                    app_version(),
-                    to_ver
-                ),
-            );
-        } else {
-            eprintln!("[Main] 자동 패치 완료: {from_ver} -> {to_ver}");
-        }
-    } else {
-        let reason = r.get("reason").cloned().unwrap_or_else(|| "unknown".into());
-        show_message_mb_ok(
-            "Overmax Update Error",
-            &format!(
-                "자동 패치가 완료되지 않았습니다.\n\n사유: {reason}\n시도 버전: {from_ver} -> {to_ver}"
-            ),
-        );
-    }
-    Ok(())
-}
-
-/// Returns `Ok(false)` if the app should exit (worker spawned).
+/// Returns `Ok(false)` if the app has been updated and should exit.
 pub fn check_and_apply_update_blocking(
-    app_dir: &Path,
+    _app_dir: &Path,
     cfg: &AppUpdateConfig,
 ) -> Result<bool, String> {
     if skip_auto_update_by_policy() {
@@ -157,66 +102,83 @@ pub fn check_and_apply_update_blocking(
     if !cfg.enabled {
         return Ok(true);
     }
-    let release = match fetch_latest_release(cfg) {
+
+    let mut builder = self_update::backends::github::Update::configure();
+    builder
+        .repo_owner(&cfg.owner)
+        .repo_name(&cfg.repo)
+        .bin_name(main_exe_name().as_str())
+        .target("") // Bypass os/arch check, look only for identifier
+        .identifier(&cfg.asset_name)
+        .current_version(app_version())
+        .no_confirm(true)
+        .show_download_progress(false); // Hide progress to prevent freezing/panic in non-console apps
+
+    let updater = match builder.build() {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("[AppUpdater] 업데이터 구성 실패: {}", e);
+            return Ok(true);
+        }
+    };
+
+    let latest_release = match updater.get_latest_release() {
         Ok(r) => r,
         Err(e) => {
             eprintln!("[AppUpdater] 업데이트 확인 실패: {}", e);
             return Ok(true);
         }
     };
-    let Some(tag) = release.tag else {
-        return Ok(true);
-    };
-    let Some(url) = release.asset_url else {
-        return Ok(true);
-    };
-    if !is_newer_version(&tag, app_version()) {
+
+    if !is_newer_version(&latest_release.version, app_version()) {
         eprintln!("[AppUpdater] 최신 버전 유지 중: {}", app_version());
         return Ok(true);
     }
-    if should_skip_repeated_tag(app_dir, &tag, app_version()) {
-        eprintln!(
-            "[AppUpdater] 동일 태그 업데이트가 이미 적용된 상태로 판단되어 재시도를 건너뜁니다: {tag} (현재 v{})",
-            app_version()
-        );
-        return Ok(true);
-    }
-    if !ask_update_confirm(app_version(), &tag) {
+
+    if !ask_update_confirm(app_version(), &latest_release.version) {
         eprintln!("[AppUpdater] 사용자가 이번 실행의 자동 패치를 취소했습니다.");
         return Ok(true);
     }
-    eprintln!("[AppUpdater] 새 버전 감지: {} -> {tag}", app_version());
-    let zip_path = update_root(app_dir).join(&cfg.asset_name);
-    let stage_dir = update_root(app_dir).join("stage");
-    download_and_verify(&url, release.manifest_url.as_deref(), &cfg.asset_name, &zip_path)
-        .map_err(|e| e.to_string())?;
-    extract_zip(&zip_path, &stage_dir).map_err(|e| e.to_string())?;
-    let Some(payload) = resolve_payload_dir(&stage_dir) else {
-        return Err("자동 패치 결과물에서 실행 파일을 찾지 못했습니다.".into());
-    };
-    if !spawn_update_worker(app_dir, &payload, app_version(), &tag) {
-        return Err("자동 패치 워커 실행에 실패했습니다.".into());
-    }
-    eprintln!("[AppUpdater] 업데이트 워커를 시작했습니다. 현재 앱을 종료합니다.");
-    Ok(false)
-}
 
-fn should_skip_repeated_tag(app_dir: &Path, latest_tag: &str, current_version: &str) -> bool {
-    let Some(applied) = read_applied_tag(app_dir) else {
-        return false;
-    };
-    if applied != latest_tag {
-        return false;
-    }
-    is_newer_version(latest_tag, current_version)
-}
+    eprintln!("[AppUpdater] 새 버전 감지: {} -> {}. 업데이트 진행...", app_version(), latest_release.version);
 
-fn read_applied_tag(app_dir: &Path) -> Option<String> {
-    let p = applied_tag_path(app_dir);
-    std::fs::read_to_string(p)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    let status = match updater.update() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[AppUpdater] 업데이트 실패: {}", e);
+            show_message_mb_ok(
+                "Overmax Update Error",
+                &format!("자동 패치가 완료되지 않았습니다.\n\n사유: {}", e),
+            );
+            return Ok(true);
+        }
+    };
+
+    let updated = match status {
+        self_update::Status::Updated(_) => true,
+        self_update::Status::UpToDate(_) => false,
+    };
+
+    if updated {
+        eprintln!("[AppUpdater] 업데이트 완료! 앱을 재시작합니다.");
+        let exe = match std::env::current_exe() {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("[AppUpdater] 실행 경로를 찾을 수 없습니다: {}", e);
+                return Ok(true);
+            }
+        };
+
+        // 재시작 (Restart)
+        if let Err(e) = std::process::Command::new(exe).spawn() {
+            eprintln!("[AppUpdater] 재시작 실패: {}", e);
+            return Ok(true); 
+        }
+        return Ok(false); // Signal to exit immediately
+    } else {
+        eprintln!("[AppUpdater] 이미 최신 버전입니다.");
+        return Ok(true);
+    }
 }
 
 fn show_message_mb_ok(title: &str, msg: &str) {

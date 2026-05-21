@@ -44,6 +44,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
+self_update = { version = "0.44.0", features = ["archive-zip", "compression-zip-deflate"] }
 
 [build-dependencies]
 winres = "0.1.12"

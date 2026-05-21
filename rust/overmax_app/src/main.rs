@@ -32,10 +32,6 @@ mod window_tracker;
 
 #[cfg(target_os = "windows")]
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if let Some(wa) = updater::worker::parse_worker_args(&args) {
-        std::process::exit(updater::worker::run_update_worker(wa));
-    }
     if let Err(err) = native_app::run_native_app() {
         eprintln!("overmax-rs failed: {err}");
         std::process::exit(1);
