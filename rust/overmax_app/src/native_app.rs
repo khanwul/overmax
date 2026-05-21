@@ -143,10 +143,12 @@ pub struct SharedDebugState {
     pub filters: Arc<Mutex<std::collections::HashMap<String, bool>>>,
 }
 
+#[derive(Clone)]
 pub struct SharedSyncState {
     pub steam_id: Arc<Mutex<String>>,
     pub status: Arc<Mutex<String>>,
     pub candidates: Arc<Mutex<Vec<SyncCandidate>>>,
+    pub steam_users: Arc<Mutex<std::collections::HashMap<String, steam_session::SteamUser>>>,
 }
 
 pub struct NativeApp {
@@ -323,6 +325,12 @@ impl NativeApp {
             steam_id: Arc::new(Mutex::new(steam0)),
             status: Arc::new(Mutex::new(String::new())),
             candidates: Arc::new(Mutex::new(Vec::new())),
+            steam_users: Arc::new(Mutex::new(
+                steam_session::all_login_users()
+                    .into_iter()
+                    .map(|u| (u.steam_id.clone(), u))
+                    .collect(),
+            )),
         };
 
         let mut app = Self {
@@ -480,6 +488,15 @@ impl NativeApp {
         while self.game_found_rx.try_recv().is_ok() {
             let sid = steam_session::most_recent_steam_id();
             let (changed, before, after) = self.record_manager.set_steam_id(sid.as_deref());
+            
+            // Steam 사용자 정보 맵 갱신
+            if let Ok(mut map) = self.sync_state.steam_users.lock() {
+                *map = steam_session::all_login_users()
+                    .into_iter()
+                    .map(|u| (u.steam_id.clone(), u))
+                    .collect();
+            }
+
             if changed {
                 debug_ui::push_log(
                     &self.debug_state.log_lines,

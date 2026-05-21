@@ -17,6 +17,7 @@ where
     pub steam_id: &'a mut String,
     pub status: &'a str,
     pub candidates: &'a [SyncCandidate],
+    pub steam_users: &'a std::collections::HashMap<String, crate::steam_session::SteamUser>,
     pub on_scan: F1,
     pub on_upload: F2,
     pub on_delete: F3,
@@ -66,9 +67,16 @@ pub fn render_sync<F1, F2, F3>(
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
+                    let mut label_text = "Steam ID".to_string();
+                    if let Some(user) = props.steam_users.get(props.steam_id) {
+                        if !user.persona_name.is_empty() {
+                            label_text = format!("{} ({})", user.persona_name, user.account_name);
+                        }
+                    }
+
                     ui.add_sized(
-                        egui::vec2(80.0, Theme::CONTROL_HEIGHT),
-                        egui::Label::new(RichText::new("Steam ID").color(Theme::TEXT_PRIMARY).size(Theme::FONT_BODY)),
+                        egui::vec2(160.0, Theme::CONTROL_HEIGHT),
+                        egui::Label::new(RichText::new(label_text).color(Theme::TEXT_PRIMARY).size(Theme::FONT_BODY)).truncate(),
                     );
                     ui.add_space(8.0);
                     

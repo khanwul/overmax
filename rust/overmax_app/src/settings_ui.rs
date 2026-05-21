@@ -17,6 +17,7 @@ pub struct SettingsUiContext {
     pub scan_pending: Arc<AtomicBool>,
     pub sync_steam_id: Arc<Mutex<String>>,
     pub fetch_tx: Sender<(String, String, i32)>,
+    pub steam_users: Arc<Mutex<std::collections::HashMap<String, crate::steam_session::SteamUser>>>,
 }
 
 pub fn render_settings_form(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
@@ -140,6 +141,18 @@ fn current_steam_label(ctx: &SettingsUiContext) -> String {
     if ctx.current_steam_id.is_empty() {
         "현재 Steam: -".into()
     } else {
+        if let Ok(users) = ctx.steam_users.lock() {
+            if let Some(user) = users.get(&ctx.current_steam_id) {
+                if !user.persona_name.is_empty() && !user.account_name.is_empty() {
+                    return format!(
+                        "현재 Steam: {} ({}) [{}]",
+                        user.persona_name, user.account_name, ctx.current_steam_id
+                    );
+                } else if !user.persona_name.is_empty() {
+                    return format!("현재 Steam: {} [{}]", user.persona_name, ctx.current_steam_id);
+                }
+            }
+        }
         format!("현재 Steam: {}", ctx.current_steam_id)
     }
 }

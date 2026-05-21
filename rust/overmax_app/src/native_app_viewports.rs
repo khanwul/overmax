@@ -103,6 +103,7 @@ impl NativeApp {
             scan_pending: self.ui_state.scan_pending.clone(),
             sync_steam_id: self.sync_state.steam_id.clone(),
             fetch_tx: self.fetch_req_tx.clone(),
+            steam_users: self.sync_state.steam_users.clone(),
         };
         ctx.show_viewport_deferred(
             native_helpers::vp_settings(),
@@ -176,11 +177,9 @@ impl NativeApp {
         }
         let open = self.ui_state.sync_open.clone();
         let scan_pending = self.ui_state.scan_pending.clone();
-        let steam = self.sync_state.steam_id.clone();
-        let status = self.sync_state.status.clone();
-        let candidates = self.sync_state.candidates.clone();
         let upload_tx = self.upload_req_tx.clone();
         let delete_tx = self.delete_req_tx.clone();
+        let sync_state = self.sync_state.clone();
         ctx.show_viewport_deferred(
             native_helpers::vp_sync(),
             Self::auxiliary_viewport("V-Archive 동기화", [520.0, 560.0]),
@@ -194,9 +193,10 @@ impl NativeApp {
                     s.debug.show_unaligned = false;
                     s.debug.debug_on_hover = false;
                 });
-                let list = candidates.lock().map(|g| g.clone()).unwrap_or_default();
-                let mut steam_g = steam.lock().unwrap_or_else(|e| e.into_inner());
-                let status_s = status.lock().map(|g| g.clone()).unwrap_or_default();
+                let list = sync_state.candidates.lock().map(|g| g.clone()).unwrap_or_default();
+                let users = sync_state.steam_users.lock().unwrap_or_else(|e| e.into_inner());
+                let mut steam_g = sync_state.steam_id.lock().unwrap_or_else(|e| e.into_inner());
+                let status_s = sync_state.status.lock().map(|g| g.clone()).unwrap_or_default();
                 sync_ui::render_sync(
                     ctx,
                     class,
@@ -204,6 +204,7 @@ impl NativeApp {
                         steam_id: &mut steam_g,
                         status: &status_s,
                         candidates: &list,
+                        steam_users: &users,
                         on_scan: || {
                             scan_pending.store(true, Ordering::Relaxed);
                         },

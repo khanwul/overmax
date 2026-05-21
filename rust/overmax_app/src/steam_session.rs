@@ -7,6 +7,46 @@ use std::path::Path;
 use winreg::enums::HKEY_CURRENT_USER;
 use winreg::RegKey;
 
+pub struct SteamUser {
+    pub steam_id: String,
+    pub persona_name: String,
+    pub account_name: String,
+}
+
+pub fn all_login_users() -> Vec<SteamUser> {
+    let mut results = Vec::new();
+    let Some(vdf) = read_loginusers_vdf() else {
+        return results;
+    };
+    let data = parse_vdf(&vdf);
+    let users = match data.get("users") {
+        Some(VdfVal::Obj(m)) => m,
+        _ => return results,
+    };
+    for (steam_id, user_data) in users {
+        let attrs = match user_data {
+            VdfVal::Obj(m) => m,
+            _ => continue,
+        };
+        let persona_name = if let Some(VdfVal::Str(s)) = attrs.get("PersonaName") {
+            s.clone()
+        } else {
+            String::new()
+        };
+        let account_name = if let Some(VdfVal::Str(s)) = attrs.get("AccountName") {
+            s.clone()
+        } else {
+            String::new()
+        };
+        results.push(SteamUser {
+            steam_id: steam_id.clone(),
+            persona_name,
+            account_name,
+        });
+    }
+    results
+}
+
 pub fn most_recent_steam_id() -> Option<String> {
     let vdf = read_loginusers_vdf()?;
     let data = parse_vdf(&vdf);
