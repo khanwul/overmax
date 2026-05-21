@@ -44,7 +44,8 @@ impl NativeApp {
             .with_inner_size(size)
             .with_visible(true)
             .with_resizable(true)
-            .with_taskbar(false)
+            .with_taskbar(true)
+            .with_always_on_top()
     }
 
     fn show_debug_viewport(&self, ctx: &egui::Context) {
@@ -483,13 +484,13 @@ mod tests {
     use eframe::egui;
 
     #[test]
-    fn auxiliary_viewports_stay_out_of_taskbar() {
+    fn auxiliary_viewports_are_topmost_and_in_taskbar() {
         let builder = NativeApp::auxiliary_viewport("debug", [720.0, 420.0]);
 
-        assert_eq!(builder.taskbar, Some(false));
+        assert_eq!(builder.taskbar, Some(true));
         assert_eq!(builder.visible, Some(true));
         assert_eq!(builder.resizable, Some(true));
-        assert_ne!(
+        assert_eq!(
             builder.window_level,
             Some(egui::viewport::WindowLevel::AlwaysOnTop)
         );
