@@ -72,15 +72,16 @@ fn overlay_section(ui: &mut egui::Ui, draft: &mut Value) {
         let current_scale = overlay.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
         ui.horizontal(|ui| {
             ui.style_mut().spacing.item_spacing.x = 4.0;
+            ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
             for (label, val) in [("S", 0.75), ("M", 1.0), ("L", 1.25), ("XL", 1.5)] {
                 let is_active = (current_scale - val).abs() < 0.01;
                 let btn = egui::Button::new(RichText::new(label).size(Theme::FONT_SMALL).strong())
-                    .min_size(egui::vec2(36.0, Theme::CONTROL_HEIGHT))
                     .fill(if is_active { Theme::TAB_ACTIVE_BG } else { Theme::TAB_DIM_BG })
                     .stroke(Stroke::new(1.0, Theme::STROKE))
-                    .corner_radius(egui::CornerRadius::same(Theme::R_SM));
+                    .corner_radius(egui::CornerRadius::same(Theme::R_SM))
+                    .wrap();
                     
-                if ui.add(btn).clicked() {
+                if ui.add_sized(egui::vec2(36.0, Theme::CONTROL_HEIGHT), btn).clicked() {
                     overlay.insert("scale".into(), serde_json::json!(val));
                 }
             }
@@ -198,13 +199,14 @@ fn steam_account_rows(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiCont
     form_row(ui, "데이터 동기화", |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.style_mut().spacing.item_spacing.x = 4.0;
+            ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
             for b in [4, 5, 6, 8] {
                 let btn = egui::Button::new(RichText::new(format!("{b}B")).size(Theme::FONT_SMALL))
-                    .min_size(egui::vec2(40.0, Theme::CONTROL_HEIGHT))
                     .fill(Theme::TAB_DIM_BG)
                     .stroke(Stroke::new(1.0, Theme::STROKE))
-                    .corner_radius(egui::CornerRadius::same(Theme::R_SM));
-                if ui.add(btn).clicked() {
+                    .corner_radius(egui::CornerRadius::same(Theme::R_SM))
+                    .wrap();
+                if ui.add_sized(egui::vec2(40.0, Theme::CONTROL_HEIGHT), btn).clicked() {
                     let v_id = entry.get("v_id").and_then(|v| v.as_str()).unwrap_or("");
                     if !v_id.is_empty() {
                         let _ = ctx.fetch_tx.send((ctx.current_steam_id.clone(), v_id.to_string(), b));
@@ -212,10 +214,10 @@ fn steam_account_rows(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiCont
                 }
             }
             let all_btn = egui::Button::new(RichText::new("All").size(Theme::FONT_SMALL).strong())
-                .min_size(egui::vec2(40.0, Theme::CONTROL_HEIGHT))
                 .fill(Theme::TAB_ACTIVE_BG)
-                .corner_radius(egui::CornerRadius::same(Theme::R_SM));
-            if ui.add(all_btn).clicked() {
+                .corner_radius(egui::CornerRadius::same(Theme::R_SM))
+                .wrap();
+            if ui.add_sized(egui::vec2(40.0, Theme::CONTROL_HEIGHT), all_btn).clicked() {
                 let v_id = entry.get("v_id").and_then(|v| v.as_str()).unwrap_or("");
                 if !v_id.is_empty() {
                     let _ = ctx.fetch_tx.send((ctx.current_steam_id.clone(), v_id.to_string(), 0));
@@ -234,11 +236,12 @@ fn steam_account_rows(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiCont
             .to_string();
             
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
             let find_btn = egui::Button::new(RichText::new("찾기").size(Theme::FONT_SMALL))
-                .min_size(egui::vec2(60.0, Theme::CONTROL_HEIGHT))
                 .fill(Theme::TAB_ACTIVE_BG)
-                .corner_radius(egui::CornerRadius::same(Theme::R_SM));
-            if ui.add(find_btn).clicked() {
+                .corner_radius(egui::CornerRadius::same(Theme::R_SM))
+                .wrap();
+            if ui.add_sized(egui::vec2(60.0, Theme::CONTROL_HEIGHT), find_btn).clicked() {
                 if let Some(file_path) = rfd::FileDialog::new()
                     .add_filter("Text Files", &["txt"])
                     .pick_file()

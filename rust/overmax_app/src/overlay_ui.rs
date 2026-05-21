@@ -224,12 +224,14 @@ fn draw_header(
                     .selectable(false),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().button_padding = Vec2::ZERO;
                     let text = RichText::new("⚙")
                         .color(Theme::TEXT_PRIMARY)
                         .font(FontId::proportional(15.0 * px.scale));
                     let btn = Button::new(text)
                         .fill(Theme::SECTION_BG)
-                        .corner_radius(CornerRadius::same((6.0 * px.scale) as u8));
+                        .corner_radius(CornerRadius::same((6.0 * px.scale) as u8))
+                        .wrap();
                     let response = ui.add_sized(Vec2::splat(px.settings_btn()), btn.sense(Sense::click())).on_hover_text("설정");
                     settings_button_rect = Some(response.rect);
                     if response.clicked() {
@@ -334,11 +336,18 @@ fn draw_footer(
         .inner_margin(Margin::symmetric(px.footer_margin_x() as i8, px.footer_margin_y() as i8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                if ui.small_button("debug").clicked() {
+                ui.spacing_mut().button_padding = egui::vec2(2.0 * px.scale, 1.0 * px.scale);
+                
+                let debug_btn = Button::new(RichText::new("debug").font(FontId::proportional(11.0 * px.scale)))
+                    .wrap();
+                if ui.add_sized(Vec2::new(42.0 * px.scale, 18.0 * px.scale), debug_btn).clicked() {
                     debug_open.store(true, Ordering::Relaxed);
                     actions.command = Some(UiCommand::OpenDebug);
                 }
-                if ui.small_button("sync").clicked() {
+                
+                let sync_btn = Button::new(RichText::new("sync").font(FontId::proportional(11.0 * px.scale)))
+                    .wrap();
+                if ui.add_sized(Vec2::new(42.0 * px.scale, 18.0 * px.scale), sync_btn).clicked() {
                     sync_open.store(true, Ordering::Relaxed);
                     actions.command = Some(UiCommand::OpenSync);
                 }
