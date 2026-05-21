@@ -230,7 +230,7 @@ fn draw_header(
                     let btn = Button::new(text)
                         .fill(Theme::SECTION_BG)
                         .corner_radius(CornerRadius::same((6.0 * px.scale) as u8));
-                    let response = ui.add_sized(Vec2::splat(px.settings_btn()), btn).on_hover_text("설정");
+                    let response = ui.add_sized(Vec2::splat(px.settings_btn()), btn.sense(Sense::click())).on_hover_text("설정");
                     settings_button_rect = Some(response.rect);
                     if response.clicked() {
                         settings_open.store(true, Ordering::Relaxed);
