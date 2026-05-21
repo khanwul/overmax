@@ -1,15 +1,15 @@
 @echo off
 setlocal enabledelayedexpansion
 
-echo.
+echo(
 echo  ===================================
 echo   Overmax - Build Script (Rust)
 echo  ===================================
-echo.
+echo(
 
 where cargo >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Rust cargo not found in PATH. Please install Rust (rustup).
+    echo [ERROR] Rust cargo not found in PATH. Please install Rust ^(rustup^).
     pause
     exit /b 1
 )
@@ -30,8 +30,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo.
+echo(
 echo Build Successful!
 echo Output: dist/overmax-rust/
-echo.
+echo(
 pause
