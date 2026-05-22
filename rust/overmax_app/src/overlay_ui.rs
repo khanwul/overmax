@@ -236,38 +236,60 @@ fn draw_header(
                     }
                 });
             });
+            let mut has_badge = false;
+            let mut is_perfect = false;
+            let mut is_max_combo = false;
+            let mut rate = 0.0;
+            if let Some(ctx) = &state.context {
+                rate = ctx.rate;
+                is_perfect = rate >= 100.0;
+                is_max_combo = ctx.is_max_combo;
+                has_badge = is_perfect || rate > 0.0 || is_max_combo;
+            }
+
             ui.add_space(px.header_meta_gap());
-            ui.with_layout(
-                Layout::left_to_right(Align::Center).with_main_align(Align::Center),
-                |ui| {
-                    let mut has_badge = false;
-                    if let Some(ctx) = &state.context {
-                        if ctx.rate > 0.0 {
+
+            if has_badge {
+                ui.with_layout(
+                    Layout::left_to_right(Align::Center).with_main_align(Align::Center),
+                    |ui| {
+                        ui.spacing_mut().interact_size.y = 0.0;
+                        ui.spacing_mut().item_spacing.y = 0.0;
+
+                        if is_perfect {
                             draw_mini_badge(
                                 ui,
-                                &format!("{:.2}%", ctx.rate),
-                                Theme::TAB_INACTIVE_BG,
-                                Theme::OK,
-                                px.scale,
-                            );
-                            has_badge = true;
-                        }
-                        if ctx.is_max_combo {
-                            if has_badge {
-                                ui.add_space(3.0 * px.scale);
-                            }
-                            draw_mini_badge(
-                                ui,
-                                "MAX COMBO",
+                                "P",
                                 Theme::TAB_INACTIVE_BG,
                                 Theme::TEXT_ACCENT,
                                 px.scale,
                             );
-                            has_badge = true;
+                        } else {
+                            let mut drew_rate = false;
+                            if rate > 0.0 {
+                                draw_mini_badge(
+                                    ui,
+                                    &format!("{:.2}%", rate),
+                                    Theme::TAB_INACTIVE_BG,
+                                    Theme::OK,
+                                    px.scale,
+                                );
+                                drew_rate = true;
+                            }
+                            if is_max_combo {
+                                if drew_rate {
+                                    ui.add_space(3.0 * px.scale);
+                                }
+                                draw_mini_badge(
+                                    ui,
+                                    "M",
+                                    Theme::TAB_INACTIVE_BG,
+                                    Theme::TEXT_ACCENT,
+                                    px.scale,
+                                );
+                            }
                         }
-                    }
 
-                    if has_badge {
                         ui.add_space(4.0 * px.scale);
                         ui.label(
                             RichText::new("|")
@@ -275,8 +297,20 @@ fn draw_header(
                                 .font(FontId::proportional(10.0 * px.scale)),
                         );
                         ui.add_space(4.0 * px.scale);
-                    }
 
+                        ui.add(
+                            Label::new(
+                                RichText::new(meta_text(state, pattern_tabs))
+                                    .color(Theme::TEXT_ACCENT)
+                                    .font(FontId::proportional(10.0 * px.scale))
+                                    .strong(),
+                            )
+                            .selectable(false),
+                        );
+                    },
+                );
+            } else {
+                ui.with_layout(Layout::top_down(Align::Center), |ui| {
                     ui.add(
                         Label::new(
                             RichText::new(meta_text(state, pattern_tabs))
@@ -286,8 +320,8 @@ fn draw_header(
                         )
                         .selectable(false),
                     );
-                },
-            );
+                });
+            }
         });
 
     let drag_rect = drag_rect_excluding_button(header.response.rect, settings_button_rect);
@@ -311,18 +345,22 @@ fn draw_mini_badge(
     text_color: Color32,
     scale: f32,
 ) {
-    Frame::new()
-        .fill(bg_color)
-        .corner_radius(CornerRadius::same((4.0 * scale) as u8))
-        .inner_margin(Margin::symmetric((5.0 * scale) as i8, (2.0 * scale) as i8))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(text)
-                    .color(text_color)
-                    .font(FontId::proportional(9.0 * scale))
-                    .strong(),
-            );
-        });
+    let width = (text.len() as f32 * 5.2 + 8.0) * scale;
+    let height = 13.0 * scale;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
+
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same((3.0 * scale) as u8),
+        bg_color,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        FontId::proportional(9.0 * scale),
+        text_color,
+    );
 }
 
 fn drag_rect_excluding_button(header: Rect, button: Option<Rect>) -> Rect {
