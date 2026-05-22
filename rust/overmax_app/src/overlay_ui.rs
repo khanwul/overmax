@@ -251,6 +251,8 @@ fn draw_header(
 
             let text_str = meta_text(state, pattern_tabs);
 
+            let second_row_height = 15.0 * px.scale;
+
             if has_badge {
                 let scale = px.scale;
                 let mut total_width = 0.0;
@@ -285,66 +287,77 @@ fn draw_header(
                 let parent_width = ui.available_width();
                 let start_space = ((parent_width - total_width) / 2.0).max(0.0);
 
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.spacing_mut().interact_size.y = 0.0;
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), second_row_height),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.spacing_mut().interact_size.y = second_row_height;
 
-                    ui.add_space(start_space);
+                        ui.add_space(start_space);
 
-                    if let Some(r_txt) = &rate_text {
-                        draw_mini_badge(
-                            ui,
-                            r_txt,
-                            Theme::TAB_INACTIVE_BG,
-                            Theme::OK,
-                            scale,
-                        );
-                    }
-
-                    if let Some(c_txt) = &combo_text {
-                        if has_rate {
-                            ui.add_space(3.0 * scale);
+                        if let Some(r_txt) = &rate_text {
+                            draw_mini_badge(
+                                ui,
+                                r_txt,
+                                Theme::TAB_INACTIVE_BG,
+                                Theme::OK,
+                                scale,
+                            );
                         }
-                        draw_mini_badge(
-                            ui,
-                            c_txt,
-                            Theme::TAB_INACTIVE_BG,
-                            Theme::TEXT_ACCENT,
-                            scale,
+
+                        if let Some(c_txt) = &combo_text {
+                            if has_rate {
+                                ui.add_space(3.0 * scale);
+                            }
+                            draw_mini_badge(
+                                ui,
+                                c_txt,
+                                Theme::TAB_INACTIVE_BG,
+                                Theme::TEXT_ACCENT,
+                                scale,
+                            );
+                        }
+
+                        ui.add_space(4.0 * scale);
+                        ui.label(
+                            RichText::new("|")
+                                .color(Theme::TEXT_MUTED)
+                                .font(FontId::proportional(10.0 * scale)),
                         );
-                    }
+                        ui.add_space(4.0 * scale);
 
-                    ui.add_space(4.0 * scale);
-                    ui.label(
-                        RichText::new("|")
-                            .color(Theme::TEXT_MUTED)
-                            .font(FontId::proportional(10.0 * scale)),
-                    );
-                    ui.add_space(4.0 * scale);
-
-                    ui.add(
-                        Label::new(
-                            RichText::new(text_str)
-                                .color(Theme::TEXT_ACCENT)
-                                .font(FontId::proportional(10.0 * scale))
-                                .strong(),
-                        )
-                        .selectable(false),
-                    );
-                });
+                        ui.add(
+                            Label::new(
+                                RichText::new(text_str)
+                                    .color(Theme::TEXT_ACCENT)
+                                    .font(FontId::proportional(10.0 * scale))
+                                    .strong(),
+                            )
+                            .selectable(false),
+                        );
+                    },
+                );
             } else {
-                ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                    ui.add(
-                        Label::new(
-                            RichText::new(text_str)
-                                .color(Theme::TEXT_ACCENT)
-                                .font(FontId::proportional(10.0 * px.scale))
-                                .strong(),
-                        )
-                        .selectable(false),
-                    );
-                });
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), second_row_height),
+                    Layout::top_down(Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.spacing_mut().interact_size.y = second_row_height;
+
+                        ui.add(
+                            Label::new(
+                                RichText::new(text_str)
+                                    .color(Theme::TEXT_ACCENT)
+                                    .font(FontId::proportional(10.0 * px.scale))
+                                    .strong(),
+                            )
+                            .selectable(false),
+                        );
+                    },
+                );
             }
         });
 
