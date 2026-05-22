@@ -243,12 +243,20 @@ impl eframe::App for NativeApp {
         }
 
         let settings_on = self.ui_state.settings_open.load(Ordering::Relaxed);
+        let sync_on = self.ui_state.sync_open.load(Ordering::Relaxed);
+
         if settings_on && !self.prev_settings_open {
             if let (Ok(m), Ok(mut d)) = (self.settings.merged.lock(), self.settings.draft.lock()) {
                 *d = m.clone();
             }
+            self.refresh_steam_session("설정 창 열림");
         }
         self.prev_settings_open = settings_on;
+
+        if sync_on && !self.prev_sync_open {
+            self.refresh_steam_session("동기화 창 열림");
+        }
+        self.prev_sync_open = sync_on;
 
         self.start_log_pump(ctx);
         ctx.request_repaint_after(std::time::Duration::from_millis(250));

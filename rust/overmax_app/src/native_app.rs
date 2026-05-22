@@ -181,6 +181,7 @@ pub struct NativeApp {
     pub(crate) recommendations: RecommendResult,
     pub(crate) pattern_tabs: Vec<crate::overlay_recommend_ui::PatternTabInfo>,
     pub(crate) prev_settings_open: bool,
+    pub(crate) prev_sync_open: bool,
     pub(crate) prev_scale: f32,
     pub(crate) prev_overlay_on: bool,
     pub(crate) record_db: Arc<RecordDB>,
@@ -370,6 +371,7 @@ impl NativeApp {
             recommendations: RecommendResult::empty(),
             pattern_tabs: Vec::new(),
             prev_settings_open: false,
+            prev_sync_open: false,
             prev_scale: 1.0,
             prev_overlay_on: false,
             record_db,
@@ -492,33 +494,40 @@ impl NativeApp {
         }
     }
 
+    pub(crate) fn refresh_steam_session(&mut self, context: &str) {
+        let sid = steam_session::most_recent_steam_id();
+        let (changed, before, after) = self.record_manager.set_steam_id(sid.as_deref());
+        
+        if let Ok(mut steam_id_lock) = self.sync_state.steam_id.lock() {
+            *steam_id_lock = sid.clone().unwrap_or_default();
+        }
+
+        if let Ok(mut map) = self.sync_state.steam_users.lock() {
+            *map = steam_session::all_login_users()
+                .into_iter()
+                .map(|u| (u.steam_id.clone(), u))
+                .collect();
+        }
+
+        if changed {
+            debug_ui::push_log(
+                &self.debug_state.log_lines,
+                self.max_log_lines(),
+                format!("[Main] Steam 세션 갱신 ({context}): {before} -> {after}"),
+            );
+            self.refresh_overlay_data();
+        } else if sid.is_some() {
+            debug_ui::push_log(
+                &self.debug_state.log_lines,
+                self.max_log_lines(),
+                format!("[Main] Steam 세션 유지 ({context}): {after}"),
+            );
+        }
+    }
+
     pub(crate) fn drain_game_found_refresh_steam(&mut self) {
         while self.game_found_rx.try_recv().is_ok() {
-            let sid = steam_session::most_recent_steam_id();
-            let (changed, before, after) = self.record_manager.set_steam_id(sid.as_deref());
-            
-            // Steam 사용자 정보 맵 갱신
-            if let Ok(mut map) = self.sync_state.steam_users.lock() {
-                *map = steam_session::all_login_users()
-                    .into_iter()
-                    .map(|u| (u.steam_id.clone(), u))
-                    .collect();
-            }
-
-            if changed {
-                debug_ui::push_log(
-                    &self.debug_state.log_lines,
-                    self.max_log_lines(),
-                    format!("[Main] Steam 세션 갱신 (게임 창 발견): {before} -> {after}"),
-                );
-                self.refresh_overlay_data();
-            } else if sid.is_some() {
-                debug_ui::push_log(
-                    &self.debug_state.log_lines,
-                    self.max_log_lines(),
-                    format!("[Main] Steam 세션 유지 (게임 창 발견): {after}"),
-                );
-            }
+            self.refresh_steam_session("게임 창 발견");
         }
     }
 
