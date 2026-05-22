@@ -250,115 +250,113 @@ fn draw_header(
             ui.add_space(px.header_meta_gap());
 
             let text_str = meta_text(state, pattern_tabs);
+            let scale = px.scale;
+            let second_row_height = 15.0 * scale;
 
-            let second_row_height = 15.0 * px.scale;
+            // 세로 높이를 정확히 15.0 * scale 로 고정하여 할당받음 (높이 흔들림 원천 방지)
+            let (row_rect, _) = ui.allocate_exact_size(
+                Vec2::new(ui.available_width(), second_row_height),
+                egui::Sense::hover(),
+            );
+
+            let mut total_width = 0.0;
+            let mut has_rate = false;
+            let rate_text = if has_badge && rate > 0.0 {
+                let s = format!("{:.2}%", rate);
+                total_width += (s.len() as f32 * 5.2 + 8.0) * scale;
+                has_rate = true;
+                Some(s)
+            } else {
+                None
+            };
+
+            let combo_text = if has_badge && is_max_combo {
+                let s = if is_perfect { "P" } else { "M" };
+                if has_rate {
+                    total_width += 3.0 * scale;
+                }
+                total_width += (s.len() as f32 * 5.2 + 8.0) * scale;
+                Some(s)
+            } else {
+                None
+            };
 
             if has_badge {
-                let scale = px.scale;
-                let mut total_width = 0.0;
-
-                let mut has_rate = false;
-                let rate_text = if rate > 0.0 {
-                    let s = format!("{:.2}%", rate);
-                    total_width += (s.len() as f32 * 5.2 + 8.0) * scale;
-                    has_rate = true;
-                    Some(s)
-                } else {
-                    None
-                };
-
-                let combo_text = if is_max_combo {
-                    let s = if is_perfect { "P" } else { "M" };
-                    if has_rate {
-                        total_width += 3.0 * scale;
-                    }
-                    total_width += (s.len() as f32 * 5.2 + 8.0) * scale;
-                    Some(s)
-                } else {
-                    None
-                };
-
-                total_width += 10.0 * scale;
-
-                let font_meta = FontId::proportional(10.0 * scale);
-                let galley_meta = ui.painter().layout_no_wrap(text_str.clone(), font_meta, Theme::TEXT_ACCENT);
-                total_width += galley_meta.size().x;
-
-                let parent_width = ui.available_width();
-                let start_space = ((parent_width - total_width) / 2.0).max(0.0);
-
-                ui.allocate_ui_with_layout(
-                    Vec2::new(ui.available_width(), second_row_height),
-                    Layout::left_to_right(Align::Center),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.spacing_mut().interact_size.y = second_row_height;
-
-                        ui.add_space(start_space);
-
-                        if let Some(r_txt) = &rate_text {
-                            draw_mini_badge(
-                                ui,
-                                r_txt,
-                                Theme::TAB_INACTIVE_BG,
-                                Theme::OK,
-                                scale,
-                            );
-                        }
-
-                        if let Some(c_txt) = &combo_text {
-                            if has_rate {
-                                ui.add_space(3.0 * scale);
-                            }
-                            draw_mini_badge(
-                                ui,
-                                c_txt,
-                                Theme::TAB_INACTIVE_BG,
-                                Theme::TEXT_ACCENT,
-                                scale,
-                            );
-                        }
-
-                        ui.add_space(4.0 * scale);
-                        ui.label(
-                            RichText::new("|")
-                                .color(Theme::TEXT_MUTED)
-                                .font(FontId::proportional(10.0 * scale)),
-                        );
-                        ui.add_space(4.0 * scale);
-
-                        ui.add(
-                            Label::new(
-                                RichText::new(text_str)
-                                    .color(Theme::TEXT_ACCENT)
-                                    .font(FontId::proportional(10.0 * scale))
-                                    .strong(),
-                            )
-                            .selectable(false),
-                        );
-                    },
-                );
-            } else {
-                ui.allocate_ui_with_layout(
-                    Vec2::new(ui.available_width(), second_row_height),
-                    Layout::top_down(Align::Center),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.spacing_mut().interact_size.y = second_row_height;
-
-                        ui.add(
-                            Label::new(
-                                RichText::new(text_str)
-                                    .color(Theme::TEXT_ACCENT)
-                                    .font(FontId::proportional(10.0 * px.scale))
-                                    .strong(),
-                            )
-                            .selectable(false),
-                        );
-                    },
-                );
+                total_width += 10.0 * scale; // 구분선 `|` 가로폭 (여백 포함)
             }
+
+            let font_meta = FontId::proportional(10.0 * scale);
+            let galley_meta = ui.painter().layout_no_wrap(text_str.clone(), font_meta.clone(), Theme::TEXT_ACCENT);
+            total_width += galley_meta.size().x;
+
+            let mut current_x = row_rect.left() + (row_rect.width() - total_width) / 2.0;
+            let center_y = row_rect.center().y;
+
+            if let Some(r_txt) = &rate_text {
+                let badge_w = (r_txt.len() as f32 * 5.2 + 8.0) * scale;
+                let badge_rect = Rect::from_center_size(
+                    egui::pos2(current_x + badge_w / 2.0, center_y),
+                    Vec2::new(badge_w, 13.0 * scale),
+                );
+                ui.painter().rect_filled(
+                    badge_rect,
+                    CornerRadius::same((3.0 * scale) as u8),
+                    Theme::TAB_INACTIVE_BG,
+                );
+                ui.painter().text(
+                    badge_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    r_txt,
+                    FontId::proportional(9.0 * scale),
+                    Theme::OK,
+                );
+                current_x += badge_w;
+            }
+
+            if let Some(c_txt) = &combo_text {
+                if has_rate {
+                    current_x += 3.0 * scale;
+                }
+                let badge_w = (c_txt.len() as f32 * 5.2 + 8.0) * scale;
+                let badge_rect = Rect::from_center_size(
+                    egui::pos2(current_x + badge_w / 2.0, center_y),
+                    Vec2::new(badge_w, 13.0 * scale),
+                );
+                ui.painter().rect_filled(
+                    badge_rect,
+                    CornerRadius::same((3.0 * scale) as u8),
+                    Theme::TAB_INACTIVE_BG,
+                );
+                ui.painter().text(
+                    badge_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    c_txt,
+                    FontId::proportional(9.0 * scale),
+                    Theme::TEXT_ACCENT,
+                );
+                current_x += badge_w;
+            }
+
+            if has_badge {
+                current_x += 4.0 * scale;
+                ui.painter().text(
+                    egui::pos2(current_x, center_y),
+                    egui::Align2::LEFT_CENTER,
+                    "|",
+                    FontId::proportional(10.0 * scale),
+                    Theme::TEXT_MUTED,
+                );
+                current_x += 2.0 * scale;
+                current_x += 4.0 * scale;
+            }
+
+            ui.painter().text(
+                egui::pos2(current_x, center_y),
+                egui::Align2::LEFT_CENTER,
+                &text_str,
+                font_meta,
+                Theme::TEXT_ACCENT,
+            );
         });
 
     let drag_rect = drag_rect_excluding_button(header.response.rect, settings_button_rect);
@@ -373,31 +371,6 @@ fn draw_header(
     if drag_response.drag_stopped() {
         actions.restore_game_focus = true;
     }
-}
-
-fn draw_mini_badge(
-    ui: &mut egui::Ui,
-    text: &str,
-    bg_color: Color32,
-    text_color: Color32,
-    scale: f32,
-) {
-    let width = (text.len() as f32 * 5.2 + 8.0) * scale;
-    let height = 13.0 * scale;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
-
-    ui.painter().rect_filled(
-        rect,
-        CornerRadius::same((3.0 * scale) as u8),
-        bg_color,
-    );
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        text,
-        FontId::proportional(9.0 * scale),
-        text_color,
-    );
 }
 
 fn drag_rect_excluding_button(header: Rect, button: Option<Rect>) -> Rect {
@@ -535,7 +508,7 @@ pub(crate) fn diff_color(diff: &str) -> Color32 {
 mod tests {
     use super::{diff_color, install_cjk_fonts, meta_text};
     use crate::overlay_recommend_ui::PatternTabInfo;
-    use eframe::egui::{Color32, Context};
+    use eframe::egui::{self, Color32, Context};
     use overmax_core::{GameSessionState, PlayContext};
 
     #[test]
@@ -577,5 +550,119 @@ mod tests {
         let ctx = Context::default();
         install_cjk_fonts(&ctx);
         // If it reaches here without panicking, the logic is sound.
+    }
+
+    #[test]
+    fn test_header_height_constancy() {
+        let ctx = Context::default();
+
+        let scales = vec![0.8, 1.0, 1.2, 1.25, 1.5, 1.75, 2.0];
+        let state_detecting = GameSessionState::detecting();
+
+        let state_no_badge = GameSessionState {
+            context: Some(overmax_core::PlayContext {
+                song_id: 1,
+                mode: "5B".into(),
+                diff: "SC".into(),
+                rate: 0.0,
+                is_max_combo: false,
+            }),
+            is_stable: true,
+        };
+
+        let state_normal_badge = GameSessionState {
+            context: Some(overmax_core::PlayContext {
+                song_id: 1,
+                mode: "5B".into(),
+                diff: "SC".into(),
+                rate: 99.50,
+                is_max_combo: true,
+            }),
+            is_stable: true,
+        };
+
+        let state_perfect_badge = GameSessionState {
+            context: Some(overmax_core::PlayContext {
+                song_id: 1,
+                mode: "5B".into(),
+                diff: "SC".into(),
+                rate: 100.00,
+                is_max_combo: true,
+            }),
+            is_stable: true,
+        };
+
+        let pattern_tabs = vec![PatternTabInfo {
+            diff: "SC".into(),
+            level: Some(12),
+            floor_name: Some("12.3".into()),
+            gold: "O".into(),
+            note: "개인차".into(),
+            assist_key: "Y".into(),
+        }];
+
+        for scale in scales {
+            let mut h_detecting = 0.0;
+            let mut h_no_badge = 0.0;
+            let mut h_normal = 0.0;
+            let mut h_perfect = 0.0;
+
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let px = super::Px::new(scale);
+                    let settings_open = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let mut actions = super::OverlayActions::default();
+
+                    let start_y = ui.cursor().top();
+                    super::draw_header(ui, &state_detecting, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px);
+                    h_detecting = ui.cursor().top() - start_y;
+                });
+            });
+
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let px = super::Px::new(scale);
+                    let settings_open = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let mut actions = super::OverlayActions::default();
+
+                    let start_y = ui.cursor().top();
+                    super::draw_header(ui, &state_no_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px);
+                    h_no_badge = ui.cursor().top() - start_y;
+                });
+            });
+
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let px = super::Px::new(scale);
+                    let settings_open = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let mut actions = super::OverlayActions::default();
+
+                    let start_y = ui.cursor().top();
+                    super::draw_header(ui, &state_normal_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px);
+                    h_normal = ui.cursor().top() - start_y;
+                });
+            });
+
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let px = super::Px::new(scale);
+                    let settings_open = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let mut actions = super::OverlayActions::default();
+
+                    let start_y = ui.cursor().top();
+                    super::draw_header(ui, &state_perfect_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px);
+                    h_perfect = ui.cursor().top() - start_y;
+                });
+            });
+
+            println!(
+                "Scale: {:.2} -> detecting: {}, no_badge: {}, normal: {}, perfect: {}",
+                scale, h_detecting, h_no_badge, h_normal, h_perfect
+            );
+
+            assert_eq!(h_detecting, h_no_badge, "Height mismatch at scale {:.2} between detecting and no_badge", scale);
+            assert_eq!(h_no_badge, h_normal, "Height mismatch at scale {:.2} between no_badge and normal", scale);
+            assert_eq!(h_normal, h_perfect, "Height mismatch at scale {:.2} between normal and perfect", scale);
+        }
     }
 }
