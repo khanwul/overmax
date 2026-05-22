@@ -200,6 +200,7 @@ fn draw_header(
     actions: &mut OverlayActions,
     px: &Px,
 ) {
+    ui.spacing_mut().interact_size.y = 0.0;
     let mut settings_button_rect = None;
     let header = Frame::new()
         .fill(Theme::HEADER_BG)
@@ -244,7 +245,7 @@ fn draw_header(
                 rate = ctx.rate;
                 is_perfect = rate >= 100.0;
                 is_max_combo = ctx.is_max_combo;
-                has_badge = is_perfect || rate > 0.0 || is_max_combo;
+                has_badge = rate > 0.0 || is_max_combo;
             }
 
             ui.add_space(px.header_meta_gap());
@@ -256,38 +257,30 @@ fn draw_header(
                         ui.spacing_mut().interact_size.y = 0.0;
                         ui.spacing_mut().item_spacing.y = 0.0;
 
-                        if is_perfect {
+                        let mut drew_rate = false;
+                        if rate > 0.0 {
                             draw_mini_badge(
                                 ui,
-                                "P",
+                                &format!("{:.2}%", rate),
+                                Theme::TAB_INACTIVE_BG,
+                                Theme::OK,
+                                px.scale,
+                            );
+                            drew_rate = true;
+                        }
+
+                        if is_max_combo {
+                            if drew_rate {
+                                ui.add_space(3.0 * px.scale);
+                            }
+                            let combo_text = if is_perfect { "P" } else { "M" };
+                            draw_mini_badge(
+                                ui,
+                                combo_text,
                                 Theme::TAB_INACTIVE_BG,
                                 Theme::TEXT_ACCENT,
                                 px.scale,
                             );
-                        } else {
-                            let mut drew_rate = false;
-                            if rate > 0.0 {
-                                draw_mini_badge(
-                                    ui,
-                                    &format!("{:.2}%", rate),
-                                    Theme::TAB_INACTIVE_BG,
-                                    Theme::OK,
-                                    px.scale,
-                                );
-                                drew_rate = true;
-                            }
-                            if is_max_combo {
-                                if drew_rate {
-                                    ui.add_space(3.0 * px.scale);
-                                }
-                                draw_mini_badge(
-                                    ui,
-                                    "M",
-                                    Theme::TAB_INACTIVE_BG,
-                                    Theme::TEXT_ACCENT,
-                                    px.scale,
-                                );
-                            }
                         }
 
                         ui.add_space(4.0 * px.scale);
