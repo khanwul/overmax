@@ -5,7 +5,7 @@ use overmax_core::GameSessionState;
 use overmax_data::{
     build_candidates, load_base_settings, load_merged_settings, normalize_settings,
     upsert_varchive_cache_record, DataCompatibility, PatternSheetMeta, RecommendResult, RecordDB,
-    RecordManager, SyncCandidate, VArchiveDB,
+    RecordManager, Recommender, SyncCandidate, VArchiveDB,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -185,6 +185,7 @@ pub struct NativeApp {
     pub(crate) prev_overlay_on: bool,
     pub(crate) record_db: Arc<RecordDB>,
     pub(crate) record_manager: Arc<RecordManager>,
+    pub(crate) recommender: Arc<Recommender>,
     pub(crate) game_found_rx: Receiver<()>,
     pub(crate) exit_requested: Arc<AtomicBool>,
     #[cfg(target_os = "windows")]
@@ -237,6 +238,12 @@ impl NativeApp {
             let _ = log_tx.send(format!("[VArchive] songs load failed: {e}"));
         }
         let varchive_db = Arc::new(varchive_db);
+
+        let recommender = Arc::new(Recommender::new(
+            varchive_db.clone(),
+            record_manager.clone(),
+        ));
+
         let sheet_meta = Arc::new(PatternSheetMeta::load_cache(
             root.join("cache").join("pattern_meta.json"),
         ));
@@ -367,6 +374,7 @@ impl NativeApp {
             prev_overlay_on: false,
             record_db,
             record_manager,
+            recommender,
             game_found_rx,
             exit_requested: exit_requested.clone(),
             #[cfg(target_os = "windows")]

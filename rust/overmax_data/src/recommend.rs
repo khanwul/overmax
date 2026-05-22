@@ -1,9 +1,14 @@
-use crate::record_manager::RecordSource;
+use crate::record_manager::{RecordManager, RecordSource};
 use crate::varchive::VArchiveDB;
 use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 
 const DIFFICULTIES: &[&str] = &["NM", "HD", "MX", "SC"];
 const SC_GROUP: &[&str] = &["SC"];
+
+type RecordKey = (i32, String, String);
 
 #[derive(Debug, Clone)]
 pub struct RecommendEntry {
@@ -44,9 +49,45 @@ impl RecommendResult {
     }
 }
 
-pub struct Recommender<'a, R: RecordSource> {
-    vdb: &'a VArchiveDB,
-    rdb: &'a R,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FloorCacheKey {
+    pub button_mode: String,
+    pub scale_type: String,
+    pub floor_millis: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FloorRateSummary {
+    pub total_count: usize,
+    pub has_record_count: usize,
+    pub rate_sum: f64,
+}
+
+impl FloorRateSummary {
+    pub fn new(total_count: usize) -> Self {
+        Self {
+            total_count,
+            has_record_count: 0,
+            rate_sum: 0.0,
+        }
+    }
+
+    pub fn avg_rate(&self) -> f64 {
+        if self.has_record_count == 0 {
+            return -1.0;
+        }
+        self.rate_sum / self.has_record_count as f64
+    }
+}
+
+pub struct Recommender {
+    vdb: Arc<VArchiveDB>,
+    rdb: Arc<RecordManager>,
+    floor_rate_cache: Mutex<HashMap<FloorCacheKey, FloorRateSummary>>,
+    floor_rate_dirty: Mutex<HashMap<FloorCacheKey, bool>>,
+    floor_patterns: Mutex<HashMap<FloorCacheKey, Vec<RecordKey>>>,
+    record_to_floor_key: Mutex<HashMap<RecordKey, FloorCacheKey>>,
+    cache_index_ready: AtomicBool,
 }
 
 struct CandidateSearchParams<'a> {
@@ -60,13 +101,25 @@ struct CandidateSearchParams<'a> {
     same_mode_only: bool,
 }
 
-impl<'a, R: RecordSource> Recommender<'a, R> {
-    pub fn new(vdb: &'a VArchiveDB, rdb: &'a R) -> Self {
-        Self { vdb, rdb }
+impl Recommender {
+    pub fn new(vdb: Arc<VArchiveDB>, rdb: Arc<RecordManager>) -> Self {
+        Self {
+            vdb,
+            rdb,
+            floor_rate_cache: Mutex::new(HashMap::new()),
+            floor_rate_dirty: Mutex::new(HashMap::new()),
+            floor_patterns: Mutex::new(HashMap::new()),
+            record_to_floor_key: Mutex::new(HashMap::new()),
+            cache_index_ready: AtomicBool::new(false),
+        }
     }
 
     fn parse_floor_value(floor_name: Option<&String>) -> Option<f64> {
         floor_name.and_then(|s| s.parse::<f64>().ok())
+    }
+
+    fn floor_to_millis(floor: f64) -> i64 {
+        (floor * 1000.0).round() as i64
     }
 
     fn diff_group(diff: &str) -> &'static str {
@@ -121,10 +174,6 @@ impl<'a, R: RecordSource> Recommender<'a, R> {
             same_mode_only,
         });
 
-        if candidates.is_empty() {
-            return RecommendResult::empty();
-        }
-
         self.merge_record_rates(&mut candidates);
 
         candidates.sort_by(|a, b| {
@@ -149,23 +198,22 @@ impl<'a, R: RecordSource> Recommender<'a, R> {
             }
         });
 
-        // Skip caching for brevity in Rust port, we just compute stats directly for the returned entries or all candidates
-        let total_count = candidates.len();
-        let has_record_count = candidates.iter().filter(|c| c.is_played()).count();
-        let avg_rate = if has_record_count > 0 {
-            let sum: f64 = candidates.iter().filter_map(|c| c.rate).sum();
-            sum / has_record_count as f64
-        } else {
-            -1.0
-        };
+        let summary = self.get_summary_from_cache(
+            button_mode,
+            difficulty,
+            final_ref_floor,
+            use_official,
+            floor_range,
+            same_mode_only,
+        );
 
         candidates.truncate(max_results);
 
         RecommendResult {
             entries: candidates,
-            avg_rate,
-            has_record_count,
-            total_count,
+            avg_rate: summary.avg_rate(),
+            has_record_count: summary.has_record_count,
+            total_count: summary.total_count,
         }
     }
 
@@ -259,6 +307,192 @@ impl<'a, R: RecordSource> Recommender<'a, R> {
                 entry.rate = Some(rate);
                 entry.is_max_combo = is_max_combo;
             }
+        }
+    }
+
+    fn build_floor_cache_index(&self) {
+        let mut floor_patterns = HashMap::new();
+        let mut record_to_floor_key = HashMap::new();
+
+        for song in &self.vdb.songs {
+            let song_id = match song.title.parse::<i32>() {
+                Ok(id) => id,
+                Err(_) => continue,
+            };
+            for (mode, mode_patterns) in &song.patterns {
+                for diff in DIFFICULTIES {
+                    if let Some(p) = mode_patterns.get(*diff) {
+                        let floor_val;
+                        let scale_type;
+                        if let Some(f) = Self::parse_floor_value(p.floor_name.as_ref()) {
+                            floor_val = f;
+                            scale_type = "UNOFFICIAL".to_string();
+                        } else {
+                            if let Some(level) = p.level {
+                                floor_val = level as f64;
+                            } else {
+                                continue;
+                            }
+                            scale_type = if SC_GROUP.contains(diff) {
+                                "OFFICIAL_SC".to_string()
+                            } else {
+                                "OFFICIAL_NHM".to_string()
+                            };
+                        }
+                        
+                        let key = FloorCacheKey {
+                            button_mode: mode.clone(),
+                            scale_type,
+                            floor_millis: Self::floor_to_millis(floor_val),
+                        };
+                        let record_key = (song_id, mode.clone(), diff.to_string());
+                        floor_patterns.entry(key.clone()).or_insert_with(Vec::new).push(record_key.clone());
+                        record_to_floor_key.insert(record_key, key);
+                    }
+                }
+            }
+        }
+
+        let mut cache_guard = self.floor_rate_cache.lock().unwrap();
+        let mut dirty_guard = self.floor_rate_dirty.lock().unwrap();
+        let mut patterns_guard = self.floor_patterns.lock().unwrap();
+        let mut record_to_key_guard = self.record_to_floor_key.lock().unwrap();
+
+        *patterns_guard = floor_patterns;
+        *record_to_key_guard = record_to_floor_key;
+
+        cache_guard.clear();
+        dirty_guard.clear();
+        for (key, entries) in patterns_guard.iter() {
+            cache_guard.insert(key.clone(), FloorRateSummary::new(entries.len()));
+            dirty_guard.insert(key.clone(), true);
+        }
+
+        self.cache_index_ready.store(true, AtomicOrdering::SeqCst);
+    }
+
+    fn ensure_floor_rate_cache(&self) {
+        if !self.cache_index_ready.load(AtomicOrdering::SeqCst) {
+            self.build_floor_cache_index();
+        }
+
+        let (full_dirty, dirty_keys) = self.rdb.consume_dirty_info();
+        {
+            let mut dirty_guard = self.floor_rate_dirty.lock().unwrap();
+            let patterns_guard = self.floor_patterns.lock().unwrap();
+            let record_to_key_guard = self.record_to_floor_key.lock().unwrap();
+
+            if full_dirty {
+                for key in patterns_guard.keys() {
+                    dirty_guard.insert(key.clone(), true);
+                }
+            } else {
+                for record_key in &dirty_keys {
+                    if let Some(floor_key) = record_to_key_guard.get(record_key) {
+                        dirty_guard.insert(floor_key.clone(), true);
+                    }
+                }
+            }
+        }
+
+        let dirty_floor_keys: Vec<FloorCacheKey> = {
+            let dirty_guard = self.floor_rate_dirty.lock().unwrap();
+            dirty_guard
+                .iter()
+                .filter(|(_, &is_dirty)| is_dirty)
+                .map(|(k, _)| k.clone())
+                .collect()
+        };
+
+        if dirty_floor_keys.is_empty() {
+            return;
+        }
+
+        let mut all_song_ids = Vec::new();
+        for song in &self.vdb.songs {
+            if let Ok(song_id) = song.title.parse::<i32>() {
+                all_song_ids.push(song_id);
+            }
+        }
+        all_song_ids.sort_unstable();
+        all_song_ids.dedup();
+
+        let rate_map = self.rdb.get_rate_map(&all_song_ids);
+
+        let mut cache_guard = self.floor_rate_cache.lock().unwrap();
+        let mut dirty_guard = self.floor_rate_dirty.lock().unwrap();
+        let patterns_guard = self.floor_patterns.lock().unwrap();
+
+        for key in &dirty_floor_keys {
+            let entries = patterns_guard.get(key).cloned().unwrap_or_default();
+            let mut summary = FloorRateSummary::new(entries.len());
+            for record_key in &entries {
+                if let Some(&(rate, _)) = rate_map.get(record_key) {
+                    if rate > 0.0 {
+                        summary.has_record_count += 1;
+                        summary.rate_sum += rate;
+                    }
+                }
+            }
+            cache_guard.insert(key.clone(), summary);
+            dirty_guard.insert(key.clone(), false);
+        }
+    }
+
+    fn get_summary_from_cache(
+        &self,
+        button_mode: &str,
+        difficulty: &str,
+        ref_floor: f64,
+        use_official: bool,
+        floor_range: f64,
+        same_mode_only: bool,
+    ) -> FloorRateSummary {
+        self.ensure_floor_rate_cache();
+
+        let scale_type = if use_official {
+            if SC_GROUP.contains(&difficulty) {
+                "OFFICIAL_SC"
+            } else {
+                "OFFICIAL_NHM"
+            }
+        } else {
+            "UNOFFICIAL"
+        };
+
+        let modes = if same_mode_only {
+            vec![button_mode]
+        } else {
+            vec!["4B", "5B", "6B", "8B"]
+        };
+
+        let mut total = 0;
+        let mut has_record = 0;
+        let mut rate_sum = 0.0;
+
+        let cache_guard = self.floor_rate_cache.lock().unwrap();
+        for (key, summary) in cache_guard.iter() {
+            if !modes.contains(&key.button_mode.as_str()) {
+                continue;
+            }
+            if key.scale_type != scale_type {
+                continue;
+            }
+            
+            let key_floor = key.floor_millis as f64 / 1000.0;
+            if (key_floor - ref_floor).abs() > floor_range {
+                continue;
+            }
+
+            total += summary.total_count;
+            has_record += summary.has_record_count;
+            rate_sum += summary.rate_sum;
+        }
+
+        FloorRateSummary {
+            total_count: total,
+            has_record_count: has_record,
+            rate_sum,
         }
     }
 }

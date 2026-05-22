@@ -2,7 +2,7 @@ use crate::debug_ui;
 use crate::native_app::NativeApp;
 use crate::overlay_recommend_ui::PatternTabInfo;
 use overmax_core::GameSessionState;
-use overmax_data::{RecommendResult, Recommender};
+use overmax_data::RecommendResult;
 
 const DIFFICULTIES: [&str; 4] = ["NM", "HD", "MX", "SC"];
 
@@ -40,7 +40,7 @@ impl NativeApp {
                                     key.0, key.1, key.2, ctx.rate, ctx.is_max_combo
                                 ),
                             );
-                            if self.record_db.upsert(
+                            if self.record_manager.upsert(
                                 key.0 as i32,
                                 &key.1,
                                 &key.2,
@@ -48,7 +48,6 @@ impl NativeApp {
                                 ctx.is_max_combo,
                             ) {
                                 self.recorded_states.insert(key);
-                                self.record_manager.refresh();
                                 changed = true;
                             }
                         }
@@ -81,8 +80,7 @@ impl NativeApp {
         let Some(ctx) = &state.context else {
             return RecommendResult::empty();
         };
-        let recommender = Recommender::new(self.varchive_db.as_ref(), self.record_manager.as_ref());
-        recommender.recommend(
+        self.recommender.recommend(
             ctx.song_id as i32,
             &ctx.mode,
             &ctx.diff,
