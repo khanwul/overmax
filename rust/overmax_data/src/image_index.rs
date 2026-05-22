@@ -338,4 +338,6 @@ mod tests {
     fn gradient_image() -> Vec<u8> {
         (0..64).map(|idx| (idx * 4) as u8).collect()
     }
+
+
 }

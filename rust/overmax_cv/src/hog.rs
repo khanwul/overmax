@@ -84,7 +84,8 @@ fn collect_block(gx: &[f32], gy: &[f32], block_x: usize, block_y: usize) -> Vec<
 }
 
 fn vote_pixel(block: &mut [f32], x: usize, y: usize, gx: f32, gy: f32) {
-    let mag = (gx * gx + gy * gy).sqrt() * gaussian_weight(x, y);
+    let raw_mag = (gx * gx + gy * gy).sqrt();
+    let mag = if raw_mag < 4.0 { 0.0 } else { raw_mag } * gaussian_weight(x, y);
     if mag == 0.0 {
         return;
     }
