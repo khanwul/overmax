@@ -124,12 +124,24 @@ pub fn render_sync<F1, F2, F3>(
         });
         ui.add_space(12.0);
         
+        let mut sorted_candidates: Vec<(usize, &SyncCandidate)> = props.candidates
+            .iter()
+            .enumerate()
+            .collect();
+        sorted_candidates.sort_by(|a, b| {
+            let mode_cmp = a.1.button_mode.cmp(&b.1.button_mode);
+            if mode_cmp != std::cmp::Ordering::Equal {
+                return mode_cmp;
+            }
+            a.1.song_name.cmp(&b.1.song_name)
+        });
+
         ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.style_mut().spacing.item_spacing.y = 12.0;
-                for (i, c) in props.candidates.iter().enumerate() {
-                    candidate_row(ui, i, c, props.on_upload, props.on_delete);
+                for (orig_idx, c) in sorted_candidates {
+                    candidate_row(ui, orig_idx, c, props.on_upload, props.on_delete);
                 }
             });
     };
@@ -156,14 +168,11 @@ fn candidate_row<F: Fn(usize), D: Fn(usize)>(ui: &mut egui::Ui, index: usize, c:
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         // Button Mode Badge
-                        badge(ui, &c.button_mode, Theme::SECONDARY, Theme::TEXT_PRIMARY);
+                        let mode_color = crate::overlay_ui::mode_color(&c.button_mode);
+                        badge(ui, &c.button_mode, mode_color, Theme::TEXT_PRIMARY);
                         ui.add_space(4.0);
                         // Difficulty Badge
-                        let diff_color = match c.difficulty.as_str() {
-                            "SC" => Theme::DANGER,
-                            "MAX" => Theme::PRIMARY,
-                            _ => Theme::TAB_DIM_BG,
-                        };
+                        let diff_color = crate::overlay_ui::diff_color(&c.difficulty);
                         badge(ui, &c.difficulty, diff_color, Theme::TEXT_BRIGHT);
                         ui.add_space(8.0);
                         ui.label(

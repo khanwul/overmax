@@ -340,15 +340,19 @@ fn draw_status_lamp(ui: &mut egui::Ui, stable: bool, px: &Px) {
     ui.painter().circle_filled(rect.center(), 3.5 * px.scale, color);
 }
 
+pub(crate) fn mode_color(mode: &str) -> Color32 {
+    match mode {
+        "4B" => Color32::from_rgb(0x2D, 0x4F, 0x55),
+        "5B" => Color32::from_rgb(0x44, 0xA9, 0xC6),
+        "6B" => Color32::from_rgb(0xED, 0x94, 0x30),
+        "8B" => Color32::from_rgb(0x1D, 0x14, 0x31),
+        _ => Color32::from_rgb(0x6A, 0x4D, 0x3D),
+    }
+}
+
 fn draw_mode_badge(ui: &mut egui::Ui, mode: Option<&str>, px: &Px) {
     let text = mode.unwrap_or("—");
-    let color = match mode {
-        Some("4B") => Color32::from_rgb(0x2D, 0x4F, 0x55),
-        Some("5B") => Color32::from_rgb(0x44, 0xA9, 0xC6),
-        Some("6B") => Color32::from_rgb(0xED, 0x94, 0x30),
-        Some("8B") => Color32::from_rgb(0x1D, 0x14, 0x31),
-        _ => Color32::from_rgb(0x6A, 0x4D, 0x3D),
-    };
+    let color = mode.map_or(Color32::from_rgb(0x6A, 0x4D, 0x3D), mode_color);
 
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(px.mode_badge_w(), px.mode_badge_h()),
