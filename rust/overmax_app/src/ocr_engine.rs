@@ -193,7 +193,17 @@ fn parse_rate_text(text: &str) -> Option<f32> {
             dot_seen = true;
         }
     }
-    let value = cleaned.parse::<f32>().ok()?;
+    let mut value = cleaned.parse::<f32>().ok()?;
+
+    // Windows OCR 오인식 대응:
+    // "94.12%"를 "9412%"와 같이 소수점(.)을 누락하여 인식하는 경우가 존재합니다.
+    // DJMAX RESPECT V의 Rate는 항상 소수점 둘째 자리까지 표기되므로, 
+    // 문자열에 소수점이 감지되지 않았고 파싱 결과가 100.0을 초과하는 경우(예: 9412.0)
+    // 소수점 이하 2자리가 정수로 취급되었다고 가정하고 100.0으로 나누어 보정합니다.
+    if !dot_seen && value > 100.0 {
+        value /= 100.0;
+    }
+
     (0.0..=100.0).contains(&value).then_some(value)
 }
 
@@ -255,6 +265,9 @@ mod tests {
         assert_eq!(parse_rate_text("99.43%"), Some(99.43));
         assert_eq!(parse_rate_text("100.00"), Some(100.0));
         assert_eq!(parse_rate_text("101.0"), None);
+        // 소수점 누락 보정 테스트
+        assert_eq!(parse_rate_text("9412%"), Some(94.12));
+        assert_eq!(parse_rate_text("10000"), Some(100.0));
     }
 
     #[test]
