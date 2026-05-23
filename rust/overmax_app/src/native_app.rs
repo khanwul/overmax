@@ -196,6 +196,10 @@ pub struct NativeApp {
     pub(crate) ctx_holder: Arc<Mutex<Option<egui::Context>>>,
     #[cfg(target_os = "windows")]
     pub(crate) _tray: Option<TrayIcon>,
+    #[cfg(target_os = "windows")]
+    pub(crate) cached_hwnd: Option<isize>,
+    #[cfg(target_os = "windows")]
+    pub(crate) last_applied_opacity: Option<f32>,
 }
 
 impl NativeApp {
@@ -393,6 +397,10 @@ impl NativeApp {
             ctx_holder,
             #[cfg(target_os = "windows")]
             _tray: Some(TrayIcon::spawn(ui_cmd_tx)),
+            #[cfg(target_os = "windows")]
+            cached_hwnd: None,
+            #[cfg(target_os = "windows")]
+            last_applied_opacity: None,
         };
 
         app.handle_auto_refresh();

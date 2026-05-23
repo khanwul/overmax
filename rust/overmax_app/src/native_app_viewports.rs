@@ -346,16 +346,21 @@ impl eframe::App for NativeApp {
         // Windows 전용: 전체 창 투명도 적용
         #[cfg(target_os = "windows")]
         {
-            let found = apply_window_opacity(opacity, &self.debug_state.log_lines);
-            if !found {
-                // 핸들을 못 찾았으면 로그에 한 번만 찍음
-                static mut LOGGED: bool = false;
-                unsafe {
-                    if !LOGGED {
-                        debug_ui::push_log(&self.debug_state.log_lines, 1000, format!("[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})", opacity));
-                        LOGGED = true;
+            if overlay_on {
+                let found = self.apply_window_opacity(opacity);
+                if !found {
+                    // 핸들을 못 찾았으면 로그에 한 번만 찍음
+                    static mut LOGGED: bool = false;
+                    unsafe {
+                        if !LOGGED {
+                            debug_ui::push_log(&self.debug_state.log_lines, self.max_log_lines(), format!("[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})", opacity));
+                            LOGGED = true;
+                        }
                     }
                 }
+            } else {
+                self.cached_hwnd = None;
+                self.last_applied_opacity = None;
             }
         }
 
@@ -434,72 +439,78 @@ impl eframe::App for NativeApp {
 }
 
 #[cfg(target_os = "windows")]
-fn apply_window_opacity(opacity: f32, log_lines: &Arc<Mutex<VecDeque<String>>>) -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-    use windows_sys::Win32::Foundation::HWND;
+impl NativeApp {
+    fn apply_window_opacity(&mut self, opacity: f32) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        use windows_sys::Win32::Foundation::HWND;
 
-    struct EnumData {
-        target_pid: u32,
-        found_hwnd: Option<HWND>,
-        log: Arc<Mutex<VecDeque<String>>>,
-    }
-
-    let target_pid = unsafe { GetCurrentProcessId() };
-    let mut data = EnumData {
-        target_pid,
-        found_hwnd: None,
-        log: log_lines.clone(),
-    };
-
-    unsafe {
-        extern "system" fn enum_callback(hwnd: HWND, lparam: isize) -> i32 {
-            unsafe {
-                let data = &mut *(lparam as *mut EnumData);
-                let mut pid = 0u32;
-                GetWindowThreadProcessId(hwnd, &mut pid);
-                if pid == data.target_pid {
-                    let mut text = [0u16; 512];
-                    let len = GetWindowTextW(hwnd, text.as_mut_ptr(), 512);
-                    let title = String::from_utf16_lossy(&text[..len as usize]);
-                    let visible = IsWindowVisible(hwnd) != 0;
-                    
-                    // 제목이 "Overmax"라면 가시성과 상관없이 최우선 타겟
-                    if title == "Overmax" {
-                        data.found_hwnd = Some(hwnd);
-                        return 0; // 즉시 중단
-                    }
-                    
-                    // 제목에 Overmax가 포함되거나, 가시적인 창을 차선책으로 저장
-                    if data.found_hwnd.is_none() && (title.contains("Overmax") || visible) {
-                        data.found_hwnd = Some(hwnd);
-                    }
+        if let (Some(hwnd_val), Some(last_opacity)) = (self.cached_hwnd, self.last_applied_opacity) {
+            if (opacity - last_opacity).abs() < 0.001 {
+                let hwnd = hwnd_val as HWND;
+                if unsafe { IsWindow(hwnd) } != 0 {
+                    return true;
                 }
-                1
             }
         }
 
-        EnumWindows(Some(enum_callback), &mut data as *mut _ as isize);
+        struct EnumData {
+            target_pid: u32,
+            found_hwnd: Option<HWND>,
+        }
 
-        if let Some(hwnd) = data.found_hwnd {
-            // 현재 투명도 값 추적 로그 (값 변화가 있을 때만)
-            static mut LAST_OPACITY: f32 = -1.0;
-            if (opacity - LAST_OPACITY).abs() > 0.01 {
-                debug_ui::push_log(&data.log, 1000, format!("[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})", opacity, hwnd));
-                LAST_OPACITY = opacity;
+        let target_pid = unsafe { GetCurrentProcessId() };
+        let mut data = EnumData {
+            target_pid,
+            found_hwnd: None,
+        };
+
+        unsafe {
+            extern "system" fn enum_callback(hwnd: HWND, lparam: isize) -> i32 {
+                unsafe {
+                    let data = &mut *(lparam as *mut EnumData);
+                    let mut pid = 0u32;
+                    GetWindowThreadProcessId(hwnd, &mut pid);
+                    if pid == data.target_pid {
+                        let mut text = [0u16; 512];
+                        let len = GetWindowTextW(hwnd, text.as_mut_ptr(), 512);
+                        let title = String::from_utf16_lossy(&text[..len as usize]);
+                        let visible = IsWindowVisible(hwnd) != 0;
+                        
+                        // 제목이 "Overmax"라면 가시성과 상관없이 최우선 타겟
+                        if title == "Overmax" {
+                            data.found_hwnd = Some(hwnd);
+                            return 0; // 즉시 중단
+                        }
+                        
+                        // 제목에 Overmax가 포함되거나, 가시적인 창을 차선책으로 저장
+                        if data.found_hwnd.is_none() && (title.contains("Overmax") || visible) {
+                            data.found_hwnd = Some(hwnd);
+                        }
+                    }
+                    1
+                }
             }
 
-            let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-            if (style & WS_EX_LAYERED as i32) == 0 {
-                SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED as i32);
-            }
-            
-            if SetLayeredWindowAttributes(hwnd, 0, (opacity * 255.0) as u8, 0x00000002) != 0 {
-                return true;
+            EnumWindows(Some(enum_callback), &mut data as *mut _ as isize);
+
+            if let Some(hwnd) = data.found_hwnd {
+                debug_ui::push_log(&self.debug_state.log_lines, self.max_log_lines(), format!("[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})", opacity, hwnd));
+
+                let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+                if (style & WS_EX_LAYERED as i32) == 0 {
+                    SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED as i32);
+                }
+                
+                if SetLayeredWindowAttributes(hwnd, 0, (opacity * 255.0) as u8, 0x00000002) != 0 {
+                    self.cached_hwnd = Some(hwnd as isize);
+                    self.last_applied_opacity = Some(opacity);
+                    return true;
+                }
             }
         }
+        false
     }
-    false
 }
 
 #[cfg(test)]
