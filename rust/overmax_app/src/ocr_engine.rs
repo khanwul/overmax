@@ -52,7 +52,7 @@ impl OcrDetector {
         let mut value = None;
         
         if let Ok((txt, threshold, bg_mean, use_invert, pixels, w, h)) = self.engine.recognize_with_telemetry(rate, false) {
-            text = txt;
+            text = txt.clone();
             value = parse_rate_text(&text);
             telemetry = Some(OcrTelemetry {
                 rate_text: text.clone(),
