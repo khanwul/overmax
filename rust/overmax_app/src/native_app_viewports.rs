@@ -57,6 +57,7 @@ impl NativeApp {
         let paused = self.debug_state.paused.clone();
         let filters = self.debug_state.filters.clone();
         let rate_ocr = self.debug_state.rate_ocr.clone();
+        let rate_ocr_texture = self.debug_state.rate_ocr_texture.clone();
         let title = self.debug_title();
         ctx.show_viewport_deferred(
             native_helpers::vp_debug(),
@@ -78,6 +79,7 @@ impl NativeApp {
                     &paused,
                     &filters,
                     &rate_ocr,
+                    &rate_ocr_texture,
                 );
                 debug_ui::close_if_requested(ctx, &open);
             },

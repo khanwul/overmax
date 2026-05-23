@@ -28,12 +28,13 @@ pub fn render_debug(
     paused: &Arc<AtomicBool>,
     filters: &Arc<Mutex<std::collections::HashMap<String, bool>>>,
     rate_ocr: &Arc<Mutex<Option<OcrTelemetry>>>,
+    rate_ocr_texture: &Arc<Mutex<Option<egui::TextureHandle>>>,
 ) {
     apply_secondary_window_style(ctx);
 
     if class == ViewportClass::Embedded {
         egui::Window::new(title).show(ctx, |ui| {
-            render_ocr_telemetry(ui, rate_ocr);
+            render_ocr_telemetry(ui, rate_ocr, rate_ocr_texture);
             render_controls(ui, lines, paused, filters);
             ui.add_space(8.0);
             log_scroll(ui, lines, filters);
@@ -63,7 +64,7 @@ pub fn render_debug(
                 });
                 ui.add_space(16.0);
 
-                render_ocr_telemetry(ui, rate_ocr);
+                render_ocr_telemetry(ui, rate_ocr, rate_ocr_texture);
                 render_controls(ui, lines, paused, filters);
                 ui.add_space(16.0);
 
@@ -72,23 +73,75 @@ pub fn render_debug(
     }
 }
 
-fn render_ocr_telemetry(ui: &mut egui::Ui, rate_ocr: &Arc<Mutex<Option<OcrTelemetry>>>) {
+fn render_ocr_telemetry(
+    ui: &mut egui::Ui,
+    rate_ocr: &Arc<Mutex<Option<OcrTelemetry>>>,
+    rate_ocr_texture: &Arc<Mutex<Option<egui::TextureHandle>>>,
+) {
     let ocr_info = if let Ok(g) = rate_ocr.lock() { g.clone() } else { None };
     if let Some(info) = ocr_info {
-        ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Rate OCR Status:").strong().color(Theme::TEXT_ACCENT));
-                ui.add_space(8.0);
-                ui.label(RichText::new(format!("Text: \"{}\"", info.rate_text)).color(Theme::TEXT_PRIMARY));
-                ui.separator();
-                ui.label(RichText::new(format!("Threshold: {}", info.threshold)).color(Theme::TEXT_PRIMARY));
-                ui.separator();
-                ui.label(RichText::new(format!("BgMean: {:.1}", info.bg_mean)).color(Theme::TEXT_PRIMARY));
-                ui.separator();
-                ui.label(RichText::new(format!("Inverted: {}", info.use_invert)).color(Theme::TEXT_PRIMARY));
+        if info.image_width > 0 && info.image_height > 0 && !info.image_pixels.is_empty() {
+            let mut texture_guard = rate_ocr_texture.lock().unwrap();
+            
+            let should_update = match &*texture_guard {
+                None => true,
+                Some(handle) => {
+                    handle.size()[0] != info.image_width || handle.size()[1] != info.image_height
+                }
+            };
+            
+            let texture_name = format!("ocr_rate_{}_{}_{}", info.rate_text, info.threshold, info.use_invert);
+            let should_update = should_update || match &*texture_guard {
+                None => true,
+                Some(handle) => handle.name() != texture_name,
+            };
+            
+            if should_update {
+                let pixels = info.image_pixels.iter()
+                    .map(|&p| egui::Color32::from_gray(p))
+                    .collect::<Vec<_>>();
+                let color_image = egui::ColorImage {
+                    size: [info.image_width, info.image_height],
+                    pixels,
+                    source_size: egui::vec2(info.image_width as f32, info.image_height as f32),
+                };
+                *texture_guard = Some(ui.ctx().load_texture(
+                    texture_name,
+                    color_image,
+                    egui::TextureOptions::default(),
+                ));
+            }
+            
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Rate OCR Status:").strong().color(Theme::TEXT_ACCENT));
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(format!("Text: \"{}\"", info.rate_text)).color(Theme::TEXT_PRIMARY));
+                    ui.separator();
+                    ui.label(RichText::new(format!("Threshold: {}", info.threshold)).color(Theme::TEXT_PRIMARY));
+                    ui.separator();
+                    ui.label(RichText::new(format!("BgMean: {:.1}", info.bg_mean)).color(Theme::TEXT_PRIMARY));
+                    ui.separator();
+                    ui.label(RichText::new(format!("Inverted: {}", info.use_invert)).color(Theme::TEXT_PRIMARY));
+                });
+                
+                ui.add_space(6.0);
+                
+                if let Some(texture) = &*texture_guard {
+                    let max_width = 300.0;
+                    let ratio = texture.size()[1] as f32 / texture.size()[0] as f32;
+                    let display_width = (texture.size()[0] as f32).min(max_width);
+                    let display_size = egui::vec2(display_width, display_width * ratio);
+                    
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Binarized Image:").size(Theme::FONT_TINY).color(Theme::TEXT_MUTED));
+                        ui.add_space(4.0);
+                        ui.image((texture.id(), display_size));
+                    });
+                }
             });
-        });
-        ui.add_space(8.0);
+            ui.add_space(8.0);
+        }
     }
 }
 

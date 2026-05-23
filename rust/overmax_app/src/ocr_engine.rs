@@ -13,6 +13,9 @@ pub struct OcrTelemetry {
     pub threshold: u8,
     pub bg_mean: f32,
     pub use_invert: bool,
+    pub image_pixels: Vec<u8>,
+    pub image_width: usize,
+    pub image_height: usize,
 }
 
 pub struct OcrDetector {
@@ -48,7 +51,7 @@ impl OcrDetector {
         let mut text = String::new();
         let mut value = None;
         
-        if let Ok((txt, threshold, bg_mean, use_invert)) = self.engine.recognize_with_telemetry(rate, false) {
+        if let Ok((txt, threshold, bg_mean, use_invert, pixels, w, h)) = self.engine.recognize_with_telemetry(rate, false) {
             text = txt;
             value = parse_rate_text(&text);
             telemetry = Some(OcrTelemetry {
@@ -56,11 +59,14 @@ impl OcrDetector {
                 threshold,
                 bg_mean,
                 use_invert,
+                image_pixels: pixels,
+                image_width: w,
+                image_height: h,
             });
         }
         
         if value.is_none() && text.is_empty() {
-            if let Ok((txt, threshold, bg_mean, use_invert)) = self.engine.recognize_with_telemetry(rate, true) {
+            if let Ok((txt, threshold, bg_mean, use_invert, pixels, w, h)) = self.engine.recognize_with_telemetry(rate, true) {
                 text = txt;
                 value = parse_rate_text(&text);
                 telemetry = Some(OcrTelemetry {
@@ -68,6 +74,9 @@ impl OcrDetector {
                     threshold,
                     bg_mean,
                     use_invert,
+                    image_pixels: pixels,
+                    image_width: w,
+                    image_height: h,
                 });
             }
         }
@@ -103,13 +112,13 @@ impl WindowsOcrEngine {
         &self,
         image: &ImageRegion,
         force_invert: bool,
-    ) -> Result<(String, u8, f32, bool), String> {
+    ) -> Result<(String, u8, f32, bool, Vec<u8>, usize, usize), String> {
         let Some(engine) = &self.engine else {
-            return Ok((String::new(), 0, 0.0, false));
+            return Ok((String::new(), 0, 0.0, false, Vec::new(), 0, 0));
         };
-        let (bmp, threshold, bg_mean, use_invert) = preprocess_ocr_bmp_with_telemetry(image, force_invert)?;
+        let (bmp, threshold, bg_mean, use_invert, pixels, w, h) = preprocess_ocr_bmp_with_telemetry(image, force_invert)?;
         let text = recognize_bmp(engine, &bmp).map(|t| t.trim().to_string())?;
-        Ok((text, threshold, bg_mean, use_invert))
+        Ok((text, threshold, bg_mean, use_invert, pixels, w, h))
     }
 }
 
@@ -129,7 +138,7 @@ fn preprocess_ocr_bmp(image: &ImageRegion, force_invert: bool) -> Result<Vec<u8>
 fn preprocess_ocr_bmp_with_telemetry(
     image: &ImageRegion,
     force_invert: bool,
-) -> Result<(Vec<u8>, u8, f32, bool), String> {
+) -> Result<(Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize), String> {
     if image.width <= 0 || image.height <= 0 {
         return Err("OCR image has invalid dimensions".to_string());
     }

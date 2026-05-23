@@ -18,6 +18,7 @@ use crate::cache_update;
 use crate::debug_ui;
 use crate::ocr_engine::OcrTelemetry;
 use crate::detection_pipeline::DetectionOutput;
+use eframe::egui;
 use crate::detection_worker;
 use crate::native_helpers::{
     account_path_for_steam, button_num, first_steam_from_settings,
@@ -143,6 +144,7 @@ pub struct SharedDebugState {
     pub paused: Arc<AtomicBool>,
     pub filters: Arc<Mutex<std::collections::HashMap<String, bool>>>,
     pub rate_ocr: Arc<Mutex<Option<OcrTelemetry>>>,
+    pub rate_ocr_texture: Arc<Mutex<Option<egui::TextureHandle>>>,
 }
 
 #[derive(Clone)]
@@ -330,6 +332,7 @@ impl NativeApp {
             paused: Arc::new(AtomicBool::new(false)),
             filters: Arc::new(Mutex::new(filters)),
             rate_ocr: Arc::new(Mutex::new(None)),
+            rate_ocr_texture: Arc::new(Mutex::new(None)),
         };
 
         let sync_state = SharedSyncState {

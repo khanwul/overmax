@@ -9,7 +9,7 @@ pub fn preprocess_bgra_with_telemetry(
     width: usize,
     height: usize,
     force_invert: bool,
-) -> (Vec<u8>, u8, f32, bool) {
+) -> (Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize) {
     let gray = to_gray_ocr(data, 4);
     let upscaled = resize_bilinear_u8(&gray, width, height, width * 3, height * 3);
     let blurred = box_blur_3x3(&upscaled, width * 3, height * 3);
@@ -24,7 +24,9 @@ pub fn preprocess_bgra_with_telemetry(
     let binary = threshold_image(&blurred, threshold, use_invert);
     let padded = pad_gray(&binary, width * 3, height * 3, 10);
     let bmp = encode_bmp_gray(&padded, width * 3 + 20, height * 3 + 20);
-    (bmp, threshold, bg_mean, use_invert)
+    let padded_width = width * 3 + 20;
+    let padded_height = height * 3 + 20;
+    (bmp, threshold, bg_mean, use_invert, padded, padded_width, padded_height)
 }
 
 fn to_gray_ocr(data: &[u8], channels: usize) -> Vec<u8> {
