@@ -132,7 +132,7 @@ pub fn render_sync<F1, F2, F3>(
                     Theme::SECONDARY
                 };
                 let diff_btn = egui::Button::new(
-                    RichText::new("변경 높은 순").size(Theme::FONT_SMALL)
+                    RichText::new("변경순").size(Theme::FONT_SMALL)
                 )
                 .fill(diff_btn_fill)
                 .corner_radius(CornerRadius::same(Theme::R_SM));
@@ -169,11 +169,11 @@ pub fn render_sync<F1, F2, F3>(
         match sort_mode {
             SyncSortMode::Title => {
                 sorted_candidates.sort_by(|a, b| {
-                    let name_cmp = a.1.song_name.cmp(&b.1.song_name);
-                    if name_cmp != std::cmp::Ordering::Equal {
-                        return name_cmp;
+                    let mode_cmp = a.1.button_mode.cmp(&b.1.button_mode);
+                    if mode_cmp != std::cmp::Ordering::Equal {
+                        return mode_cmp;
                     }
-                    a.1.button_mode.cmp(&b.1.button_mode)
+                    a.1.song_name.cmp(&b.1.song_name)
                 });
             }
             SyncSortMode::RateDiff => {
