@@ -1,5 +1,17 @@
 use crate::image::resize_bilinear_u8;
 
+pub fn preprocess_logo_bgra(data: &[u8], width: usize, height: usize, force_invert: bool) -> Vec<u8> {
+    let gray = to_gray_ocr(data, 4);
+    let upscaled = resize_bilinear_u8(&gray, width, height, width * 3, height * 3);
+    let threshold = otsu_threshold(&upscaled);
+    let bg_mean = mean_u8(&upscaled);
+    let normal_is_dark = bg_mean < 128.0;
+    let use_invert = if force_invert { normal_is_dark } else { !normal_is_dark };
+    let binary = threshold_image(&upscaled, threshold, use_invert);
+    let padded = pad_gray(&binary, width * 3, height * 3, 10);
+    encode_bmp_gray(&padded, width * 3 + 20, height * 3 + 20)
+}
+
 pub fn preprocess_bgra(data: &[u8], width: usize, height: usize, force_invert: bool) -> Vec<u8> {
     preprocess_bgra_with_telemetry(data, width, height, force_invert).0
 }
@@ -101,6 +113,10 @@ fn calculate_border_mean(data: &[u8], width: usize, height: usize) -> f32 {
     } else {
         0.0
     }
+}
+
+fn mean_u8(data: &[u8]) -> f32 {
+    data.iter().map(|value| f32::from(*value)).sum::<f32>() / data.len() as f32
 }
 
 fn otsu_threshold(data: &[u8]) -> u8 {

@@ -42,7 +42,7 @@ pub fn preprocess_ocr_bgra(
     force_invert: bool,
 ) -> Result<Vec<u8>, error::CvError> {
     image::validate_image(data, width, height, 4, "preprocess_ocr_bgra")?;
-    Ok(ocr::preprocess_bgra(data, width, height, force_invert))
+    Ok(ocr::preprocess_logo_bgra(data, width, height, force_invert))
 }
 
 pub fn preprocess_ocr_bgra_with_telemetry(
