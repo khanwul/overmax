@@ -144,9 +144,10 @@ pub fn build_candidates(
         let v_rate = v_entry.map(|e| e.0);
         let v_mc = v_entry.map(|e| e.1);
 
-        let is_candidate = v_rate.is_none()
-            || local_rate > v_rate.unwrap_or(0.0)
-            || (local_mc && !v_mc.unwrap_or(false));
+        let is_candidate = match v_rate {
+            None => true,
+            Some(vr) => (local_rate - vr) >= 0.01,
+        };
         if !is_candidate {
             continue;
         }

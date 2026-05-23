@@ -106,6 +106,9 @@ pub fn render_sync<F1, F2, F3>(
                 }
             });
 
+        let sort_mode_id = ui.make_persistent_id("sync_sort_mode");
+        let mut sort_mode = ui.data_mut(|d| d.get_temp::<SyncSortMode>(sort_mode_id).unwrap_or_default());
+
         ui.add_space(24.0);
         ui.horizontal(|ui| {
             ui.label(
@@ -121,6 +124,40 @@ pub fn render_sync<F1, F2, F3>(
                     .size(Theme::FONT_BODY)
                     .strong(),
             );
+            
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let diff_btn_fill = if sort_mode == SyncSortMode::RateDiff {
+                    Theme::PRIMARY
+                } else {
+                    Theme::SECONDARY
+                };
+                let diff_btn = egui::Button::new(
+                    RichText::new("변경 높은 순").size(Theme::FONT_SMALL)
+                )
+                .fill(diff_btn_fill)
+                .corner_radius(CornerRadius::same(Theme::R_SM));
+                if ui.add(diff_btn).clicked() {
+                    sort_mode = SyncSortMode::RateDiff;
+                    ui.data_mut(|d| d.insert_temp(sort_mode_id, sort_mode));
+                }
+
+                ui.add_space(4.0);
+
+                let title_btn_fill = if sort_mode == SyncSortMode::Title {
+                    Theme::PRIMARY
+                } else {
+                    Theme::SECONDARY
+                };
+                let title_btn = egui::Button::new(
+                    RichText::new("제목순").size(Theme::FONT_SMALL)
+                )
+                .fill(title_btn_fill)
+                .corner_radius(CornerRadius::same(Theme::R_SM));
+                if ui.add(title_btn).clicked() {
+                    sort_mode = SyncSortMode::Title;
+                    ui.data_mut(|d| d.insert_temp(sort_mode_id, sort_mode));
+                }
+            });
         });
         ui.add_space(12.0);
         
@@ -128,13 +165,31 @@ pub fn render_sync<F1, F2, F3>(
             .iter()
             .enumerate()
             .collect();
-        sorted_candidates.sort_by(|a, b| {
-            let mode_cmp = a.1.button_mode.cmp(&b.1.button_mode);
-            if mode_cmp != std::cmp::Ordering::Equal {
-                return mode_cmp;
+        
+        match sort_mode {
+            SyncSortMode::Title => {
+                sorted_candidates.sort_by(|a, b| {
+                    let name_cmp = a.1.song_name.cmp(&b.1.song_name);
+                    if name_cmp != std::cmp::Ordering::Equal {
+                        return name_cmp;
+                    }
+                    a.1.button_mode.cmp(&b.1.button_mode)
+                });
             }
-            a.1.song_name.cmp(&b.1.song_name)
-        });
+            SyncSortMode::RateDiff => {
+                sorted_candidates.sort_by(|a, b| {
+                    let diff_a = match a.1.varchive_rate {
+                        None => a.1.overmax_rate,
+                        Some(vr) => a.1.overmax_rate - vr,
+                    };
+                    let diff_b = match b.1.varchive_rate {
+                        None => b.1.overmax_rate,
+                        Some(vr) => b.1.overmax_rate - vr,
+                    };
+                    diff_b.partial_cmp(&diff_a).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+        }
 
         ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -236,5 +291,17 @@ pub fn close_if_requested(ctx: &egui::Context, open: &Arc<AtomicBool>) {
     if ctx.input(|i| i.viewport().close_requested()) {
         open.store(false, Ordering::Relaxed);
         ctx.request_repaint_of(ctx.parent_viewport_id());
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SyncSortMode {
+    Title,
+    RateDiff,
+}
+
+impl Default for SyncSortMode {
+    fn default() -> Self {
+        SyncSortMode::Title
     }
 }
