@@ -228,17 +228,30 @@ impl NativeApp {
 
 impl eframe::App for NativeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Ok(mut holder) = self.ctx_holder.lock() {
+            if holder.is_none() {
+                *holder = Some(ctx.clone());
+            }
+        }
         // 모든 레이아웃 디버그 시각화(노란 선 및 텍스트) 강제 비활성화
         #[cfg(debug_assertions)]
         {
-            ctx.style_mut(|s| {
-                s.debug.show_expand_width = false;
-                s.debug.show_expand_height = false;
-                s.debug.show_resize = false;
-                s.debug.show_unaligned = false;
-                s.debug.debug_on_hover = false;
+            thread_local! {
+                static STYLE_INIT: std::cell::Cell<bool> = std::cell::Cell::new(false);
+            }
+            STYLE_INIT.with(|init| {
+                if !init.get() {
+                    ctx.style_mut(|s| {
+                        s.debug.show_expand_width = false;
+                        s.debug.show_expand_height = false;
+                        s.debug.show_resize = false;
+                        s.debug.show_unaligned = false;
+                        s.debug.debug_on_hover = false;
+                    });
+                    ctx.set_debug_on_hover(false);
+                    init.set(true);
+                }
             });
-            ctx.set_debug_on_hover(false);
         }
 
         if self.exit_requested.load(Ordering::Relaxed) {
@@ -263,18 +276,18 @@ impl eframe::App for NativeApp {
         self.prev_sync_open = sync_on;
 
         self.start_log_pump(ctx);
-        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        ctx.request_repaint_after(std::time::Duration::from_secs(5));
         self.drain_detection_results();
         if self.drain_ui_commands() {
             ctx.request_repaint();
         }
-        self.poll_scan_requests();
-        self.poll_upload_requests();
-        self.poll_fetch_requests();
+        self.poll_scan_requests(ctx);
+        self.poll_upload_requests(ctx);
+        self.poll_fetch_requests(ctx);
         self.drain_sync_scan();
         self.drain_upload_results();
         self.drain_fetch_results();
-        self.poll_delete_requests();
+        self.poll_delete_requests(ctx);
         self.drain_game_found_refresh_steam();
         ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
 

@@ -193,6 +193,7 @@ pub struct NativeApp {
     pub(crate) recommender: Arc<Recommender>,
     pub(crate) game_found_rx: Receiver<()>,
     pub(crate) exit_requested: Arc<AtomicBool>,
+    pub(crate) ctx_holder: Arc<Mutex<Option<egui::Context>>>,
     #[cfg(target_os = "windows")]
     pub(crate) _tray: Option<TrayIcon>,
 }
@@ -295,6 +296,9 @@ impl NativeApp {
             }
         }
 
+        let ctx_holder = Arc::new(Mutex::new(None));
+        let ctx_holder_clone = ctx_holder.clone();
+
         detection_worker::spawn(
             (*root).clone(),
             merged_settings
@@ -304,6 +308,7 @@ impl NativeApp {
             log_tx.clone(),
             game_found_tx,
             detection_tx,
+            ctx_holder_clone,
         );
 
         let mut filters = std::collections::HashMap::new();
@@ -385,6 +390,7 @@ impl NativeApp {
             recommender,
             game_found_rx,
             exit_requested: exit_requested.clone(),
+            ctx_holder,
             #[cfg(target_os = "windows")]
             _tray: Some(TrayIcon::spawn(ui_cmd_tx)),
         };
@@ -393,7 +399,7 @@ impl NativeApp {
         Ok(app)
     }
 
-    pub(crate) fn poll_delete_requests(&mut self) {
+    pub(crate) fn poll_delete_requests(&mut self, ctx: &egui::Context) {
         while let Ok(idx) = self.delete_req_rx.try_recv() {
             let cand = self.sync_state.candidates.lock()
                 .ok()
@@ -405,7 +411,7 @@ impl NativeApp {
                         self.max_log_lines(),
                         format!("[Sync] 로컬 기록 삭제 완료: {} ({} {})", c.song_name, c.button_mode, c.difficulty),
                     );
-                    self.spawn_scan();
+                    self.spawn_scan(ctx.clone());
                     self.refresh_overlay_data();
                 } else {
                     debug_ui::push_log(
@@ -439,22 +445,22 @@ impl NativeApp {
             .to_string()
     }
 
-    pub(crate) fn poll_scan_requests(&mut self) {
+    pub(crate) fn poll_scan_requests(&mut self, ctx: &egui::Context) {
         if self.ui_state.scan_pending.swap(false, Ordering::Relaxed) {
             if let Ok(mut s) = self.sync_state.status.lock() {
                 *s = "스캔 중…".into();
             }
-            self.spawn_scan();
+            self.spawn_scan(ctx.clone());
         }
     }
 
-    pub(crate) fn poll_upload_requests(&mut self) {
+    pub(crate) fn poll_upload_requests(&mut self, ctx: &egui::Context) {
         while let Ok(idx) = self.upload_req_rx.try_recv() {
             let cand = self.sync_state.candidates.lock()
                 .ok()
                 .and_then(|g| g.get(idx).cloned());
             if let Some(c) = cand {
-                self.spawn_upload(idx, c);
+                self.spawn_upload(idx, c, ctx.clone());
             }
         }
     }
@@ -537,7 +543,7 @@ impl NativeApp {
         }
     }
 
-    fn spawn_scan(&self) {
+    fn spawn_scan(&self, ctx: egui::Context) {
         let steam = self.sync_state.steam_id.lock()
             .map(|g| g.clone())
             .unwrap_or_default();
@@ -550,15 +556,17 @@ impl NativeApp {
             let mut db = VArchiveDB::new();
             if let Err(e) = db.load_from_file(&songs_path) {
                 let _ = tx.send(Err(format!("songs.json: {e}")));
+                ctx.request_repaint();
                 return;
             }
             let cache_root = root.join("cache").join("varchive");
             let list = build_candidates(&db, rdb.as_ref(), &steam, &cache_root);
             let _ = tx.send(Ok(list));
+            ctx.request_repaint();
         });
     }
 
-    fn spawn_upload(&self, index: usize, candidate: SyncCandidate) {
+    fn spawn_upload(&self, index: usize, candidate: SyncCandidate, ctx: egui::Context) {
         let merged = match self.settings.merged.lock() {
             Ok(g) => g.clone(),
             Err(_) => return,
@@ -574,10 +582,12 @@ impl NativeApp {
             let path = Path::new(&account_path);
             if account_path.is_empty() || !path.exists() {
                 let _ = tx.send((index, "error".into(), "account.txt 경로 없음".into()));
+                ctx.request_repaint();
                 return;
             }
             let Some(account) = varchive_upload::parse_account_file(path) else {
                 let _ = tx.send((index, "error".into(), "account.txt 파싱 실패".into()));
+                ctx.request_repaint();
                 return;
             };
             let res = varchive_upload::upload_score_blocking(
@@ -617,6 +627,7 @@ impl NativeApp {
             } else {
                 let _ = tx.send((index, "error".into(), res.message));
             }
+            ctx.request_repaint();
         });
     }
 
@@ -653,9 +664,9 @@ impl NativeApp {
         }
     }
 
-    pub(crate) fn poll_fetch_requests(&mut self) {
+    pub(crate) fn poll_fetch_requests(&mut self, ctx: &egui::Context) {
         while let Ok((steam_id, v_id, button)) = self.fetch_req_rx.try_recv() {
-            self.spawn_fetch(steam_id, v_id, button);
+            self.spawn_fetch(steam_id, v_id, button, ctx.clone());
         }
     }
 
@@ -681,7 +692,7 @@ impl NativeApp {
         }
     }
 
-    fn spawn_fetch(&self, steam_id: String, v_id: String, button: i32) {
+    fn spawn_fetch(&self, steam_id: String, v_id: String, button: i32, ctx: egui::Context) {
         let tx = self.fetch_res_tx.clone();
         let cache_root = self.root.join("cache").join("varchive");
         let log_lines = self.debug_state.log_lines.clone();
@@ -718,6 +729,7 @@ impl NativeApp {
                         let _ = tx.send((v_id.clone(), b, Err(e)));
                     }
                 }
+                ctx.request_repaint();
             }
         });
     }

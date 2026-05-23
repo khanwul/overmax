@@ -22,6 +22,9 @@ pub struct PlayStateDetector {
     history_size: usize,
     history: VecDeque<Option<RawPlayState>>,
     last_stable_state: Option<GameSessionState>,
+    last_rate_bgra: Option<Vec<u8>>,
+    last_rate_result: (Option<f32>, String, Option<OcrTelemetry>),
+    last_rate_ocr_ts: f64,
 }
 
 impl PlayStateDetector {
@@ -30,12 +33,18 @@ impl PlayStateDetector {
             history_size: history_size.max(1),
             history: VecDeque::new(),
             last_stable_state: None,
+            last_rate_bgra: None,
+            last_rate_result: (None, String::new(), None),
+            last_rate_ocr_ts: 0.0,
         }
     }
 
     pub fn reset(&mut self) {
         self.history.clear();
         self.last_stable_state = None;
+        self.last_rate_bgra = None;
+        self.last_rate_result = (None, String::new(), None);
+        self.last_rate_ocr_ts = 0.0;
     }
 
     pub fn detect(
@@ -44,6 +53,7 @@ impl PlayStateDetector {
         rois: &RoiManager,
         song_id: Option<u32>,
         ocr: &OcrDetector,
+        now: f64,
     ) -> (GameSessionState, Option<OcrTelemetry>) {
         let mode = detect_button_mode(frame, rois);
         let (diff, confident) = detect_difficulty(frame, rois);
@@ -55,9 +65,29 @@ impl PlayStateDetector {
                 let mut rate = 0.0;
                 if let Some(rate_roi) = rois.get_roi("rate") {
                     if let Some(rate_img) = crop_roi(frame, rate_roi) {
-                        let (r_val, _txt, t_val) = ocr.detect_rate(&rate_img);
-                        rate = r_val.unwrap_or(0.0);
-                        telemetry = t_val;
+                        let changed = if let Some(ref prev) = self.last_rate_bgra {
+                            crate::frame_utils::thumbnail_changed(
+                                &rate_img.bgra,
+                                Some(prev),
+                                1.5,
+                            )
+                        } else {
+                            true
+                        };
+
+                        let should_ocr = changed || now - self.last_rate_ocr_ts >= 2.0;
+
+                        if should_ocr {
+                            if now - self.last_rate_ocr_ts >= 0.20 {
+                                let res = ocr.detect_rate(&rate_img);
+                                self.last_rate_result = res;
+                                self.last_rate_bgra = Some(rate_img.bgra.clone());
+                                self.last_rate_ocr_ts = now;
+                            }
+                        }
+
+                        rate = self.last_rate_result.0.unwrap_or(0.0);
+                        telemetry = self.last_rate_result.2.clone();
                     }
                 }
 
@@ -204,9 +234,9 @@ mod tests {
         rois.set_scene(SceneType::Freestyle);
 
         let ocr = crate::ocr_engine::OcrDetector::new();
-        assert!(!detector.detect(&frame, &rois, Some(7), &ocr).0.is_stable);
-        assert!(!detector.detect(&frame, &rois, Some(7), &ocr).0.is_stable);
-        assert!(detector.detect(&frame, &rois, Some(7), &ocr).0.is_stable);
+        assert!(!detector.detect(&frame, &rois, Some(7), &ocr, 1.0).0.is_stable);
+        assert!(!detector.detect(&frame, &rois, Some(7), &ocr, 2.0).0.is_stable);
+        assert!(detector.detect(&frame, &rois, Some(7), &ocr, 3.0).0.is_stable);
     }
 
     fn blank_frame() -> CapturedFrame {

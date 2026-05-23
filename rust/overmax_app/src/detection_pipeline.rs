@@ -7,7 +7,7 @@ use crate::screen_capture::CapturedFrame;
 use overmax_core::{GameSessionState, SceneType};
 use overmax_data::ImageIndexDb;
 
-const JACKET_MATCH_INTERVAL: f64 = 0.0;
+const JACKET_MATCH_INTERVAL: f64 = 0.25;
 const JACKET_CHANGE_THRESHOLD: f32 = 2.5;
 const JACKET_FORCE_RECHECK_SEC: f64 = 2.0;
 const LOGO_OCR_COOLDOWN_SEC: f64 = 1.0;
@@ -123,7 +123,7 @@ impl DetectionPipeline {
         let jacket_status = self.update_song_id_from_jacket(frame, now);
         let (state, telemetry) = self
             .play_state
-            .detect(frame, &self.rois, self.current_song_id, &self.ocr);
+            .detect(frame, &self.rois, self.current_song_id, &self.ocr, now);
         
         self.output(logo_detected, true, false, confidence, state, jacket_status, telemetry)
     }

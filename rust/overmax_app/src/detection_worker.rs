@@ -11,6 +11,7 @@ use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 const ACTIVE_SLEEP: Duration = Duration::from_millis(120);
+const BACKGROUND_SLEEP: Duration = Duration::from_millis(500);
 const LOG_INTERVAL: Duration = Duration::from_secs(3);
 
 pub fn spawn(
@@ -19,10 +20,11 @@ pub fn spawn(
     log_tx: Sender<String>,
     game_found_tx: Sender<()>,
     detection_tx: Sender<DetectionOutput>,
+    ctx_holder: std::sync::Arc<std::sync::Mutex<Option<eframe::egui::Context>>>,
 ) {
     std::thread::spawn(move || {
         initialize_winrt(&log_tx);
-        let mut worker = DetectionWorker::new(root, settings, log_tx, game_found_tx, detection_tx);
+        let mut worker = DetectionWorker::new(root, settings, log_tx, game_found_tx, detection_tx, ctx_holder);
         worker.run();
     });
 }
@@ -49,6 +51,8 @@ struct DetectionWorker {
     last_window_log: Instant,
     last_detection_log: Instant,
     was_found: bool,
+    is_foreground: bool,
+    ctx_holder: std::sync::Arc<std::sync::Mutex<Option<eframe::egui::Context>>>,
 }
 
 impl DetectionWorker {
@@ -58,6 +62,7 @@ impl DetectionWorker {
         log_tx: Sender<String>,
         game_found_tx: Sender<()>,
         detection_tx: Sender<DetectionOutput>,
+        ctx_holder: std::sync::Arc<std::sync::Mutex<Option<eframe::egui::Context>>>,
     ) -> Self {
         Self {
             root,
@@ -69,6 +74,8 @@ impl DetectionWorker {
             last_window_log: Instant::now() - LOG_INTERVAL,
             last_detection_log: Instant::now() - LOG_INTERVAL,
             was_found: false,
+            is_foreground: false,
+            ctx_holder,
         }
     }
 
@@ -87,6 +94,14 @@ impl DetectionWorker {
         loop {
             self.tick(&tracker, &capturer, &mut pipeline);
             std::thread::sleep(self.sleep_duration());
+        }
+    }
+
+    fn request_repaint(&self) {
+        if let Ok(holder) = self.ctx_holder.lock() {
+            if let Some(ctx) = &*holder {
+                ctx.request_repaint();
+            }
         }
     }
 
@@ -123,6 +138,7 @@ impl DetectionWorker {
                 out.game_rect = Some(rect);
                 self.log_detection_summary(&out);
                 let _ = self.detection_tx.send(out);
+                self.request_repaint();
             }
             Err(e) => self.log_detection_throttled(format!("[Detection] capture failed: {e}")),
         }
@@ -135,9 +151,14 @@ impl DetectionWorker {
     ) -> bool {
         if !self.was_found {
             let _ = self.game_found_tx.send(());
+            self.request_repaint();
             self.log("[Detection] game window found".into());
         }
+        if foreground != self.is_foreground {
+            self.request_repaint();
+        }
         self.was_found = true;
+        self.is_foreground = foreground;
         if !foreground {
             self.log_window_throttled("[Detection] foreground=false; capture skipped".into());
             return false;
@@ -163,9 +184,11 @@ impl DetectionWorker {
                 game_rect: None,
                 ocr_telemetry: None,
             });
+            self.request_repaint();
+            self.log("[WindowTracker] game window lost".into());
         }
         self.was_found = false;
-        self.log_window_throttled("[WindowTracker] game window not found".into());
+        self.is_foreground = false;
     }
 
     fn log_detection_summary(&mut self, out: &DetectionOutput) {
@@ -196,7 +219,11 @@ impl DetectionWorker {
 
     fn sleep_duration(&self) -> Duration {
         if self.was_found {
-            ACTIVE_SLEEP
+            if self.is_foreground {
+                ACTIVE_SLEEP
+            } else {
+                BACKGROUND_SLEEP
+            }
         } else {
             Duration::from_secs_f64(idle_sleep(&self.settings))
         }
@@ -274,6 +301,6 @@ fn idle_sleep(settings: &Value) -> f64 {
         .get("screen_capture")
         .and_then(|v| v.get("idle_sleep_sec"))
         .and_then(Value::as_f64)
-        .unwrap_or(0.5)
-        .max(0.05)
+        .unwrap_or(1.0)
+        .max(0.5)
 }
