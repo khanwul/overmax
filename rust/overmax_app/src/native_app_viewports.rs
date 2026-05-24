@@ -289,7 +289,10 @@ impl eframe::App for NativeApp {
         self.drain_fetch_results();
         self.poll_delete_requests(ctx);
         self.drain_game_found_refresh_steam();
-        ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
+        if self.prev_protected != Some(true) {
+            ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
+            self.prev_protected = Some(true);
+        }
 
         let scale = if let Ok(m) = self.settings.merged.lock() {
 
@@ -341,7 +344,11 @@ impl eframe::App for NativeApp {
 
         // 마우스가 오버레이 영역 위에 있을 때만 상호작용 가능하게 함 (보조창 조작을 위해)
         let is_over = is_mouse_over_overlay(ctx, scale);
-        ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(!overlay_on || !is_over));
+        let passthrough = !overlay_on || !is_over;
+        if self.prev_passthrough != Some(passthrough) {
+            ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(passthrough));
+            self.prev_passthrough = Some(passthrough);
+        }
 
         // Windows 전용: 전체 창 투명도 적용
         #[cfg(target_os = "windows")]

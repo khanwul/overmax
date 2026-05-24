@@ -89,7 +89,7 @@ impl DetectionWorker {
 
     fn run(&mut self) {
         let tracker = WindowTracker::new(&window_title(&self.settings));
-        let capturer = match ScreenCapturer::new() {
+        let mut capturer = match ScreenCapturer::new() {
             Ok(c) => c,
             Err(e) => return self.log(format!("[Detection] capture init failed: {e}")),
         };
@@ -100,7 +100,7 @@ impl DetectionWorker {
         ));
 
         loop {
-            self.tick(&tracker, &capturer, &mut pipeline);
+            self.tick(&tracker, &mut capturer, &mut pipeline);
             std::thread::sleep(self.sleep_duration());
         }
     }
@@ -130,7 +130,7 @@ impl DetectionWorker {
     fn tick(
         &mut self,
         tracker: &WindowTracker,
-        capturer: &ScreenCapturer,
+        capturer: &mut ScreenCapturer,
         pipeline: &mut DetectionPipeline,
     ) {
         let Some(rect) = tracker.game_rect() else {
@@ -247,7 +247,11 @@ impl DetectionWorker {
     fn sleep_duration(&self) -> Duration {
         if self.was_found {
             if self.is_foreground {
-                ACTIVE_SLEEP
+                if self.last_is_song_select || self.last_logo_detected {
+                    ACTIVE_SLEEP
+                } else {
+                    Duration::from_millis(1000)
+                }
             } else {
                 BACKGROUND_SLEEP
             }

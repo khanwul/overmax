@@ -40,7 +40,7 @@ fn main() {
     println!("[Bootstrap] 창 발견: {}x{} @ ({},{})", rect.width, rect.height, rect.left, rect.top);
     println!("[Bootstrap] 화면 캡처 중...");
     
-    let capturer = match ScreenCapturer::new() {
+    let mut capturer = match ScreenCapturer::new() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("에러: 캡처러 초기화 실패: {}", e);
