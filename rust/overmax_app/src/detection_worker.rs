@@ -146,10 +146,16 @@ impl DetectionWorker {
                 out.game_rect = Some(rect);
                 self.log_detection_summary(&out);
                 
+                let jacket_changed = match (&out.jacket_status, &self.last_jacket_status) {
+                    (JacketMatchStatus::Matched { song_id: id1, .. }, JacketMatchStatus::Matched { song_id: id2, .. }) => id1 != id2,
+                    (JacketMatchStatus::InvalidId { image_id: id1, .. }, JacketMatchStatus::InvalidId { image_id: id2, .. }) => id1 != id2,
+                    (s1, s2) => std::mem::discriminant(s1) != std::mem::discriminant(s2),
+                };
+
                 let state_changed = out.current_song_id != self.last_song_id
                     || out.is_song_select != self.last_is_song_select
                     || out.logo_detected != self.last_logo_detected
-                    || std::mem::discriminant(&out.jacket_status) != std::mem::discriminant(&self.last_jacket_status);
+                    || jacket_changed;
 
                 self.last_song_id = out.current_song_id;
                 self.last_is_song_select = out.is_song_select;
