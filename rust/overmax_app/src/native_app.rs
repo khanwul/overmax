@@ -96,6 +96,33 @@ pub fn run_native_app() -> eframe::Result<()> {
     )
 }
 
+#[cfg(target_os = "windows")]
+fn is_position_on_screen(x: f32, y: f32) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+        SM_YVIRTUALSCREEN,
+    };
+    unsafe {
+        let vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let vwidth = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let vheight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+        if vwidth > 0 && vheight > 0 {
+            let px = x as i32;
+            let py = y as i32;
+            px >= vx && px < (vx + vwidth) && py >= vy && py < (vy + vheight)
+        } else {
+            x >= 0.0 && y >= 0.0
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_position_on_screen(_x: f32, _y: f32) -> bool {
+    true
+}
+
 fn native_options(merged: &Value) -> eframe::NativeOptions {
     let mut builder = ViewportBuilder::default()
         .with_title("Overmax")
@@ -115,7 +142,11 @@ fn native_options(merged: &Value) -> eframe::NativeOptions {
             pos.get("x").and_then(|v| v.as_f64()),
             pos.get("y").and_then(|v| v.as_f64()),
         ) {
-            builder = builder.with_position(eframe::egui::pos2(x as f32, y as f32));
+            let px = x as f32;
+            let py = y as f32;
+            if is_position_on_screen(px, py) {
+                builder = builder.with_position(eframe::egui::pos2(px, py));
+            }
         }
     }
 

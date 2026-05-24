@@ -400,8 +400,8 @@ impl eframe::App for NativeApp {
                                 let mut overlay = settings.get("overlay").cloned().unwrap_or_else(|| serde_json::json!({}));
                                 if let Some(overlay_obj) = overlay.as_object_mut() {
                                     overlay_obj.insert("position".to_string(), serde_json::json!({
-                                        "x": rect.min.x.max(0.0) as i32,
-                                        "y": rect.min.y.max(0.0) as i32
+                                        "x": rect.min.x as i32,
+                                        "y": rect.min.y as i32
                                     }));
                                 }
                                 settings["overlay"] = overlay.clone();
