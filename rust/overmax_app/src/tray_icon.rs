@@ -1,10 +1,11 @@
 //! Windows system tray icon for the native Rust app.
 
 use crate::ui_command::UiCommand;
+use serde_json::Value;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
@@ -42,11 +43,12 @@ pub struct TrayIcon {
 
 struct TrayActions {
     command_tx: Sender<UiCommand>,
+    settings: Arc<Mutex<Value>>,
 }
 
 impl TrayIcon {
-    pub fn spawn(command_tx: Sender<UiCommand>) -> Self {
-        let _ = ACTIONS.set(TrayActions { command_tx });
+    pub fn spawn(command_tx: Sender<UiCommand>, settings: Arc<Mutex<Value>>) -> Self {
+        let _ = ACTIONS.set(TrayActions { command_tx, settings });
         let hwnd = Arc::new(AtomicIsize::new(0));
         let thread_hwnd = hwnd.clone();
         let thread = thread::spawn(move || unsafe {
@@ -251,7 +253,13 @@ unsafe fn show_context_menu(hwnd: HWND) {
     }
     append_item(menu, CMD_SETTINGS, "설정");
     append_item(menu, CMD_SYNC, "V-Archive 동기화");
-    append_item(menu, CMD_DEBUG, "디버그 로그");
+    let debug_enabled = ACTIONS.get()
+        .and_then(|a| a.settings.lock().ok())
+        .and_then(|s| s.get("debug").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    if debug_enabled {
+        append_item(menu, CMD_DEBUG, "디버그 로그");
+    }
     AppendMenuW(menu, MF_SEPARATOR, 0, null());
     append_item(menu, CMD_EXIT, "종료");
 

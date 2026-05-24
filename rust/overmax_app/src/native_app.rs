@@ -396,7 +396,7 @@ impl NativeApp {
             exit_requested: exit_requested.clone(),
             ctx_holder,
             #[cfg(target_os = "windows")]
-            _tray: Some(TrayIcon::spawn(ui_cmd_tx)),
+            _tray: Some(TrayIcon::spawn(ui_cmd_tx, merged_settings.clone())),
             #[cfg(target_os = "windows")]
             cached_hwnd: None,
             #[cfg(target_os = "windows")]
