@@ -34,16 +34,42 @@ impl OcrDetector {
     }
 
     pub fn detect_logo(&self, logo: &ImageRegion) -> (SceneType, String, String) {
-        let text = self.engine.recognize(logo, false).unwrap_or_default();
-        let normalized = normalize_alnum(&text);
+        let features = match overmax_cv::compute_image_features(
+            &logo.bgra,
+            logo.width as usize,
+            logo.height as usize,
+            4,
+        ) {
+            Ok((_, _, _, hog)) => hog,
+            Err(_) => return (SceneType::Unknown, String::new(), String::new()),
+        };
 
-        if is_logo_keyword_match(&normalize_alnum(KEYWORD_FREESTYLE), &normalized) {
-            (SceneType::Freestyle, text, normalized)
-        } else if is_logo_keyword_match(&normalize_alnum(KEYWORD_ONLINE), &normalized) {
-            (SceneType::Online, text, normalized)
-        } else {
-            (SceneType::Unknown, text, normalized)
+        let sim_freestyle = cosine_similarity(&features, &crate::logo_templates::TEMPLATE_FREESTYLE_HOG);
+        let sim_online = cosine_similarity(&features, &crate::logo_templates::TEMPLATE_ONLINE_HOG);
+
+        // BGA 동영상 노이즈가 겹쳐 흐려져도 로고 형상을 안전하게 잡을 수 있도록 매칭 임계치를 0.80으로 정의합니다.
+        let threshold = 0.80;
+        let mut best_scene = SceneType::Unknown;
+        let mut best_sim = 0.0;
+
+        if sim_freestyle >= threshold {
+            best_scene = SceneType::Freestyle;
+            best_sim = sim_freestyle;
         }
+
+        if sim_online >= threshold && sim_online > best_sim {
+            best_scene = SceneType::Online;
+            best_sim = sim_online;
+        }
+
+        let label = match best_scene {
+            SceneType::Freestyle => "FREESTYLE".to_string(),
+            SceneType::Online => "ONLINE".to_string(),
+            _ => "UNKNOWN".to_string(),
+        };
+
+        let text = format!("HOG Matching (Free: {:.3}, Online: {:.3})", sim_freestyle, sim_online);
+        (best_scene, text, label)
     }
 
     pub fn detect_rate(&self, rate: &ImageRegion) -> (Option<f32>, String, Option<OcrTelemetry>) {
@@ -284,4 +310,21 @@ mod tests {
         assert!(is_logo_keyword_match("ONLINE", "ONL1NE"));
         assert!(!is_logo_keyword_match("FREESTYLE", "MISSION"));
     }
+}
+
+fn dot(left: &[f32], right: &[f32]) -> f32 {
+    left.iter().zip(right).map(|(a, b)| a * b).sum()
+}
+
+fn vector_norm(values: &[f32]) -> f32 {
+    values.iter().map(|value| value * value).sum::<f32>().sqrt()
+}
+
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+    let norm_l = vector_norm(left);
+    let norm_r = vector_norm(right);
+    if norm_l <= 0.0 || norm_r <= 0.0 {
+        return 0.0;
+    }
+    dot(left, right) / (norm_l * norm_r)
 }
