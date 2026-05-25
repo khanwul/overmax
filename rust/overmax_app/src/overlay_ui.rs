@@ -386,7 +386,10 @@ fn drag_rect_excluding_button(header: Rect, button: Option<Rect>) -> Rect {
 
 fn draw_status_lamp(ui: &mut egui::Ui, stable: bool, px: &Px) {
     let color = if stable { Theme::OK } else { Theme::WARN };
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(px.status_dot()), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(px.status_dot(), px.mode_badge_h()),
+        egui::Sense::hover(),
+    );
     ui.painter().circle_filled(rect.center(), 3.5 * px.scale, color);
 }
 

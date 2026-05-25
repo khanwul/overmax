@@ -85,7 +85,9 @@ fn draw_diff_tab(
         .show(ui, |ui| {
             ui.set_min_size(Vec2::new(TAB_WIDTH * scale, TAB_HEIGHT * scale));
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                ui.add_space(6.0 * scale);
+                // 전체 46.0px 높이 중 라벨 두 개(약 28.0px 상당)의 수직 중앙 정렬을 위한 여백 계산
+                let space = (TAB_HEIGHT * scale - 28.0 * scale) / 2.0;
+                ui.add_space(space.max(0.0));
                 ui.add(diff_label(diff, scale));
                 ui.add(pattern_floor_label(pattern, active == Some(diff), exists, scale));
             });
