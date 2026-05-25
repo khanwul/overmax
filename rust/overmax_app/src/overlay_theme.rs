@@ -65,6 +65,7 @@ impl Theme {
 }
 
 pub fn apply_secondary_window_style(ctx: &egui::Context) {
+    ctx.set_visuals(egui::Visuals::dark());
     ctx.style_mut(|s| {
         // Typography
         let mut families = std::collections::BTreeMap::new();

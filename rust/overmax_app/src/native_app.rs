@@ -85,6 +85,7 @@ pub fn run_native_app() -> eframe::Result<()> {
         "Overmax",
         options,
         Box::new(|cc| {
+            cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
             overlay_ui::install_cjk_fonts(&cc.egui_ctx);
             NativeApp::new()
                 .map(|app| Box::new(app) as Box<dyn eframe::App>)
