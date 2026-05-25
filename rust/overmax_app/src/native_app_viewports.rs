@@ -447,21 +447,35 @@ impl eframe::App for NativeApp {
 }
 
 #[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::HWND;
+
+#[cfg(target_os = "windows")]
 impl NativeApp {
-    fn apply_window_opacity(&mut self, opacity: f32) -> bool {
+    fn check_cached_window_opacity(&self, hwnd: HWND, target_opacity: f32) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        if unsafe { IsWindow(hwnd) } == 0 {
+            return false;
+        }
+        let style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
+        if (style & WS_EX_LAYERED as i32) == 0 {
+            return false;
+        }
+        let mut alpha = 0u8;
+        let mut flags = 0u32;
+        let success = unsafe {
+            GetLayeredWindowAttributes(hwnd, std::ptr::null_mut(), &mut alpha, &mut flags)
+        };
+        if success == 0 || (flags & 0x00000002) == 0 {
+            return false;
+        }
+        let current_opacity = alpha as f32 / 255.0;
+        (target_opacity - current_opacity).abs() < 0.005
+    }
+
+    fn find_overlay_window(&self) -> Option<HWND> {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-        use windows_sys::Win32::Foundation::HWND;
-
-        if let (Some(hwnd_val), Some(last_opacity)) = (self.cached_hwnd, self.last_applied_opacity) {
-            if (opacity - last_opacity).abs() < 0.001 {
-                let hwnd = hwnd_val as HWND;
-                if unsafe { IsWindow(hwnd) } != 0 {
-                    return true;
-                }
-            }
-        }
-
+        
         struct EnumData {
             target_pid: u32,
             found_hwnd: Option<HWND>,
@@ -485,13 +499,11 @@ impl NativeApp {
                         let title = String::from_utf16_lossy(&text[..len as usize]);
                         let visible = IsWindowVisible(hwnd) != 0;
                         
-                        // 제목이 "Overmax"라면 가시성과 상관없이 최우선 타겟
                         if title == "Overmax" {
                             data.found_hwnd = Some(hwnd);
                             return 0; // 즉시 중단
                         }
                         
-                        // 제목에 Overmax가 포함되거나, 가시적인 창을 차선책으로 저장
                         if data.found_hwnd.is_none() && (title.contains("Overmax") || visible) {
                             data.found_hwnd = Some(hwnd);
                         }
@@ -501,15 +513,46 @@ impl NativeApp {
             }
 
             EnumWindows(Some(enum_callback), &mut data as *mut _ as isize);
+        }
+        data.found_hwnd
+    }
 
-            if let Some(hwnd) = data.found_hwnd {
-                debug_ui::push_log(&self.debug_state.log_lines, self.max_log_lines(), format!("[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})", opacity, hwnd));
+    fn apply_window_opacity(&mut self, opacity: f32) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+        // 1. 캐싱된 핸들이 있고 투명도가 올바르게 유지되고 있다면 조기 반환
+        if let Some(hwnd_val) = self.cached_hwnd {
+            let hwnd = hwnd_val as HWND;
+            if self.check_cached_window_opacity(hwnd, opacity) {
+                return true;
+            }
+            
+            // 캐시된 핸들은 유효하나 스타일이 풀린 경우: 바로 재적용 시도
+            if unsafe { IsWindow(hwnd) } != 0 {
+                let style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
+                if (style & WS_EX_LAYERED as i32) == 0 {
+                    unsafe { SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED as i32) };
+                }
+                if unsafe { SetLayeredWindowAttributes(hwnd, 0, (opacity * 255.0) as u8, 0x00000002) } != 0 {
+                    self.last_applied_opacity = Some(opacity);
+                    return true;
+                }
+            }
+        }
+
+        // 2. 캐싱된 핸들이 없거나 유효하지 않은 경우 새롭게 검색 후 적용
+        if let Some(hwnd) = self.find_overlay_window() {
+            debug_ui::push_log(
+                &self.debug_state.log_lines,
+                self.max_log_lines(),
+                format!("[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})", opacity, hwnd),
+            );
+
+            unsafe {
                 let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
                 if (style & WS_EX_LAYERED as i32) == 0 {
                     SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED as i32);
                 }
-                
                 if SetLayeredWindowAttributes(hwnd, 0, (opacity * 255.0) as u8, 0x00000002) != 0 {
                     self.cached_hwnd = Some(hwnd as isize);
                     self.last_applied_opacity = Some(opacity);
