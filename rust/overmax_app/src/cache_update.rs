@@ -282,7 +282,7 @@ fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> Value {
     let raw_assist = pick(values, &["보조 키 여부", "보조키여부"]);
     let assist_key = if raw_assist == "❌" || raw_assist == "○" || raw_assist == "O" {
         "사용".to_string()
-    } else if raw_assist == "️️⚠️" || raw_assist == "⚠" {
+    } else if raw_assist == "️️⚠️" || raw_assist.starts_with("⚠") {
         "주의".to_string()
     } else if raw_assist == "✅" {
         "미사용".to_string()
