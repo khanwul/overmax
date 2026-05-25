@@ -34,7 +34,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 - `overmax_app`: 메인 애플리케이션 (`egui/winit` 기반 GUI, 화면 캡처 루프, 디텍션 워커, 앱/DB 자가 업데이트)
 - `overmax_core`: 공통 데이터 모델 및 핵심 상태 구조체 (`GameSessionState`, `PlayContext`, `SceneType`)
 - `overmax_data`: 설정 파싱, SQLite DB (`RecordDB`), V-Archive API 클라이언트, 추천 정렬 로직
-- `overmax_cv`: 이미지 매칭(HOG, Perceptual Hash), OCR 전처리(Grayscale, Upscale, Otsu 이진화 등)
+- `overmax_cv`: 이미지 매칭(HOG, Perceptual Hash), OCR 전처리(Grayscale, Upscale, Otsu 이진화, 컬러 패스 등)
 
 ## 데이터 흐름 및 스레드 구조
 ```
@@ -49,7 +49,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
    ├── WindowTracker: DJMAX RESPECT V 창 추적 (Win32 API)
    ├── ScreenCapture: GDI 기반의 실시간 프레임 캡처
    └── DetectionPipeline
-        ├── OcrDetector: Windows OCR (logo -> SceneType 판별, rate -> f32 추출)
+        ├── OcrDetector: Windows OCR 멀티패스 (Color / Grayscale / Binarized / Inverted) → logo SceneType 판별, rate f32 추출
         ├── ImageIndexDb: overmax_cv (HOG + Hash 매칭 -> song_id 탐색)
         └── PlayStateDetector: (버튼 모드, 난이도, 맥스콤보 감지)
 ```
@@ -59,8 +59,8 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 # Detection Pipeline & State Handling
 
 ## 1. 씬 감지 및 동적 ROI (Scene-Aware ROI)
-- **로고 OCR 감지**: `logo` ROI 영역에 대해 Windows OCR을 수행.
-  - 키워드 매칭: `FREESTYLE` -> `SceneType::Freestyle`, `ONLINE` -> `SceneType::Online`, 매칭 실패 -> `SceneType::Unknown`.
+- **로고 OCR 감지**: `logo` ROI 영역에 대해 Windows OCR 멀티패스를 수행 (Color → Grayscale → Binarized → Binarized Inverted 순서로 시도, 첫 번째 매칭 성공 시 즉시 반환).
+  - 키워드 매칭: `FREESTYLE` → `SceneType::Freestyle`, `ONLINE` → `SceneType::Online`, 전 패스 매칭 실패 → `SceneType::Unknown`.
 - **동적 ROI 전환**: `RoiManager`가 감지된 씬(`SceneType`)에 따라 최적의 ROI 세트(Freestyle / Online)를 동적으로 전환.
   - `logo` ROI는 씬과 독립적으로 상단 고정 좌표를 가지며, 씬 판별의 트리거 역할을 수행.
 - **히스테리시스 버퍼**: `HysteresisBuffer`를 통해 선곡 화면 진입/이탈 판정 및 신뢰도(Confidence) 계산.
@@ -74,7 +74,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
   - **버튼 모드 (Button Mode)**: `btn_mode` ROI의 평균 BGR 색상과 미리 정의된 대표색(4B/5B/6B/8B)의 Euclidean 거리가 60 이하인 모드 중 최적 매칭값 선택.
   - **난이도 (Difficulty)**: 각 난이도 패널 ROI(NM/HD/MX/SC)의 평균 밝기를 계산. 상위 1위 밝기가 최소 밝기(45) 이상이고 2위와의 차이(margin)가 15.0 이상일 때 유효(confident)한 난이도로 판정.
   - **Max Combo**: `max_combo_badge` ROI의 평균 밝기가 160 이상일 때 True.
-  - **Rate**: `rate` ROI 영역의 Windows OCR 결과를 실수값(`f32`)으로 실시간 수집.
+  - **Rate**: `rate` ROI 영역의 Windows OCR 멀티패스(Color → Grayscale → Grayscale Inverted) 결과를 실수값(`f32`)으로 실시간 수집. 유효 파싱값이 나온 첫 번째 패스 결과를 채택.
 - **원자적 안정화**:
   - 곡 ID, 버튼 모드, 난이도, Rate, Max Combo 전체를 하나의 `PlayContext`로 묶어 관리.
   - `PlayStateDetector`에서 이 전체 필드가 연속으로 N 프레임(기본 3프레임) 동안 완벽히 동일하게 감지될 때만 `GameSessionState.is_stable = true` 상태로 commit.
@@ -86,7 +86,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 - **egui/winit 멀티 뷰포트**: 네이티브 타이틀바가 없는 투명 오버레이 구현.
 - **오버레이 드래그 & 스냅**: 마우스 드래그를 통한 위치 이동 및 모니터 경계 스냅 지원. 마우스 드래그 종료 시 자동으로 DJMAX RESPECT V 게임 창으로 포커스(foreground)를 복원하여 플레이 방해를 최소화.
-- **스케일 프리셋**: 75% ~ 150% 스케일 조절 지원 및 `settings.user.json` 저장. egui 렌더링 시 버튼 크기 고정 및 패딩 보정을 통해 UI Jitter(흔들림)를 방지.
+- **스케일 프리셋**: S / M / L / XL 4단계 스케일 프리셋 지원 및 `settings.user.json` 저장. egui 렌더링 시 버튼 크기 고정 및 패딩 보정을 통해 UI Jitter(흔들림)를 방지.
 - **V-Archive 연동 및 기록 동기화**:
   - V-Archive API를 통한 플레이 데이터 패치/자동 갱신.
   - 로컬 DB에만 존재하는 갱신 후보 데이터를 스캔하여 V-Archive 웹서버에 일괄 등록/삭제 지원 (`SyncWindow`).
@@ -95,7 +95,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 # Debug Strategy
 
-- **Debug UI**: `debug_ui.rs`를 통해 모듈별 실시간 디버그 로그 표시, 카테고리 필터링, 일시정지, 비우기 기능 제공.
+- **Debug UI**: `debug_ui.rs`를 통해 모듈별 실시간 디버그 로그 표시, 카테고리 필터링, 일시정지, 비우기 기능 제공. Rate OCR 텔레메트리(OCR에 전달된 실제 이미지 컬러/그레이스케일 미리보기, Threshold/BgMean/Invert 수치) 지원.
 
 ---
 
