@@ -20,7 +20,7 @@ fn game_window_title(settings: &serde_json::Value) -> &str {
         .unwrap_or("DJMAX RESPECT V")
 }
 
-fn is_mouse_over_overlay(ctx: &egui::Context, _scale: f32) -> bool {
+fn is_mouse_over_overlay(ctx: &egui::Context, last_painted_rect: Option<egui::Rect>) -> bool {
     let Some(rect) = ctx.input(|i| i.viewport().outer_rect) else {
         return false;
     };
@@ -28,11 +28,13 @@ fn is_mouse_over_overlay(ctx: &egui::Context, _scale: f32) -> bool {
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pos);
     }
-    // We no longer use pixels_per_point for scaling, so the mouse position 
-    // from Windows is in physical pixels, and rect from egui is also effectively in 
-    // physical pixels (since PPI=1.0).
     let mouse_pos = egui::pos2(pos.x as f32, pos.y as f32);
-    rect.contains(mouse_pos)
+    if let Some(paint_rect) = last_painted_rect {
+        let global_paint_rect = paint_rect.translate(rect.min.to_vec2());
+        global_paint_rect.contains(mouse_pos)
+    } else {
+        rect.contains(mouse_pos)
+    }
 }
 
 impl NativeApp {
@@ -340,7 +342,7 @@ impl eframe::App for NativeApp {
         let _hidden_size = Vec2::new(1.0, 1.0);
 
         // 마우스가 오버레이 영역 위에 있을 때만 상호작용 가능하게 함 (보조창 조작을 위해)
-        let is_over = is_mouse_over_overlay(ctx, scale);
+        let is_over = is_mouse_over_overlay(ctx, self.last_painted_rect);
         let passthrough = !overlay_on || !is_over;
         if self.prev_passthrough != Some(passthrough) {
             ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(passthrough));
@@ -376,6 +378,7 @@ impl eframe::App for NativeApp {
             .frame(egui::Frame::NONE.fill(Color32::from_rgba_unmultiplied(0, 0, 0, 0)))
             .show(ctx, |ui| {
                 if !overlay_on {
+                    self.last_painted_rect = None;
                     return;
                 }
                 let actions = overlay_ui::draw_overlay_panel(
@@ -432,6 +435,7 @@ impl eframe::App for NativeApp {
                     self.handle_ui_command(command);
                     ctx.request_repaint();
                 }
+                self.last_painted_rect = actions.response_rect;
             });
     }
 

@@ -233,6 +233,7 @@ pub struct NativeApp {
     pub(crate) cached_hwnd: Option<isize>,
     #[cfg(target_os = "windows")]
     pub(crate) last_applied_opacity: Option<f32>,
+    pub(crate) last_painted_rect: Option<egui::Rect>,
 }
 
 impl NativeApp {
@@ -436,6 +437,7 @@ impl NativeApp {
             cached_hwnd: None,
             #[cfg(target_os = "windows")]
             last_applied_opacity: None,
+            last_painted_rect: None,
         };
 
         app.handle_auto_refresh();

@@ -20,6 +20,7 @@ pub struct OverlayActions {
     pub start_drag: bool,
     pub restore_game_focus: bool,
     pub command: Option<UiCommand>,
+    pub response_rect: Option<Rect>,
 }
 
 struct Px {
@@ -160,7 +161,7 @@ pub fn draw_overlay_panel(
 
     let px = Px::new(props.scale);
     let mut actions = OverlayActions::default();
-    Frame::new()
+    let response = Frame::new()
         .fill(Theme::PANEL_BG)
         .corner_radius(CornerRadius::same((14.0 * props.scale) as u8))
         .inner_margin(Margin::same(px.panel_margin() as i8))
@@ -188,6 +189,7 @@ pub fn draw_overlay_panel(
             );
         });
 
+    actions.response_rect = Some(response.response.rect);
     actions
 }
 
