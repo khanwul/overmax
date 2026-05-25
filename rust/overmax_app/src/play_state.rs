@@ -22,7 +22,7 @@ pub struct PlayStateDetector {
     history_size: usize,
     history: VecDeque<Option<RawPlayState>>,
     last_stable_state: Option<GameSessionState>,
-    last_rate_bgra: Option<Vec<u8>>,
+    last_rate_thumb: Option<Vec<u8>>,
     last_rate_result: (Option<f32>, String, Option<OcrTelemetry>),
     last_rate_ocr_ts: f64,
 }
@@ -33,7 +33,7 @@ impl PlayStateDetector {
             history_size: history_size.max(1),
             history: VecDeque::new(),
             last_stable_state: None,
-            last_rate_bgra: None,
+            last_rate_thumb: None,
             last_rate_result: (None, String::new(), None),
             last_rate_ocr_ts: 0.0,
         }
@@ -42,7 +42,7 @@ impl PlayStateDetector {
     pub fn reset(&mut self) {
         self.history.clear();
         self.last_stable_state = None;
-        self.last_rate_bgra = None;
+        self.last_rate_thumb = None;
         self.last_rate_result = (None, String::new(), None);
         self.last_rate_ocr_ts = 0.0;
     }
@@ -65,23 +65,29 @@ impl PlayStateDetector {
                 let mut rate = 0.0;
                 if let Some(rate_roi) = rois.get_roi("rate") {
                     if let Some(rate_img) = crop_roi(frame, rate_roi) {
-                        let changed = if let Some(ref prev) = self.last_rate_bgra {
-                            crate::frame_utils::thumbnail_changed(
-                                &rate_img.bgra,
-                                Some(prev),
-                                1.5,
-                            )
+                        let thumb = crate::frame_utils::make_thumbnail(&rate_img);
+                        let changed = if let Some(ref prev) = self.last_rate_thumb {
+                            if let Some(ref t) = thumb {
+                                crate::frame_utils::thumbnail_changed(
+                                    t,
+                                    Some(prev),
+                                    2.0,
+                                )
+                            } else {
+                                true
+                            }
                         } else {
                             true
                         };
 
-                        let should_ocr = changed || now - self.last_rate_ocr_ts >= 2.0;
+                        let should_ocr = changed
+                            || (self.last_rate_result.0.is_none() && now - self.last_rate_ocr_ts >= 5.0);
 
                         if should_ocr {
                             if now - self.last_rate_ocr_ts >= 0.20 {
                                 let res = ocr.detect_rate(&rate_img);
                                 self.last_rate_result = res;
-                                self.last_rate_bgra = Some(rate_img.bgra.clone());
+                                self.last_rate_thumb = thumb;
                                 self.last_rate_ocr_ts = now;
                             }
                         }
