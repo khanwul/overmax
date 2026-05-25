@@ -210,6 +210,7 @@ fn parse_rate_text(text: &str) -> Option<f32> {
     (0.0..=100.0).contains(&value).then_some(value)
 }
 
+#[cfg(test)]
 fn normalize_alnum(text: &str) -> String {
     text.chars()
         .filter(|ch| ch.is_ascii_alphanumeric())
@@ -217,6 +218,7 @@ fn normalize_alnum(text: &str) -> String {
         .collect()
 }
 
+#[cfg(test)]
 fn is_logo_keyword_match(keyword: &str, normalized_ocr: &str) -> bool {
     if keyword.is_empty() || normalized_ocr.is_empty() {
         return false;
@@ -234,11 +236,13 @@ fn is_logo_keyword_match(keyword: &str, normalized_ocr: &str) -> bool {
     sequence_ratio(keyword, normalized_ocr) >= 0.72
 }
 
+#[cfg(test)]
 fn sequence_ratio(left: &str, right: &str) -> f32 {
     let lcs = lcs_len(left.as_bytes(), right.as_bytes()) as f32;
     2.0 * lcs / (left.len() + right.len()) as f32
 }
 
+#[cfg(test)]
 fn lcs_len(left: &[u8], right: &[u8]) -> usize {
     let mut prev = vec![0; right.len() + 1];
     let mut curr = vec![0; right.len() + 1];
