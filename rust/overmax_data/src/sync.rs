@@ -34,8 +34,10 @@ impl SyncCandidate {
                 self.overmax_rate - self.varchive_rate.unwrap_or(0.0)
             ));
         }
-        if self.overmax_mc && !self.varchive_mc.unwrap_or(false) {
-            parts.push("MC".to_string());
+        if self.overmax_rate >= 100.0 {
+            parts.push("P".to_string());
+        } else if self.overmax_mc && !self.varchive_mc.unwrap_or(false) {
+            parts.push("M".to_string());
         }
         parts.join(" · ")
     }
