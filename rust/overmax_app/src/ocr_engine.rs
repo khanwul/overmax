@@ -33,103 +33,113 @@ impl OcrDetector {
     pub fn is_available(&self) -> bool {
         self.engine.is_available()
     }
-    #[allow(unused_assignments)]
     pub fn detect_logo(&self, logo: &ImageRegion) -> (SceneType, String, String) {
-        // Pass 1: Grayscale (no binarization) - extremely robust on bright/fluctuating backgrounds
-        let mut text = self.engine.recognize_logo(logo, false, false).unwrap_or_default();
-        let mut normalized = normalize_alnum(&text);
+        // 1. Try Color OCR
+        if let Ok(t) = self.engine.recognize_logo_color(logo) {
+            if let Some((scene, _)) = match_logo_scene(&t) {
+                return (scene, t, scene_label(scene));
+            }
+        }
+        // 2. Try Grayscale (no binarization)
+        if let Ok(t) = self.engine.recognize_logo(logo, false, false) {
+            if let Some((scene, _)) = match_logo_scene(&t) {
+                return (scene, t, scene_label(scene));
+            }
+        }
+        // 3. Try Binarized normal
+        if let Ok(t) = self.engine.recognize_logo(logo, false, true) {
+            if let Some((scene, _)) = match_logo_scene(&t) {
+                return (scene, t, scene_label(scene));
+            }
+        }
+        // 4. Try Binarized inverted
+        if let Ok(t) = self.engine.recognize_logo(logo, true, true) {
+            if let Some((scene, _)) = match_logo_scene(&t) {
+                return (scene, t, scene_label(scene));
+            }
+        }
 
-        let mut scene = if is_logo_keyword_match(&normalize_alnum(KEYWORD_FREESTYLE), &normalized) {
-            SceneType::Freestyle
-        } else if is_logo_keyword_match(&normalize_alnum(KEYWORD_ONLINE), &normalized) {
-            SceneType::Online
+        (SceneType::Unknown, String::new(), "UNKNOWN".to_string())
+    }
+
+    fn attempt_rate_ocr(
+        &self,
+        rate: &ImageRegion,
+        color: bool,
+        force_invert: bool,
+    ) -> Option<(Option<f32>, String, OcrTelemetry)> {
+        let res = if color {
+            self.engine.recognize_color_with_telemetry(rate)
         } else {
-            SceneType::Unknown
+            self.engine.recognize_with_telemetry(rate, force_invert, false)
         };
-
-        // Pass 2: Fallback to binarized normal
-        if scene == SceneType::Unknown {
-            if let Ok(t) = self.engine.recognize_logo(logo, false, true) {
-                let norm = normalize_alnum(&t);
-                let sc = if is_logo_keyword_match(&normalize_alnum(KEYWORD_FREESTYLE), &norm) {
-                    SceneType::Freestyle
-                } else if is_logo_keyword_match(&normalize_alnum(KEYWORD_ONLINE), &norm) {
-                    SceneType::Online
-                } else {
-                    SceneType::Unknown
-                };
-                if sc != SceneType::Unknown {
-                    scene = sc;
-                    text = t;
-                    normalized = norm;
-                }
-            }
-        }
-
-        // Pass 3: Fallback to binarized inverted (useful for bright BGA flashes that invert the threshold)
-        if scene == SceneType::Unknown {
-            if let Ok(t) = self.engine.recognize_logo(logo, true, true) {
-                let norm = normalize_alnum(&t);
-                let sc = if is_logo_keyword_match(&normalize_alnum(KEYWORD_FREESTYLE), &norm) {
-                    SceneType::Freestyle
-                } else if is_logo_keyword_match(&normalize_alnum(KEYWORD_ONLINE), &norm) {
-                    SceneType::Online
-                } else {
-                    SceneType::Unknown
-                };
-                if sc != SceneType::Unknown {
-                    scene = sc;
-                    text = t;
-                    normalized = norm;
-                }
-            }
-        }
-
-        let label = match scene {
-            SceneType::Freestyle => "FREESTYLE".to_string(),
-            SceneType::Online => "ONLINE".to_string(),
-            _ => "UNKNOWN".to_string(),
+        let (txt, threshold, bg_mean, use_invert, pixels, w, h) = res.ok()?;
+        let val = parse_rate_text(&txt);
+        let telemetry = OcrTelemetry {
+            rate_text: txt.clone(),
+            threshold,
+            bg_mean,
+            use_invert,
+            image_pixels: pixels,
+            image_width: w,
+            image_height: h,
         };
-
-        (scene, text, label)
+        Some((val, txt, telemetry))
     }
 
     pub fn detect_rate(&self, rate: &ImageRegion) -> (Option<f32>, String, Option<OcrTelemetry>) {
-        let mut telemetry = None;
-        let mut text = String::new();
-        let mut value = None;
-        
-        if let Ok((txt, threshold, bg_mean, use_invert, pixels, w, h)) = self.engine.recognize_with_telemetry(rate, false) {
-            text = txt.clone();
-            value = parse_rate_text(&text);
-            telemetry = Some(OcrTelemetry {
-                rate_text: text.clone(),
-                threshold,
-                bg_mean,
-                use_invert,
-                image_pixels: pixels,
-                image_width: w,
-                image_height: h,
-            });
-        }
-        
-        if value.is_none() && text.is_empty() {
-            if let Ok((txt, threshold, bg_mean, use_invert, pixels, w, h)) = self.engine.recognize_with_telemetry(rate, true) {
-                text = txt;
-                value = parse_rate_text(&text);
-                telemetry = Some(OcrTelemetry {
-                    rate_text: text.clone(),
-                    threshold,
-                    bg_mean,
-                    use_invert,
-                    image_pixels: pixels,
-                    image_width: w,
-                    image_height: h,
-                });
+        let mut fallback = None;
+        // Pass 1: Color OCR
+        if let Some((val, txt, tel)) = self.attempt_rate_ocr(rate, true, false) {
+            if val.is_some() {
+                return (val, txt, Some(tel));
+            }
+            if !txt.is_empty() && fallback.is_none() {
+                fallback = Some((val, txt, tel));
             }
         }
-        
-        (value, text, telemetry)
+        // Pass 2: Grayscale OCR (auto-invert)
+        if let Some((val, txt, tel)) = self.attempt_rate_ocr(rate, false, false) {
+            if val.is_some() {
+                return (val, txt, Some(tel));
+            }
+            if !txt.is_empty() && fallback.is_none() {
+                fallback = Some((val, txt, tel));
+            }
+        }
+        // Pass 3: Grayscale OCR (forced opposite invert)
+        if let Some((val, txt, tel)) = self.attempt_rate_ocr(rate, false, true) {
+            if val.is_some() {
+                return (val, txt, Some(tel));
+            }
+            if !txt.is_empty() && fallback.is_none() {
+                fallback = Some((val, txt, tel));
+            }
+        }
+        if let Some((val, txt, tel)) = fallback {
+            (val, txt, Some(tel))
+        } else {
+            (None, String::new(), None)
+        }
+    }
+}
+
+fn match_logo_scene(text: &str) -> Option<(SceneType, String)> {
+    let normalized = normalize_alnum(text);
+    if is_logo_keyword_match(&normalize_alnum(KEYWORD_FREESTYLE), &normalized) {
+        Some((SceneType::Freestyle, normalized))
+    } else if is_logo_keyword_match(&normalize_alnum(KEYWORD_ONLINE), &normalized) {
+        Some((SceneType::Online, normalized))
+    } else {
+        None
+    }
+}
+
+fn scene_label(scene: SceneType) -> String {
+    match scene {
+        SceneType::Freestyle => "FREESTYLE".to_string(),
+        SceneType::Online => "ONLINE".to_string(),
+        _ => "UNKNOWN".to_string(),
     }
 }
 
@@ -163,15 +173,54 @@ impl WindowsOcrEngine {
         recognize_bmp(engine, &bmp).map(|text| text.trim().to_string())
     }
 
+    fn recognize_logo_color(&self, image: &ImageRegion) -> Result<String, String> {
+        let Some(engine) = &self.engine else {
+            return Ok(String::new());
+        };
+        if image.width <= 0 || image.height <= 0 {
+            return Err("OCR image has invalid dimensions".to_string());
+        }
+        let bmp = overmax_cv::preprocess_ocr_color_bgra(
+            &image.bgra,
+            image.width as usize,
+            image.height as usize,
+        )
+        .map_err(|e| e.to_string())?;
+        recognize_bmp(engine, &bmp).map(|text| text.trim().to_string())
+    }
+
     fn recognize_with_telemetry(
         &self,
         image: &ImageRegion,
         force_invert: bool,
+        binarize: bool,
     ) -> Result<(String, u8, f32, bool, Vec<u8>, usize, usize), String> {
         let Some(engine) = &self.engine else {
             return Ok((String::new(), 0, 0.0, false, Vec::new(), 0, 0));
         };
-        let (bmp, threshold, bg_mean, use_invert, pixels, w, h) = preprocess_ocr_bmp_with_telemetry(image, force_invert)?;
+        let (bmp, threshold, bg_mean, use_invert, pixels, w, h) =
+            preprocess_ocr_bmp_with_telemetry(image, force_invert, binarize)?;
+        let text = recognize_bmp(engine, &bmp).map(|t| t.trim().to_string())?;
+        Ok((text, threshold, bg_mean, use_invert, pixels, w, h))
+    }
+
+    fn recognize_color_with_telemetry(
+        &self,
+        image: &ImageRegion,
+    ) -> Result<(String, u8, f32, bool, Vec<u8>, usize, usize), String> {
+        let Some(engine) = &self.engine else {
+            return Ok((String::new(), 0, 0.0, false, Vec::new(), 0, 0));
+        };
+        if image.width <= 0 || image.height <= 0 {
+            return Err("OCR image has invalid dimensions".to_string());
+        }
+        let (bmp, threshold, bg_mean, use_invert, pixels, w, h) =
+            overmax_cv::preprocess_ocr_color_bgra_with_telemetry(
+                &image.bgra,
+                image.width as usize,
+                image.height as usize,
+            )
+            .map_err(|e| e.to_string())?;
         let text = recognize_bmp(engine, &bmp).map(|t| t.trim().to_string())?;
         Ok((text, threshold, bg_mean, use_invert, pixels, w, h))
     }
@@ -180,6 +229,7 @@ impl WindowsOcrEngine {
 fn preprocess_ocr_bmp_with_telemetry(
     image: &ImageRegion,
     force_invert: bool,
+    binarize: bool,
 ) -> Result<(Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize), String> {
     if image.width <= 0 || image.height <= 0 {
         return Err("OCR image has invalid dimensions".to_string());
@@ -189,6 +239,7 @@ fn preprocess_ocr_bmp_with_telemetry(
         image.width as usize,
         image.height as usize,
         force_invert,
+        binarize,
     )
     .map_err(|e| e.to_string())
 }

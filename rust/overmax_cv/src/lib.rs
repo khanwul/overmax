@@ -51,7 +51,26 @@ pub fn preprocess_ocr_bgra_with_telemetry(
     width: usize,
     height: usize,
     force_invert: bool,
+    binarize: bool,
 ) -> Result<(Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize), error::CvError> {
     image::validate_image(data, width, height, 4, "preprocess_ocr_bgra_with_telemetry")?;
-    Ok(ocr::preprocess_bgra_with_telemetry(data, width, height, force_invert))
+    Ok(ocr::preprocess_bgra_with_telemetry(data, width, height, force_invert, binarize))
+}
+
+pub fn preprocess_ocr_color_bgra(
+    data: &[u8],
+    width: usize,
+    height: usize,
+) -> Result<Vec<u8>, error::CvError> {
+    image::validate_image(data, width, height, 4, "preprocess_ocr_color_bgra")?;
+    Ok(ocr::preprocess_color_bgra(data, width, height))
+}
+
+pub fn preprocess_ocr_color_bgra_with_telemetry(
+    data: &[u8],
+    width: usize,
+    height: usize,
+) -> Result<(Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize), error::CvError> {
+    image::validate_image(data, width, height, 4, "preprocess_ocr_color_bgra_with_telemetry")?;
+    Ok(ocr::preprocess_color_bgra_with_telemetry(data, width, height))
 }

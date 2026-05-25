@@ -22,8 +22,8 @@ pub fn preprocess_logo_bgra(
     encode_bmp_gray(&padded, width * 3 + 20, height * 3 + 20)
 }
 
-pub fn preprocess_bgra(data: &[u8], width: usize, height: usize, force_invert: bool) -> Vec<u8> {
-    preprocess_bgra_with_telemetry(data, width, height, force_invert).0
+pub fn preprocess_bgra(data: &[u8], width: usize, height: usize, force_invert: bool, binarize: bool) -> Vec<u8> {
+    preprocess_bgra_with_telemetry(data, width, height, force_invert, binarize).0
 }
 
 pub fn preprocess_bgra_with_telemetry(
@@ -31,6 +31,7 @@ pub fn preprocess_bgra_with_telemetry(
     width: usize,
     height: usize,
     force_invert: bool,
+    binarize: bool,
 ) -> (Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize) {
     let gray = to_gray_ocr(data, 4);
     let upscaled = resize_bilinear_u8(&gray, width, height, width * 3, height * 3);
@@ -43,12 +44,45 @@ pub fn preprocess_bgra_with_telemetry(
     let normal_is_dark = bg_mean <= threshold as f32;
     let use_invert = if force_invert { !normal_is_dark } else { normal_is_dark };
     
-    let binary = threshold_image(&blurred, threshold, use_invert);
-    let padded = pad_gray(&binary, width * 3, height * 3, 10);
+    let pixels = if binarize {
+        threshold_image(&blurred, threshold, use_invert)
+    } else {
+        if use_invert {
+            blurred.iter().map(|p| 255 - *p).collect()
+        } else {
+            blurred
+        }
+    };
+    
+    let padded = pad_gray(&pixels, width * 3, height * 3, 10);
     let bmp = encode_bmp_gray(&padded, width * 3 + 20, height * 3 + 20);
     let padded_width = width * 3 + 20;
     let padded_height = height * 3 + 20;
     (bmp, threshold, bg_mean, use_invert, padded, padded_width, padded_height)
+}
+
+pub fn preprocess_color_bgra(data: &[u8], width: usize, height: usize) -> Vec<u8> {
+    preprocess_color_bgra_with_telemetry(data, width, height).0
+}
+
+pub fn preprocess_color_bgra_with_telemetry(
+    data: &[u8],
+    width: usize,
+    height: usize,
+) -> (Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize) {
+    let upscaled = resize_bilinear_bgra(data, width, height, width * 3, height * 3);
+    let padded = pad_bgra(&upscaled, width * 3, height * 3, 10);
+    let bmp = encode_bmp_bgra(&padded, width * 3 + 20, height * 3 + 20);
+    
+    (
+        bmp,
+        0,
+        0.0,
+        false,
+        padded,
+        width * 3 + 20,
+        height * 3 + 20,
+    )
 }
 
 fn to_gray_ocr(data: &[u8], channels: usize) -> Vec<u8> {
@@ -223,4 +257,88 @@ fn write_bmp_pixels(out: &mut Vec<u8>, data: &[u8], width: usize, height: usize,
         out.extend_from_slice(&data[y * width..y * width + width]);
         out.extend(std::iter::repeat_n(0, stride - width));
     }
+}
+
+fn resize_bilinear_bgra(
+    src: &[u8],
+    src_w: usize,
+    src_h: usize,
+    dst_w: usize,
+    dst_h: usize,
+) -> Vec<u8> {
+    let mut dst = vec![0u8; dst_w * dst_h * 4];
+    let x_ratio = (src_w as f32) / (dst_w as f32);
+    let y_ratio = (src_h as f32) / (dst_h as f32);
+
+    for y in 0..dst_h {
+        let py = y as f32 * y_ratio;
+        let y_l = py.floor() as usize;
+        let y_h = (y_l + 1).min(src_h - 1);
+        let y_weight = py - y_l as f32;
+
+        for x in 0..dst_w {
+            let px = x as f32 * x_ratio;
+            let x_l = px.floor() as usize;
+            let x_h = (x_l + 1).min(src_w - 1);
+            let x_weight = px - x_l as f32;
+
+            let idx_ll = (y_l * src_w + x_l) * 4;
+            let idx_hl = (y_l * src_w + x_h) * 4;
+            let idx_lh = (y_h * src_w + x_l) * 4;
+            let idx_hh = (y_h * src_w + x_h) * 4;
+
+            let dst_idx = (y * dst_w + x) * 4;
+
+            for c in 0..4 {
+                let val = (src[idx_ll + c] as f32 * (1.0 - x_weight) * (1.0 - y_weight))
+                    + (src[idx_hl + c] as f32 * x_weight * (1.0 - y_weight))
+                    + (src[idx_lh + c] as f32 * (1.0 - x_weight) * y_weight)
+                    + (src[idx_hh + c] as f32 * x_weight * y_weight);
+                dst[dst_idx + c] = val.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    dst
+}
+
+fn pad_bgra(src: &[u8], width: usize, height: usize, pad: usize) -> Vec<u8> {
+    let out_w = width + pad * 2;
+    let out_h = height + pad * 2;
+    let mut out = vec![0; out_w * out_h * 4];
+    for y in 0..height {
+        let dst = ((y + pad) * out_w + pad) * 4;
+        let src_start = y * width * 4;
+        out[dst..dst + width * 4].copy_from_slice(&src[src_start..src_start + width * 4]);
+    }
+    out
+}
+
+fn encode_bmp_bgra(data: &[u8], width: usize, height: usize) -> Vec<u8> {
+    let image_size = width * height * 4;
+    let pixel_offset = 14 + 40; // No palette
+    let mut out = Vec::with_capacity(pixel_offset + image_size);
+    
+    // BMP File Header
+    out.extend_from_slice(b"BM");
+    out.extend_from_slice(&((pixel_offset + image_size) as u32).to_le_bytes());
+    out.extend_from_slice(&[0; 4]);
+    out.extend_from_slice(&(pixel_offset as u32).to_le_bytes());
+    
+    // DIB Header (BITMAPINFOHEADER)
+    out.extend_from_slice(&40u32.to_le_bytes());
+    out.extend_from_slice(&(width as i32).to_le_bytes());
+    out.extend_from_slice(&(height as i32).to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&32u16.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&(image_size as u32).to_le_bytes());
+    out.extend_from_slice(&[0; 16]);
+    
+    // Pixel data (bottom-up row order)
+    for y in (0..height).rev() {
+        let start = y * width * 4;
+        out.extend_from_slice(&data[start..start + width * 4]);
+    }
+    
+    out
 }
