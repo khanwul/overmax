@@ -36,7 +36,7 @@ impl Default for GlobalRoiConfig {
         // Online ROI
         let mut online_rois = HashMap::new();
         online_rois.insert("jacket".to_string(), RoiRect { x: 664, y: 534, width: 60, height: 58 });
-        online_rois.insert("rate".to_string(), RoiRect { x: 176, y: 553, width: 109, height: 26 });
+        online_rois.insert("rate".to_string(), RoiRect { x: 191, y: 554, width: 94, height: 27 });
         online_rois.insert("btn_mode".to_string(), RoiRect { x: 60, y: 130, width: 5, height: 5 });
         online_rois.insert("max_combo_badge".to_string(), RoiRect { x: 397, y: 601, width: 36, height: 36 });
         online_rois.insert("diff_panel".to_string(), RoiRect { x: 82, y: 467, width: 116, height: 31 });
