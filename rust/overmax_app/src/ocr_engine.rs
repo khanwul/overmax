@@ -4,8 +4,6 @@ use windows::Graphics::Imaging::BitmapDecoder;
 use windows::Media::Ocr::OcrEngine;
 use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 
-const KEYWORD_FREESTYLE: &str = "FREESTYLE";
-const KEYWORD_ONLINE: &str = "ONLINE";
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OcrTelemetry {
@@ -32,7 +30,7 @@ impl OcrDetector {
     pub fn is_available(&self) -> bool {
         self.engine.is_available()
     }
-
+    #[allow(unused_assignments)]
     pub fn detect_logo(&self, logo: &ImageRegion) -> (SceneType, String, String) {
         let features = match overmax_cv::compute_image_features(
             &logo.bgra,
@@ -126,14 +124,6 @@ impl WindowsOcrEngine {
         self.engine.is_some()
     }
 
-    fn recognize(&self, image: &ImageRegion, force_invert: bool) -> Result<String, String> {
-        let Some(engine) = &self.engine else {
-            return Ok(String::new());
-        };
-        let bmp = preprocess_ocr_bmp(image, force_invert)?;
-        recognize_bmp(engine, &bmp).map(|text| text.trim().to_string())
-    }
-
     fn recognize_with_telemetry(
         &self,
         image: &ImageRegion,
@@ -146,19 +136,6 @@ impl WindowsOcrEngine {
         let text = recognize_bmp(engine, &bmp).map(|t| t.trim().to_string())?;
         Ok((text, threshold, bg_mean, use_invert, pixels, w, h))
     }
-}
-
-fn preprocess_ocr_bmp(image: &ImageRegion, force_invert: bool) -> Result<Vec<u8>, String> {
-    if image.width <= 0 || image.height <= 0 {
-        return Err("OCR image has invalid dimensions".to_string());
-    }
-    overmax_cv::preprocess_ocr_bgra(
-        &image.bgra,
-        image.width as usize,
-        image.height as usize,
-        force_invert,
-    )
-    .map_err(|e| e.to_string())
 }
 
 fn preprocess_ocr_bmp_with_telemetry(

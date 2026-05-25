@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -57,7 +59,7 @@ fn main() {
     };
     
     println!("[Bootstrap] 로고 영역 크롭 및 HOG 계산 중...");
-    let mut roi_manager = RoiManager::new(frame.width, frame.height);
+    let roi_manager = RoiManager::new(frame.width, frame.height);
     let Some(logo_roi) = roi_manager.get_roi("logo") else {
         eprintln!("에러: 로고 ROI 정의를 가져올 수 없습니다.");
         std::process::exit(1);

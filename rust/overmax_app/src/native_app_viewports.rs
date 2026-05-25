@@ -1,9 +1,7 @@
 //! Deferred viewports + `eframe::App` (split from `native_app.rs` for file-size limits).
 
 use eframe::egui::{self, Color32, RichText, Vec2, ViewportBuilder, ViewportCommand};
-use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
 
 use crate::debug_ui;
 use crate::native_app::NativeApp;

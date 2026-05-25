@@ -49,6 +49,7 @@ impl Theme {
     // Action Colors
     pub const PRIMARY: Color32 = Color32::from_rgb(255, 209, 102); // TEXT_ACCENT
     pub const SECONDARY: Color32 = Color32::from_rgb(63, 80, 117); // TAB_ACTIVE_BG
+    #[allow(dead_code)]
     pub const DANGER: Color32 = Color32::from_rgb(255, 75, 75); // WARN
 
     // Layout & Sizing
