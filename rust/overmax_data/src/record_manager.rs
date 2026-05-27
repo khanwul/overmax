@@ -111,6 +111,15 @@ impl RecordManager {
         (full_dirty, keys)
     }
 
+    pub fn get_local_record(&self, song_id: i32, button_mode: &str, difficulty: &str) -> Option<(f64, bool)> {
+        self.record_db.get(song_id, button_mode, difficulty)
+    }
+
+    pub fn get_varchive_cache_record(&self, song_id: i32, button_mode: &str, difficulty: &str) -> Option<(f64, bool)> {
+        let guard = self.varchive_cache.lock().ok()?;
+        guard.get(&(song_id, button_mode.to_string(), difficulty.to_string())).copied()
+    }
+
     fn merge_varchive_cache(&self, result: &mut HashMap<RecordKey, RecordValue>, song_ids: &[i32]) {
         let Ok(cache) = self.varchive_cache.lock() else {
             return;
@@ -276,6 +285,35 @@ mod tests {
         assert_eq!(result.has_record_count, 2);
         assert_eq!(result.avg_rate, 98.0);
         
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_record_manager_helpers() {
+        let dir = test_dir("record-manager-helpers");
+        let db_path = dir.join("record.db");
+        let cache_root = dir.join("varchive");
+        let steam_id = "765611";
+        std::fs::create_dir_all(cache_root.join(steam_id)).unwrap();
+
+        let mut db = RecordDB::new(&db_path, Some(steam_id));
+        assert!(db.initialize());
+        assert!(db.upsert(123, "5B", "SC", 99.80, true));
+        write_cache(&cache_root, steam_id); // Writes MX/SC cache: MX=99.5, SC=97.0 for song 42/99
+
+        let db = Arc::new(db);
+        let manager = RecordManager::new(db, &cache_root);
+        manager.refresh();
+
+        // 1. Verify get_local_record
+        assert_eq!(manager.get_local_record(123, "5B", "SC"), Some((99.80, true)));
+        assert_eq!(manager.get_local_record(999, "4B", "NM"), None);
+
+        // 2. Verify get_varchive_cache_record
+        // Write cache has MX 99.5 for song 42
+        assert_eq!(manager.get_varchive_cache_record(42, "4B", "MX"), Some((99.5, true)));
+        assert_eq!(manager.get_varchive_cache_record(42, "4B", "NM"), None);
+
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -20,6 +20,7 @@ impl NativeApp {
             UiCommand::OpenDebug => self.open_debug(),
             UiCommand::OpenSync => self.open_sync(),
             UiCommand::Exit => self.exit_requested.store(true, Ordering::Relaxed),
+            UiCommand::UploadCurrentPattern => {}
         }
     }
 

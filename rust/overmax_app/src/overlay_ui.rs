@@ -143,6 +143,8 @@ pub struct OverlayProps<'a> {
     pub settings_open: Arc<AtomicBool>,
     pub sync_open: Arc<AtomicBool>,
     pub scale: f32,
+    pub varchive_upload_needed: bool,
+    pub varchive_account_configured: bool,
 }
 
 pub fn draw_overlay_panel(
@@ -176,6 +178,8 @@ pub fn draw_overlay_panel(
                 &props.settings_open,
                 &mut actions,
                 &px,
+                props.varchive_upload_needed,
+                props.varchive_account_configured,
             );
             ui.add_space(px.panel_gap());
             draw_body(ui, props.state, props.pattern_tabs, props.recommendations, &px);
@@ -201,6 +205,8 @@ fn draw_header(
     settings_open: &Arc<AtomicBool>,
     actions: &mut OverlayActions,
     px: &Px,
+    varchive_upload_needed: bool,
+    varchive_account_configured: bool,
 ) {
     let mut settings_button_rect = None;
     let header = Frame::new()
@@ -235,6 +241,30 @@ fn draw_header(
                     if response.clicked() {
                         settings_open.store(true, Ordering::Relaxed);
                         actions.command = Some(UiCommand::OpenSettings);
+                    }
+
+                    if varchive_upload_needed {
+                        ui.add_space(4.0 * px.scale);
+                        let upload_text = RichText::new("⬆")
+                            .color(if varchive_account_configured { Theme::TEXT_PRIMARY } else { Theme::TEXT_MUTED })
+                            .font(FontId::proportional(11.0 * px.scale));
+                        
+                        let upload_btn = Button::new(upload_text)
+                            .fill(if varchive_account_configured { Theme::PRIMARY } else { Theme::SECTION_BG })
+                            .corner_radius(CornerRadius::same((4.0 * px.scale) as u8));
+                            
+                        let btn_size = Vec2::splat(18.0 * px.scale);
+                        let response = if varchive_account_configured {
+                            ui.add_sized(btn_size, upload_btn.sense(Sense::click()))
+                                .on_hover_text("V-Archive 업로드 필요 (클릭하여 즉시 업로드)")
+                        } else {
+                            ui.add_sized(btn_size, upload_btn.sense(Sense::hover()))
+                                .on_hover_text("V-Archive 계정 연동 필요 (설정에서 account.txt 경로를 지정해주세요)")
+                        };
+                        
+                        if varchive_account_configured && response.clicked() {
+                            actions.command = Some(UiCommand::UploadCurrentPattern);
+                        }
                     }
                 });
             });
@@ -624,7 +654,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_detecting, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px);
+                    super::draw_header(ui, &state_detecting, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false);
                     h_detecting = ui.cursor().top() - start_y;
                 });
             });
@@ -636,7 +666,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_no_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px);
+                    super::draw_header(ui, &state_no_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false);
                     h_no_badge = ui.cursor().top() - start_y;
                 });
             });
@@ -648,7 +678,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_normal_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px);
+                    super::draw_header(ui, &state_normal_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false);
                     h_normal = ui.cursor().top() - start_y;
                 });
             });
@@ -660,7 +690,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_perfect_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px);
+                    super::draw_header(ui, &state_perfect_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false);
                     h_perfect = ui.cursor().top() - start_y;
                 });
             });

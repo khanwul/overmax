@@ -4,4 +4,5 @@ pub enum UiCommand {
     OpenDebug,
     OpenSync,
     Exit,
+    UploadCurrentPattern,
 }

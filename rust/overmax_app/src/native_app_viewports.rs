@@ -391,8 +391,14 @@ impl eframe::App for NativeApp {
                         settings_open: self.ui_state.settings_open.clone(),
                         sync_open: self.ui_state.sync_open.clone(),
                         scale,
+                        varchive_upload_needed: self.current_pattern_needs_upload(),
+                        varchive_account_configured: self.is_varchive_account_configured(),
                     },
                 );
+
+                if actions.command == Some(crate::ui_command::UiCommand::UploadCurrentPattern) {
+                    self.upload_current_pattern(ctx.clone());
+                }
 
                 if actions.start_drag {
                     ctx.send_viewport_cmd(ViewportCommand::StartDrag);

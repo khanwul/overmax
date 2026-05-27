@@ -681,6 +681,81 @@ impl NativeApp {
         });
     }
 
+    pub(crate) fn is_varchive_account_configured(&self) -> bool {
+        let merged = match self.settings.merged.lock() {
+            Ok(g) => g.clone(),
+            Err(_) => return false,
+        };
+        let steam = self.sync_state.steam_id.lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        let account_path = account_path_for_steam(&merged, &steam);
+        if account_path.is_empty() {
+            return false;
+        }
+        std::path::Path::new(&account_path).exists()
+    }
+
+    pub(crate) fn current_pattern_needs_upload(&self) -> bool {
+        let Some(ctx) = &self.session.context else {
+            return false;
+        };
+        let song_id = ctx.song_id as i32;
+        let mode = &ctx.mode;
+        let diff = &ctx.diff;
+
+        let local = self.record_manager.get_local_record(song_id, mode, diff);
+        let varchive = self.record_manager.get_varchive_cache_record(song_id, mode, diff);
+
+        match (local, varchive) {
+            (Some((l_rate, l_mc)), Some((v_rate, v_mc))) => {
+                (l_rate - v_rate) >= 0.01 || (l_mc && !v_mc)
+            }
+            (Some((l_rate, _)), None) => {
+                l_rate > 0.0
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn upload_current_pattern(&self, ctx: egui::Context) {
+        let Some(session_ctx) = &self.session.context else {
+            return;
+        };
+        let song_id = session_ctx.song_id as i32;
+        let mode = &session_ctx.mode;
+        let diff = &session_ctx.diff;
+
+        let Some(song) = self.varchive_db.search_by_id(song_id) else {
+            return;
+        };
+        let local = self.record_manager.get_local_record(song_id, mode, diff);
+        let varchive = self.record_manager.get_varchive_cache_record(song_id, mode, diff);
+
+        let (overmax_rate, overmax_mc) = local.unwrap_or((0.0, false));
+        let (v_rate, v_mc) = match varchive {
+            Some((r, mc)) => (Some(r), Some(mc)),
+            None => (None, None),
+        };
+
+        let candidate = overmax_data::SyncCandidate {
+            song_id,
+            song_name: song.name.clone(),
+            composer: song.composer.to_string(),
+            dlc: song.dlc_code.to_string(),
+            button_mode: mode.clone(),
+            difficulty: diff.clone(),
+            overmax_rate,
+            overmax_mc,
+            varchive_rate: v_rate,
+            varchive_mc: v_mc,
+            upload_status: String::new(),
+            upload_message: String::new(),
+        };
+
+        self.spawn_upload(999999, candidate, ctx);
+    }
+
     pub(crate) fn handle_auto_refresh(&mut self) {
         let merged = match self.settings.merged.lock() {
             Ok(g) => g.clone(),
