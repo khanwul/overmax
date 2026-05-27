@@ -155,7 +155,7 @@ pub fn build_candidates(
         }
 
         let (song_name, composer, dlc) = match varchive_db.search_by_id(song_id) {
-            Some(s) => (s.name.clone(), s.composer.clone(), s.dlc_code.clone()),
+            Some(s) => (s.name.clone(), s.composer.to_string(), s.dlc_code.to_string()),
             None => (song_id.to_string(), String::new(), String::new()),
         };
 

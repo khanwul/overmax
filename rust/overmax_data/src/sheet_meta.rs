@@ -2,14 +2,73 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GoldMeta {
+    #[default]
+    #[serde(rename = "")]
+    None,
+    #[serde(rename = "정배")]
+    Normal,
+    #[serde(rename = "핲랜")]
+    HalfRandom,
+    #[serde(rename = "맥랜")]
+    MaxRandom,
+    #[serde(rename = "랜덤")]
+    Random,
+}
+
+impl GoldMeta {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Normal => "정배",
+            Self::HalfRandom => "핲랜",
+            Self::MaxRandom => "맥랜",
+            Self::Random => "랜덤",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AssistMeta {
+    #[default]
+    #[serde(rename = "")]
+    None,
+    #[serde(rename = "사용")]
+    Used,
+    #[serde(rename = "주의")]
+    Caution,
+    #[serde(rename = "미사용")]
+    NotUsed,
+}
+
+impl AssistMeta {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Used => "사용",
+            Self::Caution => "주의",
+            Self::NotUsed => "미사용",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PatternSheetMetaItem {
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub gold: String,
+    #[serde(default, skip_serializing_if = "GoldMeta::is_none")]
+    pub gold: GoldMeta,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub note: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub assist_key: String,
+    #[serde(default, skip_serializing_if = "AssistMeta::is_none")]
+    pub assist_key: AssistMeta,
     #[serde(default, skip_serializing_if = "is_false")]
     pub keypart: bool,
 }
@@ -93,9 +152,9 @@ mod tests {
         items.insert(
             "123|5B|sc".into(),
             PatternSheetMetaItem {
-                gold: "O".into(),
+                gold: GoldMeta::Random,
                 note: "개인차".into(),
-                assist_key: "Y".into(),
+                assist_key: AssistMeta::Used,
                 keypart: false,
             },
         );
@@ -104,9 +163,9 @@ mod tests {
         assert_eq!(
             meta.get("123", "5B", "SC"),
             PatternSheetMetaItem {
-                gold: "O".into(),
+                gold: GoldMeta::Random,
                 note: "개인차".into(),
-                assist_key: "Y".into(),
+                assist_key: AssistMeta::Used,
                 keypart: false,
             }
         );

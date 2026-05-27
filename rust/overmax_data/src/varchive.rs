@@ -2,7 +2,74 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use strsim::normalized_damerau_levenshtein;
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Mode {
+    #[serde(rename = "4B")]
+    B4 = 0,
+    #[serde(rename = "5B")]
+    B5 = 1,
+    #[serde(rename = "6B")]
+    B6 = 2,
+    #[serde(rename = "8B")]
+    B8 = 3,
+}
+
+impl Mode {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "4B" | "4b" => Some(Self::B4),
+            "5B" | "5b" => Some(Self::B5),
+            "6B" | "6b" => Some(Self::B6),
+            "8B" | "8b" => Some(Self::B8),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::B4 => "4B",
+            Self::B5 => "5B",
+            Self::B6 => "6B",
+            Self::B8 => "8B",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Difficulty {
+    #[serde(rename = "NM")]
+    NM = 0,
+    #[serde(rename = "HD")]
+    HD = 1,
+    #[serde(rename = "MX")]
+    MX = 2,
+    #[serde(rename = "SC")]
+    SC = 3,
+}
+
+impl Difficulty {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.trim().to_uppercase().as_str() {
+            "NM" => Some(Self::NM),
+            "HD" => Some(Self::HD),
+            "MX" => Some(Self::MX),
+            "SC" => Some(Self::SC),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NM => "NM",
+            Self::HD => "HD",
+            Self::MX => "MX",
+            Self::SC => "SC",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatternInfo {
@@ -26,11 +93,15 @@ pub struct Song {
     #[serde(deserialize_with = "deserialize_string_id")]
     pub title: String, // Actually song_id
     pub name: String,
-    pub composer: String,
+    pub composer: Arc<str>,
     #[serde(default, rename = "dlcCode")]
-    pub dlc_code: String,
-    #[serde(default)]
-    pub patterns: HashMap<String, HashMap<String, PatternInfo>>,
+    pub dlc_code: Arc<str>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_patterns",
+        serialize_with = "serialize_patterns"
+    )]
+    pub patterns: [[Option<PatternInfo>; 4]; 4],
 }
 
 pub struct VArchiveDB {
@@ -246,8 +317,8 @@ impl VArchiveDB {
             }
 
             // 2. Pattern (mode, diff) & Level check
-            if let Some(modes) = song.patterns.get(mode) {
-                if let Some(p_info) = modes.get(diff) {
+            if let (Some(m), Some(d)) = (Mode::from_str(mode), Difficulty::from_str(diff)) {
+                if let Some(p_info) = &song.patterns[m as usize][d as usize] {
                     score += 50.0;
                     if let Some(target_lvl) = level {
                         if p_info.level == Some(target_lvl) {
@@ -341,6 +412,61 @@ where
     }
 }
 
+fn deserialize_patterns<'de, D>(deserializer: D) -> Result<[[Option<PatternInfo>; 4]; 4], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw_patterns: HashMap<String, HashMap<String, PatternInfo>> = Deserialize::deserialize(deserializer)?;
+    let mut patterns: [[Option<PatternInfo>; 4]; 4] = Default::default();
+
+    for (mode_str, diffs) in raw_patterns {
+        if let Some(mode) = Mode::from_str(&mode_str) {
+            let m_idx = mode as usize;
+            for (diff_str, info) in diffs {
+                if let Some(diff) = Difficulty::from_str(&diff_str) {
+                    let d_idx = diff as usize;
+                    patterns[m_idx][d_idx] = Some(info);
+                }
+            }
+        }
+    }
+
+    Ok(patterns)
+}
+
+fn serialize_patterns<S>(patterns: &[[Option<PatternInfo>; 4]; 4], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut raw_patterns = HashMap::new();
+    for m_idx in 0..4 {
+        let mode = match m_idx {
+            0 => "4B",
+            1 => "5B",
+            2 => "6B",
+            3 => "8B",
+            _ => unreachable!(),
+        };
+        let mut diffs = HashMap::new();
+        for d_idx in 0..4 {
+            let diff = match d_idx {
+                0 => "NM",
+                1 => "HD",
+                2 => "MX",
+                3 => "SC",
+                _ => unreachable!(),
+            };
+            if let Some(info) = &patterns[m_idx][d_idx] {
+                diffs.insert(diff.to_string(), info.clone());
+            }
+        }
+        if !diffs.is_empty() {
+            raw_patterns.insert(mode.to_string(), diffs);
+        }
+    }
+    raw_patterns.serialize(serializer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,9 +475,9 @@ mod tests {
         Song {
             title: title.to_string(),
             name: name.to_string(),
-            composer: composer.to_string(),
-            dlc_code: String::new(),
-            patterns: HashMap::new(),
+            composer: Arc::from(composer),
+            dlc_code: Arc::from(""),
+            patterns: Default::default(),
         }
     }
 
@@ -419,16 +545,12 @@ mod tests {
         
         // Setup mock songs for Alone duplicates
         let mut s1 = create_mock_song("2", "Alone", "Marshmello");
-        s1.dlc_code = "RV".into();
-        s1.patterns.insert("5B".into(), [
-            ("SC".into(), PatternInfo { level: Some(5), floor: None, floor_name: None, rating: None })
-        ].into_iter().collect());
+        s1.dlc_code = Arc::from("RV");
+        s1.patterns[Mode::B5 as usize][Difficulty::SC as usize] = Some(PatternInfo { level: Some(5), floor: None, floor_name: None, rating: None });
         
         let mut s2 = create_mock_song("441", "Alone", "Nauts");
-        s2.dlc_code = "RV".into();
-        s2.patterns.insert("5B".into(), [
-            ("SC".into(), PatternInfo { level: Some(6), floor: None, floor_name: None, rating: None })
-        ].into_iter().collect());
+        s2.dlc_code = Arc::from("RV");
+        s2.patterns[Mode::B5 as usize][Difficulty::SC as usize] = Some(PatternInfo { level: Some(6), floor: None, floor_name: None, rating: None });
         
         db.songs.push(s1);
         db.songs.push(s2);

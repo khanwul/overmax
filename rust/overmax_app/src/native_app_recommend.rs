@@ -101,21 +101,23 @@ impl NativeApp {
             return Vec::new();
         };
         let mode = &ctx.mode;
-        let Some(patterns) = song.patterns.get(mode) else {
+        let Some(m) = overmax_data::varchive::Mode::from_str(mode) else {
             return Vec::new();
         };
+        let patterns = &song.patterns[m as usize];
         DIFFICULTIES
             .iter()
             .filter_map(|diff| {
-                let pattern = patterns.get(*diff)?;
+                let d = overmax_data::varchive::Difficulty::from_str(diff)?;
+                let pattern = patterns[d as usize].as_ref()?;
                 let meta = self.sheet_meta.get(&song.title, mode, diff);
                 Some(PatternTabInfo {
                     diff: (*diff).to_string(),
                     level: pattern.level,
                     floor_name: pattern.floor_name.clone(),
-                    gold: meta.gold,
+                    gold: meta.gold.as_str().to_string(),
                     note: meta.note,
-                    assist_key: meta.assist_key,
+                    assist_key: meta.assist_key.as_str().to_string(),
                     keypart: meta.keypart,
                 })
             })

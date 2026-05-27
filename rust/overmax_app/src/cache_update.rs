@@ -287,9 +287,9 @@ fn merge_sheet_meta(
             continue;
         }
         let meta = pattern_meta_value(mode, &values);
-        let has_content = !meta.gold.is_empty()
+        let has_content = !meta.gold.is_none()
             || !meta.note.is_empty()
-            || !meta.assist_key.is_empty()
+            || !meta.assist_key.is_none()
             || meta.keypart;
             
         if has_content {
@@ -310,13 +310,13 @@ fn merge_sheet_meta(
 fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> overmax_data::PatternSheetMetaItem {
     let raw_gold = pick(values, &["황배 여부", "황배여부"]);
     let gold = if raw_gold.is_empty() {
-        String::new()
+        overmax_data::sheet_meta::GoldMeta::None
     } else if raw_gold.contains("[H]") {
-        "핲랜".to_string()
+        overmax_data::sheet_meta::GoldMeta::HalfRandom
     } else if raw_gold.contains("[M]") {
-        "맥랜".to_string()
+        overmax_data::sheet_meta::GoldMeta::MaxRandom
     } else {
-        "랜덤".to_string()
+        overmax_data::sheet_meta::GoldMeta::Random
     };
 
     let note = pick(values, &["비고", "Note"]);
@@ -330,14 +330,14 @@ fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> overmax_d
     }
 
     let raw_assist = pick(values, &["보조 키 여부", "보조키여부"]);
-    let assist_key = if raw_assist == "❌" {
-        "사용".to_string()
-    } else if raw_assist == "️️⚠️" || raw_assist.starts_with("⚠") {
-        "주의".to_string()
-    } else if raw_assist == "✅" {
-        "미사용".to_string()
+    let assist_key = if raw_assist.contains("❌") {
+        overmax_data::sheet_meta::AssistMeta::Used
+    } else if raw_assist.contains("⚠️") || raw_assist.starts_with("⚠") {
+        overmax_data::sheet_meta::AssistMeta::Caution
+    } else if raw_assist.contains("✅") {
+        overmax_data::sheet_meta::AssistMeta::NotUsed
     } else {
-        raw_assist
+        overmax_data::sheet_meta::AssistMeta::None
     };
 
     overmax_data::PatternSheetMetaItem {
@@ -418,21 +418,22 @@ mod tests {
     #[test]
     fn sheet_meta_merge_matches_python_cache_shape() {
         let mut db = overmax_data::varchive::VArchiveDB::new();
+        let mut patterns: [[Option<overmax_data::varchive::PatternInfo>; 4]; 4] = Default::default();
+        patterns[overmax_data::varchive::Mode::B5 as usize][overmax_data::varchive::Difficulty::SC as usize] = Some(
+            overmax_data::varchive::PatternInfo {
+                level: Some(12),
+                floor: None,
+                floor_name: None,
+                rating: None,
+            }
+        );
+
         db.songs.push(overmax_data::varchive::Song {
             title: "1".into(),
             name: "Love ☆ Panic".into(),
-            composer: "ESTi".into(),
-            dlc_code: "".into(),
-            patterns: [
-                ("5B".to_string(), [
-                    ("SC".to_string(), overmax_data::varchive::PatternInfo {
-                        level: Some(12),
-                        floor: None,
-                        floor_name: None,
-                        rating: None,
-                    })
-                ].into_iter().collect())
-            ].into_iter().collect(),
+            composer: std::sync::Arc::from("ESTi"),
+            dlc_code: std::sync::Arc::from(""),
+            patterns,
         });
 
         let mut items = std::collections::HashMap::new();
@@ -446,9 +447,9 @@ mod tests {
         assert_eq!(
             items.get("1|5B|sc").unwrap(),
             &overmax_data::PatternSheetMetaItem {
-                gold: "랜덤".into(),
+                gold: overmax_data::sheet_meta::GoldMeta::Random,
                 note: "개인차".into(),
-                assist_key: "사용".into(),
+                assist_key: overmax_data::sheet_meta::AssistMeta::Used,
                 keypart: false,
             }
         );

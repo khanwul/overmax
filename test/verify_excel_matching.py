@@ -178,11 +178,11 @@ def pattern_meta_value(mode, row_dict):
             keypart = True
 
     raw_assist = clean_cell_value(row_dict.get("보조 키 여부") or row_dict.get("보조키여부") or "")
-    if raw_assist == "❌":
+    if "❌" in raw_assist:
         assist_key = "사용"
     elif "⚠️" in raw_assist or raw_assist.startswith("⚠"):
         assist_key = "주의"
-    elif raw_assist == "✅":
+    elif "✅" in raw_assist:
         assist_key = "미사용"
     else:
         assist_key = raw_assist

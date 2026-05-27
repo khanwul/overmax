@@ -144,10 +144,9 @@ impl Recommender {
             None => return RecommendResult::empty(),
         };
 
-        let current_pattern = current_song
-            .patterns
-            .get(button_mode)
-            .and_then(|m| m.get(difficulty));
+        let current_pattern = crate::varchive::Mode::from_str(button_mode)
+            .and_then(|m| crate::varchive::Difficulty::from_str(difficulty).map(|d| (m, d)))
+            .and_then(|(m, d)| current_song.patterns[m as usize][d as usize].as_ref());
 
         let p = match current_pattern {
             Some(p) => p,
@@ -236,46 +235,48 @@ impl Recommender {
             };
 
             for mode in &modes_to_check {
-                if let Some(mode_patterns) = song.patterns.get(*mode) {
-                    for diff in DIFFICULTIES {
-                        if let Some(p) = mode_patterns.get(*diff) {
-                            let cand_floor_val = Self::parse_floor_value(p.floor_name.as_ref());
+                if let (Some(m), Some(d_list)) = (crate::varchive::Mode::from_str(mode), Some(DIFFICULTIES)) {
+                    for diff in d_list {
+                        if let Some(d) = crate::varchive::Difficulty::from_str(diff) {
+                            if let Some(p) = &song.patterns[m as usize][d as usize] {
+                                let cand_floor_val = Self::parse_floor_value(p.floor_name.as_ref());
 
-                            let final_cand_floor = if params.use_official {
-                                if cand_floor_val.is_some()
-                                    || Self::diff_group(diff) != params.ref_diff_grp
+                                let final_cand_floor = if params.use_official {
+                                    if cand_floor_val.is_some()
+                                        || Self::diff_group(diff) != params.ref_diff_grp
+                                    {
+                                        continue;
+                                    }
+                                    p.level.unwrap_or(0) as f64
+                                } else {
+                                    match cand_floor_val {
+                                        Some(f) => f,
+                                        None => continue,
+                                    }
+                                };
+
+                                if (final_cand_floor - params.ref_floor).abs() > params.floor_range {
+                                    continue;
+                                }
+
+                                if sid == params.target_song_id && mode == &params.target_mode && diff == &params.target_diff
                                 {
                                     continue;
                                 }
-                                p.level.unwrap_or(0) as f64
-                            } else {
-                                match cand_floor_val {
-                                    Some(f) => f,
-                                    None => continue,
-                                }
-                            };
 
-                            if (final_cand_floor - params.ref_floor).abs() > params.floor_range {
-                                continue;
+                                candidates.push(RecommendEntry {
+                                    song_id: sid,
+                                    song_name: song.name.clone(),
+                                    composer: song.composer.to_string(),
+                                    button_mode: mode.to_string(),
+                                    difficulty: diff.to_string(),
+                                    level: p.level,
+                                    floor: Some(final_cand_floor),
+                                    floor_name: p.floor_name.clone(),
+                                    rate: None,
+                                    is_max_combo: false,
+                                });
                             }
-
-                            if sid == params.target_song_id && mode == &params.target_mode && diff == &params.target_diff
-                            {
-                                continue;
-                            }
-
-                            candidates.push(RecommendEntry {
-                                song_id: sid,
-                                song_name: song.name.clone(),
-                                composer: song.composer.clone(),
-                                button_mode: mode.to_string(),
-                                difficulty: diff.to_string(),
-                                level: p.level,
-                                floor: Some(final_cand_floor),
-                                floor_name: p.floor_name.clone(),
-                                rate: None,
-                                is_max_combo: false,
-                            });
                         }
                     }
                 }
@@ -319,9 +320,23 @@ impl Recommender {
                 Ok(id) => id,
                 Err(_) => continue,
             };
-            for (mode, mode_patterns) in &song.patterns {
-                for diff in DIFFICULTIES {
-                    if let Some(p) = mode_patterns.get(*diff) {
+            for m_idx in 0..4 {
+                let mode = match m_idx {
+                    0 => "4B",
+                    1 => "5B",
+                    2 => "6B",
+                    3 => "8B",
+                    _ => unreachable!(),
+                };
+                for d_idx in 0..4 {
+                    let diff = match d_idx {
+                        0 => "NM",
+                        1 => "HD",
+                        2 => "MX",
+                        3 => "SC",
+                        _ => unreachable!(),
+                    };
+                    if let Some(p) = &song.patterns[m_idx][d_idx] {
                         let floor_val;
                         let scale_type;
                         if let Some(f) = Self::parse_floor_value(p.floor_name.as_ref()) {
@@ -333,7 +348,7 @@ impl Recommender {
                             } else {
                                 continue;
                             }
-                            scale_type = if SC_GROUP.contains(diff) {
+                            scale_type = if SC_GROUP.contains(&diff) {
                                 "OFFICIAL_SC".to_string()
                             } else {
                                 "OFFICIAL_NHM".to_string()
@@ -341,11 +356,11 @@ impl Recommender {
                         }
                         
                         let key = FloorCacheKey {
-                            button_mode: mode.clone(),
+                            button_mode: mode.to_string(),
                             scale_type,
                             floor_millis: Self::floor_to_millis(floor_val),
                         };
-                        let record_key = (song_id, mode.clone(), diff.to_string());
+                        let record_key = (song_id, mode.to_string(), diff.to_string());
                         floor_patterns.entry(key.clone()).or_insert_with(Vec::new).push(record_key.clone());
                         record_to_floor_key.insert(record_key, key);
                     }
