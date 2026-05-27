@@ -216,7 +216,12 @@ def main():
     with open(songs_path, 'r', encoding='utf-8') as f:
         songs = json.load(f)
     with open(meta_path, 'r', encoding='utf-8') as f:
-        meta_cache = json.load(f)
+        meta_raw = json.load(f)
+    # JSON Array → (song_id, mode, diff) 튜플 인덱스로 변환
+    meta_cache = {
+        (entry["song_id"], entry["mode"], entry["diff"]): entry
+        for entry in meta_raw
+    }
 
     sheet_id = "1ks1dwJyNjkAXYtQ_6UZIeNOCGOmhf2jMbakpTcJm9rw"
     gids = {
@@ -285,14 +290,13 @@ def main():
                 
             song_id = matched_song["title"]
             composer = matched_song["composer"]
-            
-            # Key shape format is song_id|mode|diff
-            cache_key = f"{song_id}|{mode}|{diff.lower()}"
-            
+
+            cache_key = (song_id, mode, diff.upper())
+
             if cache_key not in meta_cache:
-                failures.append(f"{mode} {title} {diff} (Lv {level}) [song_id={song_id}]: Not found in pattern_meta.json under key '{cache_key}'")
+                failures.append(f"{mode} {title} {diff} (Lv {level}) [song_id={song_id}]: Not found in pattern_meta.json")
                 continue
-                
+
             cache_val = meta_cache[cache_key]
             
             # Check fields
