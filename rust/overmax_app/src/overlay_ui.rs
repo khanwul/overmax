@@ -267,8 +267,10 @@ fn draw_header(
                                 .unwrap_or(response.rect.min.x),
                         );
                         
-                        if varchive_account_configured && response.clicked() {
-                            actions.command = Some(UiCommand::UploadCurrentPattern);
+                        if response.clicked() {
+                            if varchive_account_configured {
+                                actions.command = Some(UiCommand::UploadCurrentPattern);
+                            }
                         }
                     }
                 });
