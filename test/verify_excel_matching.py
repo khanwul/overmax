@@ -44,7 +44,7 @@ def fetch_csv(mode, gid, sheet_id):
         f.write(content)
     return content
 
-# Simple implementation of normalized Damerau-Levenshtein distance in Python
+# Optimized implementation of normalized Damerau-Levenshtein distance using a 2D list
 def normalized_damerau_levenshtein(s1, s2):
     if s1 == s2:
         return 1.0
@@ -53,36 +53,35 @@ def normalized_damerau_levenshtein(s1, s2):
     if len1 == 0 or len2 == 0:
         return 0.0
 
-    # Max distance
     max_dist = max(len1, len2)
     
-    # Standard Damerau-Levenshtein distance
-    d = {}
+    # We need indices from -2 to len1 (shifted by +2 -> 0 to len1 + 2)
+    # and from -2 to len2 (shifted by +2 -> 0 to len2 + 2)
+    d = [[999999] * (len2 + 3) for _ in range(len1 + 3)]
     for i in range(-1, len1 + 1):
-        d[(i, -1)] = i + 1
+        d[i + 2][1] = i + 1
     for j in range(-1, len2 + 1):
-        d[(-1, j)] = j + 1
+        d[1][j + 2] = j + 1
 
     for i in range(len1):
         for j in range(len2):
             cost = 0 if s1[i] == s2[j] else 1
-            d[(i, j)] = min(
-                d[(i - 1, j)] + 1,        # deletion
-                d[(i, j - 1)] + 1,        # insertion
-                d[(i - 1, j - 1)] + cost,  # substitution
+            val = min(
+                d[i + 1][j + 2] + 1,        # deletion
+                d[i + 2][j + 1] + 1,        # insertion
+                d[i + 1][j + 1] + cost,     # substitution
             )
             if i > 0 and j > 0 and s1[i] == s2[j - 1] and s1[i - 1] == s2[j]:
-                d[(i, j)] = min(d[(i, j)], d[(i - 2, j - 2)] + cost) # transposition
+                val = min(val, d[i][j] + cost) # transposition
+            d[i + 2][j + 2] = val
 
-    dist = d[(len1 - 1, len2 - 1)]
+    dist = d[len1 + 1][len2 + 1]
     return 1.0 - (dist / max_dist)
 
 def normalize_text(text):
     return text.lower().replace(" ", "").replace("\t", "").replace("\r", "").replace("\n", "").replace("腦", "뇌").replace("뇌", "脳").replace("擊", "격").replace("격", "撃").replace("腦", "脳").replace("擊", "撃")
 
-def category_matches_dlc(category, dlc_code):
-    cat = normalize_text(category)
-    dlc = normalize_text(dlc_code)
+def category_matches_dlc(cat, dlc):
     if dlc in cat or cat in dlc:
         return True
     
@@ -128,38 +127,45 @@ def find_best_match(songs, title, mode, diff, level, category, note):
     if not songs:
         return None
     
+    query_norm = normalize_text(title)
+    category_norm = normalize_text(category)
+    
     # Try full title match first
-    song = find_best_match_internal(songs, title, mode, diff, level, category, note)
+    song = find_best_match_internal(songs, query_norm, mode, diff, level, category_norm, note)
     if song:
         return song
         
     # Try splitting by '/' for composite titles (DPC)
     if '/' in title:
-        first_part = title.split('/')[0]
-        song = find_best_match_internal(songs, first_part, mode, diff, level, category, note)
+        first_part = normalize_text(title.split('/')[0])
+        song = find_best_match_internal(songs, first_part, mode, diff, level, category_norm, note)
         if song:
             return song
             
     return None
 
-def find_best_match_internal(songs, title, mode, diff, level, category, note):
-    query_norm = normalize_text(title)
+def find_best_match_internal(songs, query_norm, mode, diff, level, category_norm, note):
     if not query_norm:
         return None
     
     best_song = None
     best_score = -1000.0
     
+    len1 = len(query_norm)
     for song in songs:
-        song_name_norm = normalize_text(song.get("name", ""))
+        song_name_norm = song["_name_norm"]
         score = 0.0
         
         # 1. Title match
         if query_norm == song_name_norm:
             score += 100.0
-        elif (query_norm.startswith(song_name_norm) or song_name_norm.startswith(query_norm)) and len(query_norm) >= 5 and len(song_name_norm) >= 5:
+        elif (query_norm.startswith(song_name_norm) or song_name_norm.startswith(query_norm)) and len1 >= 5 and len(song_name_norm) >= 5:
             score += 80.0
         else:
+            len2 = len(song_name_norm)
+            # Pruning: if length difference is too large, normalized edit distance can never be >= 0.8
+            if abs(len1 - len2) > 0.2 * max(len1, len2):
+                continue
             dist = normalized_damerau_levenshtein(query_norm, song_name_norm)
             if dist >= 0.8:
                 score += 50.0
@@ -180,8 +186,8 @@ def find_best_match_internal(songs, title, mode, diff, level, category, note):
                     score -= 50.0
         
         # 3. Category / DLC match
-        dlc_code = song.get("dlcCode", "")
-        if category_matches_dlc(category, dlc_code):
+        dlc_norm = song["_dlc_norm"]
+        if category_matches_dlc(category_norm, dlc_norm):
             score += 80.0
             
         # 4. Composer in note check
@@ -254,6 +260,10 @@ def main():
 
     with open(songs_path, 'r', encoding='utf-8') as f:
         songs = json.load(f)
+    for song in songs:
+        song["_name_norm"] = normalize_text(song.get("name", ""))
+        song["_dlc_norm"] = normalize_text(song.get("dlcCode", ""))
+        
     with open(meta_path, 'r', encoding='utf-8') as f:
         meta_raw = json.load(f)
     # JSON Array → (song_id, mode, diff) 튜플 인덱스로 변환
