@@ -154,14 +154,7 @@ impl DetectionPipeline {
     }
 
     fn detect_logo_if_due(&mut self, frame: &CapturedFrame, now: f64) -> Option<SceneType> {
-        // hysteresis가 활성화되기 전까지 0.2s 간격으로 계속 폴링하여 진입 반응 속도를 높임.
-        // 활성화된 이후에는 1.0s로 복귀하여 CPU 부하를 줄임.
-        let cooldown = if !self.hysteresis.is_active {
-            0.2
-        } else {
-            1.0
-        };
-
+        let cooldown = 0.3;
         if now - self.last_logo_ocr_ts < cooldown {
             return None;
         }
