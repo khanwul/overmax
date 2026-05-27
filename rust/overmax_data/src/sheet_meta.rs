@@ -7,8 +7,6 @@ pub enum GoldMeta {
     #[default]
     #[serde(rename = "")]
     None,
-    #[serde(rename = "정배")]
-    Normal,
     #[serde(rename = "핲랜")]
     HalfRandom,
     #[serde(rename = "맥랜")]
@@ -25,7 +23,6 @@ impl GoldMeta {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::None => "",
-            Self::Normal => "정배",
             Self::HalfRandom => "핲랜",
             Self::MaxRandom => "맥랜",
             Self::Random => "랜덤",
