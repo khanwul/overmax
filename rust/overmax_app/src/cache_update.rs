@@ -103,14 +103,25 @@ fn refresh_pattern_meta(root: &Path, varchive_db: &overmax_data::varchive::VArch
     if !is_stale(&path, DAY) {
         return;
     }
-    let mut items = std::collections::HashMap::new();
+    type Key = (String, overmax_data::varchive::Mode, overmax_data::varchive::Difficulty);
+    let mut items: std::collections::HashMap<Key, overmax_data::PatternSheetMetaItem> =
+        std::collections::HashMap::new();
     for (mode, gid) in SHEET_GIDS {
         match download_text(&sheet_csv_url(gid), Duration::from_secs(10)) {
             Ok(csv) => merge_sheet_meta(&mut items, mode, &csv, varchive_db),
             Err(e) => log(format!("[Cache] pattern meta {mode} 갱신 실패: {e}")),
         }
     }
-    let Ok(text) = serde_json::to_vec_pretty(&items) else {
+    let entries: Vec<overmax_data::sheet_meta::PatternMetaEntry> = items
+        .into_iter()
+        .map(|((song_id, mode, diff), meta)| overmax_data::sheet_meta::PatternMetaEntry {
+            song_id,
+            mode,
+            diff,
+            meta,
+        })
+        .collect();
+    let Ok(text) = serde_json::to_vec_pretty(&entries) else {
         return;
     };
     if let Err(e) = write_atomic(&path, &text) {
@@ -270,11 +281,17 @@ fn sheet_csv_url(gid: &str) -> String {
 }
 
 fn merge_sheet_meta(
-    items: &mut std::collections::HashMap<String, overmax_data::PatternSheetMetaItem>,
+    items: &mut std::collections::HashMap<
+        (String, overmax_data::varchive::Mode, overmax_data::varchive::Difficulty),
+        overmax_data::PatternSheetMetaItem,
+    >,
     mode: &str,
     csv: &str,
     varchive_db: &overmax_data::varchive::VArchiveDB,
 ) {
+    let Some(parsed_mode) = overmax_data::varchive::Mode::from_str(mode) else {
+        return;
+    };
     let rows = parse_csv(csv);
     let Some(headers) = rows.first() else {
         return;
@@ -286,23 +303,29 @@ fn merge_sheet_meta(
         if title.is_empty() || diff.is_empty() {
             continue;
         }
+        let Some(parsed_diff) = overmax_data::varchive::Difficulty::from_str(&diff) else {
+            continue;
+        };
         let meta = pattern_meta_value(mode, &values);
         let has_content = !meta.gold.is_none()
             || !meta.note.is_empty()
             || !meta.assist_key.is_none()
             || meta.keypart;
-            
+
         if has_content {
             let level_str = pick(&values, &["레벨", "Level"]);
             let level = level_str.parse::<f64>().map(|f| f as u32).ok();
             let category = pick(&values, &["카테고리", "Category"]);
             let note = pick(&values, &["비고", "Note"]);
 
-            if let Some(song) = varchive_db.find_best_match(&title, mode, &diff, level, &category, &note) {
-                items.insert(format!("{}|{mode}|{}", song.title, norm(&diff)), meta);
+            let song_id = if let Some(song) =
+                varchive_db.find_best_match(&title, mode, &diff, level, &category, &note)
+            {
+                song.title.to_string()
             } else {
-                items.insert(format!("{}|{mode}|{}", norm(&title), norm(&diff)), meta);
-            }
+                norm(&title)
+            };
+            items.insert((song_id, parsed_mode, parsed_diff), meta);
         }
     }
 }
@@ -436,7 +459,13 @@ mod tests {
             patterns,
         });
 
-        let mut items = std::collections::HashMap::new();
+        type Key = (
+            String,
+            overmax_data::varchive::Mode,
+            overmax_data::varchive::Difficulty,
+        );
+        let mut items: std::collections::HashMap<Key, overmax_data::PatternSheetMetaItem> =
+            std::collections::HashMap::new();
         merge_sheet_meta(
             &mut items,
             "5B",
@@ -444,8 +473,13 @@ mod tests {
             &db,
         );
 
+        let key = (
+            "1".to_string(),
+            overmax_data::varchive::Mode::B5,
+            overmax_data::varchive::Difficulty::SC,
+        );
         assert_eq!(
-            items.get("1|5B|sc").unwrap(),
+            items.get(&key).unwrap(),
             &overmax_data::PatternSheetMetaItem {
                 gold: overmax_data::sheet_meta::GoldMeta::Random,
                 note: "개인차".into(),

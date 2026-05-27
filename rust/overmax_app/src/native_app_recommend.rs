@@ -110,7 +110,7 @@ impl NativeApp {
             .filter_map(|diff| {
                 let d = overmax_data::varchive::Difficulty::from_str(diff)?;
                 let pattern = patterns[d as usize].as_ref()?;
-                let meta = self.sheet_meta.get(&song.title, mode, diff);
+                let meta = self.sheet_meta.get(&song.title, m, d);
                 Some(PatternTabInfo {
                     diff: (*diff).to_string(),
                     level: pattern.level,
