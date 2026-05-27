@@ -162,8 +162,6 @@ def pattern_meta_value(mode, row_dict):
     raw_gold = row_dict.get("황배 여부") or row_dict.get("황배여부") or ""
     if not raw_gold:
         gold = ""
-    elif raw_gold == "O":
-        gold = "정배"
     elif "[H]" in raw_gold:
         gold = "핲랜"
     elif "[M]" in raw_gold:
@@ -180,7 +178,7 @@ def pattern_meta_value(mode, row_dict):
             keypart = True
 
     raw_assist = clean_cell_value(row_dict.get("보조 키 여부") or row_dict.get("보조키여부") or "")
-    if raw_assist in ["❌", "○", "O"]:
+    if raw_assist == "❌":
         assist_key = "사용"
     elif "⚠️" in raw_assist or raw_assist.startswith("⚠"):
         assist_key = "주의"

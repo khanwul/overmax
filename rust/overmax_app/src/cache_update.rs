@@ -311,8 +311,6 @@ fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> overmax_d
     let raw_gold = pick(values, &["황배 여부", "황배여부"]);
     let gold = if raw_gold.is_empty() {
         String::new()
-    } else if raw_gold == "O" {
-        "정배".to_string()
     } else if raw_gold.contains("[H]") {
         "핲랜".to_string()
     } else if raw_gold.contains("[M]") {
@@ -332,7 +330,7 @@ fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> overmax_d
     }
 
     let raw_assist = pick(values, &["보조 키 여부", "보조키여부"]);
-    let assist_key = if raw_assist == "❌" || raw_assist == "○" || raw_assist == "O" {
+    let assist_key = if raw_assist == "❌" {
         "사용".to_string()
     } else if raw_assist == "️️⚠️" || raw_assist.starts_with("⚠") {
         "주의".to_string()
@@ -448,7 +446,7 @@ mod tests {
         assert_eq!(
             items.get("1|5B|sc").unwrap(),
             &overmax_data::PatternSheetMetaItem {
-                gold: "정배".into(),
+                gold: "랜덤".into(),
                 note: "개인차".into(),
                 assist_key: "사용".into(),
                 keypart: false,
