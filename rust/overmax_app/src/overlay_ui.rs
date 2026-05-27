@@ -208,7 +208,7 @@ fn draw_header(
     varchive_upload_needed: bool,
     varchive_account_configured: bool,
 ) {
-    let mut settings_button_rect = None;
+    let mut buttons_left_x = None;
     let header = Frame::new()
         .fill(Theme::HEADER_BG)
         .corner_radius(CornerRadius::same(px.header_radius() as u8))
@@ -237,7 +237,7 @@ fn draw_header(
                         .corner_radius(CornerRadius::same((6.0 * px.scale) as u8))
                         .wrap();
                     let response = ui.add_sized(Vec2::splat(px.settings_btn()), btn.sense(Sense::click())).on_hover_text("설정");
-                    settings_button_rect = Some(response.rect);
+                    buttons_left_x = Some(response.rect.min.x);
                     if response.clicked() {
                         settings_open.store(true, Ordering::Relaxed);
                         actions.command = Some(UiCommand::OpenSettings);
@@ -261,6 +261,11 @@ fn draw_header(
                             ui.add_sized(btn_size, upload_btn.sense(Sense::hover()))
                                 .on_hover_text("V-Archive 계정 연동 필요 (설정에서 account.txt 경로를 지정해주세요)")
                         };
+                        buttons_left_x = Some(
+                            buttons_left_x
+                                .map(|x| x.min(response.rect.min.x))
+                                .unwrap_or(response.rect.min.x),
+                        );
                         
                         if varchive_account_configured && response.clicked() {
                             actions.command = Some(UiCommand::UploadCurrentPattern);
@@ -391,7 +396,7 @@ fn draw_header(
             );
         });
 
-    let drag_rect = drag_rect_excluding_button(header.response.rect, settings_button_rect);
+    let drag_rect = drag_rect_excluding_buttons(header.response.rect, buttons_left_x);
     let drag_response = ui.interact(
         drag_rect,
         ui.id().with("overlay_header_drag"),
@@ -405,12 +410,12 @@ fn draw_header(
     }
 }
 
-fn drag_rect_excluding_button(header: Rect, button: Option<Rect>) -> Rect {
-    let Some(button) = button else {
+fn drag_rect_excluding_buttons(header: Rect, buttons_left_x: Option<f32>) -> Rect {
+    let Some(left_x) = buttons_left_x else {
         return header;
     };
     let mut rect = header;
-    rect.max.x = (button.min.x - 4.0).max(rect.min.x);
+    rect.max.x = (left_x - 4.0).max(rect.min.x);
     rect
 }
 
