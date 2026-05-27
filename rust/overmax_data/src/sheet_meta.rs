@@ -94,18 +94,53 @@ pub struct PatternSheetMeta {
 }
 
 impl PatternSheetMeta {
-    pub fn load_cache(path: impl AsRef<Path>, _varchive_db: &crate::varchive::VArchiveDB) -> Self {
+    pub fn load_cache(path: impl AsRef<Path>, varchive_db: &crate::varchive::VArchiveDB) -> Self {
         let path_ref = path.as_ref();
         let Ok(text) = std::fs::read_to_string(path_ref) else {
             return Self::default();
         };
-        let entries: Vec<PatternMetaEntry> =
+
+        // 신 포맷: JSON Array
+        if let Ok(entries) = serde_json::from_str::<Vec<PatternMetaEntry>>(&text) {
+            let items = entries
+                .into_iter()
+                .map(|e| ((e.song_id, e.mode, e.diff), e.meta))
+                .collect();
+            return Self { items };
+        }
+
+        // 구 포맷 fallback: mode|title|diff 키를 쓰는 JSON Object (유저 로컬 파일)
+        let raw_items: HashMap<String, PatternSheetMetaItem> =
             serde_json::from_str(&text).unwrap_or_default();
-        let items = entries
-            .into_iter()
-            .map(|e| ((e.song_id, e.mode, e.diff), e.meta))
-            .collect();
-        Self { items }
+        let mut items: HashMap<LookupKey, PatternSheetMetaItem> = HashMap::new();
+
+        for (key, item) in raw_items {
+            let parts: Vec<&str> = key.split('|').collect();
+            if parts.len() != 3 {
+                continue;
+            }
+            let first = parts[0].to_lowercase();
+            if first != "4b" && first != "5b" && first != "6b" && first != "8b" {
+                // song_id|mode|diff 포맷은 개발용이었으므로 무시
+                continue;
+            }
+            // mode|title|diff → song_id 매칭
+            let mode_str = parts[0].to_uppercase();
+            let title = parts[1];
+            let diff_str = parts[2].to_uppercase();
+            let Some(mode) = Mode::from_str(&mode_str) else { continue };
+            let Some(diff) = Difficulty::from_str(&diff_str) else { continue };
+            if let Some(song) =
+                varchive_db.find_best_match(title, &mode_str, &diff_str, None, "", &item.note)
+            {
+                items.insert((song.title.to_string(), mode, diff), item);
+            }
+        }
+
+        // 새 포맷으로 re-save (다음 로드부터 Array 경로)
+        let meta = Self { items };
+        meta.save(path_ref);
+        meta
     }
 
     pub fn get(&self, song_id: &str, mode: Mode, diff: Difficulty) -> PatternSheetMetaItem {
