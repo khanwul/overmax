@@ -251,15 +251,15 @@ fn draw_header(
                         
                         let upload_btn = Button::new(upload_text)
                             .fill(if varchive_account_configured { Theme::PRIMARY } else { Theme::SECTION_BG })
-                            .corner_radius(CornerRadius::same((4.0 * px.scale) as u8));
+                            .corner_radius(CornerRadius::same((4.0 * px.scale) as u8))
+                            .wrap();
                             
                         let btn_size = Vec2::splat(18.0 * px.scale);
+                        let response = ui.add_sized(btn_size, upload_btn.sense(Sense::click()));
                         let response = if varchive_account_configured {
-                            ui.add_sized(btn_size, upload_btn.sense(Sense::click()))
-                                .on_hover_text("V-Archive 업로드 필요 (클릭하여 즉시 업로드)")
+                            response.on_hover_text("V-Archive 업로드 필요 (클릭하여 즉시 업로드)")
                         } else {
-                            ui.add_sized(btn_size, upload_btn.sense(Sense::hover()))
-                                .on_hover_text("V-Archive 계정 연동 필요 (설정에서 account.txt 경로를 지정해주세요)")
+                            response.on_hover_text("V-Archive 계정 연동 필요 (설정에서 account.txt 경로를 지정해주세요)")
                         };
                         buttons_left_x = Some(
                             buttons_left_x
