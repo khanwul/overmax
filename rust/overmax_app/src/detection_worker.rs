@@ -1,7 +1,8 @@
 //! Runtime detection worker: window tracking -> capture -> pipeline -> UI state.
 
 use crate::detection_pipeline::{DetectionOutput, DetectionPipeline, JacketMatchStatus};
-use crate::screen_capture::ScreenCapturer;
+use crate::capture_engine::CaptureEngine;
+use crate::screen_capture::GdiCaptureEngine;
 use crate::window_tracker::WindowTracker;
 use overmax_core::GameSessionState;
 use overmax_data::{DataCompatibility, ImageIndexDb};
@@ -89,8 +90,8 @@ impl DetectionWorker {
 
     fn run(&mut self) {
         let tracker = WindowTracker::new(&window_title(&self.settings));
-        let mut capturer = match ScreenCapturer::new() {
-            Ok(c) => c,
+        let mut capturer: Box<dyn CaptureEngine> = match GdiCaptureEngine::new() {
+            Ok(c) => Box::new(c),
             Err(e) => return self.log(format!("[Detection] capture init failed: {e}")),
         };
         let mut pipeline = self.build_pipeline();
@@ -130,7 +131,7 @@ impl DetectionWorker {
     fn tick(
         &mut self,
         tracker: &WindowTracker,
-        capturer: &mut ScreenCapturer,
+        capturer: &mut Box<dyn CaptureEngine>,
         pipeline: &mut DetectionPipeline,
     ) {
         let Some(rect) = tracker.game_rect() else {

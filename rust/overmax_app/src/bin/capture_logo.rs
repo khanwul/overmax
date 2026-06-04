@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 #[path = "../window_tracker.rs"]
 mod window_tracker;
+#[path = "../capture_engine.rs"]
+mod capture_engine;
 #[path = "../screen_capture.rs"]
 mod screen_capture;
 #[path = "../roi.rs"]
@@ -14,7 +16,8 @@ mod roi;
 mod frame_utils;
 
 use window_tracker::WindowTracker;
-use screen_capture::ScreenCapturer;
+use capture_engine::CaptureEngine;
+use screen_capture::GdiCaptureEngine;
 use roi::RoiManager;
 use frame_utils::crop_roi;
 
@@ -42,7 +45,7 @@ fn main() {
     println!("[Bootstrap] 창 발견: {}x{} @ ({},{})", rect.width, rect.height, rect.left, rect.top);
     println!("[Bootstrap] 화면 캡처 중...");
     
-    let mut capturer = match ScreenCapturer::new() {
+    let mut capturer = match GdiCaptureEngine::new() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("에러: 캡처러 초기화 실패: {}", e);

@@ -1,4 +1,5 @@
 use crate::window_tracker::WindowRect;
+use crate::capture_engine::CaptureEngine;
 use std::ptr::null_mut;
 use windows_sys::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
@@ -13,7 +14,7 @@ pub struct CapturedFrame {
     pub bgra: Vec<u8>,
 }
 
-pub struct ScreenCapturer {
+pub struct GdiCaptureEngine {
     screen_dc: Option<HDC>,
     memory_dc: Option<HDC>,
     hbitmap: Option<HBITMAP>,
@@ -22,10 +23,10 @@ pub struct ScreenCapturer {
     height: i32,
 }
 
-unsafe impl Send for ScreenCapturer {}
-unsafe impl Sync for ScreenCapturer {}
+unsafe impl Send for GdiCaptureEngine {}
+unsafe impl Sync for GdiCaptureEngine {}
 
-impl ScreenCapturer {
+impl GdiCaptureEngine {
     pub fn new() -> Result<Self, String> {
         Ok(Self {
             screen_dc: None,
@@ -34,48 +35,6 @@ impl ScreenCapturer {
             bits: null_mut(),
             width: 0,
             height: 0,
-        })
-    }
-
-    pub fn capture_bgra(&mut self, rect: WindowRect) -> Result<CapturedFrame, String> {
-        if !rect.is_valid() {
-            return Err("capture rect must have positive dimensions".to_string());
-        }
-
-        // 해상도가 변경되었거나 리소스가 아예 초기화되지 않은 상태면 재생성
-        if self.width != rect.width || self.height != rect.height || self.hbitmap.is_none() {
-            self.release_resources();
-            self.init_resources(rect.width, rect.height)?;
-        }
-
-        let screen_dc = self.screen_dc.ok_or("Screen DC not initialized")?;
-        let memory_dc = self.memory_dc.ok_or("Memory DC not initialized")?;
-
-        let ok = unsafe {
-            BitBlt(
-                memory_dc,
-                0,
-                0,
-                rect.width,
-                rect.height,
-                screen_dc,
-                rect.left,
-                rect.top,
-                SRCCOPY | CAPTUREBLT,
-            )
-        };
-
-        if ok == 0 {
-            return Err("BitBlt failed".to_string());
-        }
-
-        let len = (rect.width as usize) * (rect.height as usize) * 4;
-        let bgra = unsafe { std::slice::from_raw_parts(self.bits, len).to_vec() };
-
-        Ok(CapturedFrame {
-            width: rect.width,
-            height: rect.height,
-            bgra,
         })
     }
 
@@ -137,7 +96,51 @@ impl ScreenCapturer {
     }
 }
 
-impl Drop for ScreenCapturer {
+impl CaptureEngine for GdiCaptureEngine {
+    fn capture_bgra(&mut self, rect: WindowRect) -> Result<CapturedFrame, String> {
+        if !rect.is_valid() {
+            return Err("capture rect must have positive dimensions".to_string());
+        }
+
+        // 해상도가 변경되었거나 리소스가 아예 초기화되지 않은 상태면 재생성
+        if self.width != rect.width || self.height != rect.height || self.hbitmap.is_none() {
+            self.release_resources();
+            self.init_resources(rect.width, rect.height)?;
+        }
+
+        let screen_dc = self.screen_dc.ok_or("Screen DC not initialized")?;
+        let memory_dc = self.memory_dc.ok_or("Memory DC not initialized")?;
+
+        let ok = unsafe {
+            BitBlt(
+                memory_dc,
+                0,
+                0,
+                rect.width,
+                rect.height,
+                screen_dc,
+                rect.left,
+                rect.top,
+                SRCCOPY | CAPTUREBLT,
+            )
+        };
+
+        if ok == 0 {
+            return Err("BitBlt failed".to_string());
+        }
+
+        let len = (rect.width as usize) * (rect.height as usize) * 4;
+        let bgra = unsafe { std::slice::from_raw_parts(self.bits, len).to_vec() };
+
+        Ok(CapturedFrame {
+            width: rect.width,
+            height: rect.height,
+            bgra,
+        })
+    }
+}
+
+impl Drop for GdiCaptureEngine {
     fn drop(&mut self) {
         self.release_resources();
     }
@@ -160,12 +163,13 @@ fn bitmap_info(width: i32, height: i32) -> BITMAPINFO {
 
 #[cfg(test)]
 mod tests {
-    use super::ScreenCapturer;
+    use super::GdiCaptureEngine;
+    use crate::capture_engine::CaptureEngine;
     use crate::window_tracker::WindowRect;
 
     #[test]
     fn rejects_invalid_capture_rect() {
-        let mut capturer = ScreenCapturer::new().unwrap();
+        let mut capturer = GdiCaptureEngine::new().unwrap();
         let result = capturer.capture_bgra(WindowRect {
             left: 0,
             top: 0,

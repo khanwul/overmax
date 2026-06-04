@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cache_update;
+mod capture_engine;
 mod debug_ui;
 mod detection_pipeline;
 mod detection_worker;
