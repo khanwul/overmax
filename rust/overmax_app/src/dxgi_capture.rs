@@ -113,25 +113,34 @@ impl CaptureEngine for DxgiCaptureEngine {
 
             let staging = self.staging_texture.as_ref().ok_or("Staging texture missing")?;
 
-            if acquire_res.is_ok() {
-                if let Some(res) = resource {
-                    let texture: ID3D11Texture2D = res.cast().map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
-                    self.context.CopyResource(staging, &texture);
-                    let _ = self.duplication.ReleaseFrame();
-                    
-                    // 새 프레임이 왔을 때만 크롭하여 캐시 업데이트
-                    match crop_texture_to_frame(&self.context, staging, self.width, self.height, rect) {
-                        Ok(frame) => {
-                            self.last_frame = Some(frame.clone());
-                            return Ok(frame);
+            match acquire_res {
+                Ok(_) => {
+                    if let Some(res) = resource {
+                        let texture: ID3D11Texture2D = res.cast().map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
+                        self.context.CopyResource(staging, &texture);
+                        let _ = self.duplication.ReleaseFrame();
+                        
+                        // 새 프레임이 왔을 때만 크롭하여 캐시 업데이트
+                        match crop_texture_to_frame(&self.context, staging, self.width, self.height, rect) {
+                            Ok(frame) => {
+                                self.last_frame = Some(frame.clone());
+                                return Ok(frame);
+                            }
+                            Err(e) => return Err(e),
                         }
-                        Err(e) => return Err(e),
+                    }
+                    let _ = self.duplication.ReleaseFrame();
+                }
+                Err(err) => {
+                    // DXGI_ERROR_WAIT_TIMEOUT (0x887A0027) 이외의 치명적인 에러인 경우 에러 상위 전파하여 GDI 백엔드로 폴백 유도
+                    let code = err.code().0 as u32;
+                    if code != 0x887A0027 {
+                        return Err(format!("DXGI AcquireNextFrame failed with HRESULT 0x{:X}: {}", code, err));
                     }
                 }
-                let _ = self.duplication.ReleaseFrame();
             }
 
-            // 새로운 프레임이 들어오지 않은 경우(또는 DXGI_ERROR_WAIT_TIMEOUT) 이전 캐시 프레임 재활용
+            // 새로운 프레임이 들어오지 않은 경우(DXGI_ERROR_WAIT_TIMEOUT) 이전 캐시 프레임 재활용
             if let Some(ref cached) = self.last_frame {
                 Ok(cached.clone())
             } else {
