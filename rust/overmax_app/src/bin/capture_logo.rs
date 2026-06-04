@@ -5,8 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use overmax_app::window_tracker::WindowTracker;
-use overmax_app::capture_engine::CaptureEngine;
-use overmax_app::screen_capture::GdiCaptureEngine;
+use overmax_app::capture_engine::{CaptureEngine, AdaptiveCaptureEngine};
 use overmax_app::roi::RoiManager;
 use overmax_app::frame_utils::crop_roi;
 
@@ -34,8 +33,8 @@ fn main() {
     println!("[Bootstrap] 창 발견: {}x{} @ ({},{})", rect.width, rect.height, rect.left, rect.top);
     println!("[Bootstrap] 화면 캡처 중...");
     
-    let mut capturer = match GdiCaptureEngine::new() {
-        Ok(c) => c,
+    let mut capturer: Box<dyn CaptureEngine> = match AdaptiveCaptureEngine::new() {
+        Ok(c) => Box::new(c),
         Err(e) => {
             eprintln!("에러: 캡처러 초기화 실패: {}", e);
             std::process::exit(1);
