@@ -9,7 +9,9 @@
 Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선택된 곡의 난이도별 정보를 오버레이로 보여주는 도구이다.
 
 - **인식 방식**: 화면 캡처 + Rust 네이티브 CV 이미지 매칭 (`overmax_cv`) + OCR (Windows OCR)
+  - *캡처 엔진*: GDI 캡처 엔진 및 DXGI Desktop Duplication 캡처 엔진을 감싸는 `AdaptiveCaptureEngine` Facade 구성. 게임의 창/전체화면 상태에 따라 실시간 런타임 스위칭 및 GPU Lost 복구 기능 수행.
 - **UI**: egui / winit (하드웨어 가속 활용 멀티 뷰포트 네이티브 UI)
+  - 전체화면 포커스 차단: 게임 윈도우 최소화 방지를 위해 `WS_EX_NOACTIVATE` 및 `WS_EX_TOOLWINDOW` 확장 윈도우 스타일 강제 주입.
 - **데이터**: V-Archive DB (JSON) 및 로컬 기록 DB (SQLite)
 
 ---
@@ -112,12 +114,12 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 # Future Focus
 
-1. **라이트모드 (Lite Mode) 추가**:
-   - 추천 탭을 숨기고 현재 곡의 비공식 난이도 및 선택된 패턴의 핵심 메타 정보만 집중 노출하는 모드 추가 (`settings.user.json` 및 `overlay_ui.rs` 구현).
+1. **라이트모드 (Lite Mode) 레이아웃 재배치**:
+   - 설정 필드 및 감지 상태(`is_lite`)는 연동 완료되었으나, 라이트모드 시 크기를 대폭 축소하고 전용 레이아웃으로 변경하는 기능은 본 세션에서 제외(보류)되어 향후 작업 대상으로 남겨둡니다.
 2. **감지 씬(Scene) 다양화**:
    - FREESTYLE 및 ONLINE 대기방 외에도 래더 매칭 씬이나 결과 화면 등 감지 가능 범위를 추가 확장 (`SceneType::LadderMatch` 등).
-3. **전체화면(Fullscreen) 호환성 검증**:
-   - DJMAX RESPECT V를 전체화면 모드로 구동할 때의 캡처 루프 및 winit 투명 오버레이 렌더링 호환성 조사 및 대응.
+3. **전체화면(Fullscreen) 호환성 검증 (완료)**:
+   - `AdaptiveCaptureEngine` 동적 위임 연동(DXGI 캡처 백엔드) 및 포커스 차단용 Win32 스타일 적용 완료.
 4. **OBS 방송 송출용 화면 모드 (OBS Mode)**:
    - 인터넷 방송 스트리머들을 위해 크로마키(Chroma key) 전용 스킨이나 OBS에서 캡처/배치가 편리한 방송 특화 레이아웃 모드 지원.
 5. **V-Archive 클라이언트 완전 대체 (장기 목표)**:
