@@ -21,6 +21,7 @@ pub struct DxgiCaptureEngine {
     staging_texture: Option<ID3D11Texture2D>,
     width: u32,
     height: u32,
+    last_frame: Option<CapturedFrame>,
 }
 
 unsafe impl Send for DxgiCaptureEngine {}
@@ -64,6 +65,7 @@ impl DxgiCaptureEngine {
                 staging_texture: None,
                 width: desc.ModeDesc.Width,
                 height: desc.ModeDesc.Height,
+                last_frame: None,
             })
         }
     }
@@ -106,18 +108,38 @@ impl CaptureEngine for DxgiCaptureEngine {
             let mut resource = None;
             let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
 
-            // 50ms 대기하여 프레임 획득 시도
-            let _ = self.duplication.AcquireNextFrame(50, &mut frame_info, &mut resource);
+            // 0ms 대기하여 비차단으로 프레임 즉시 획득 시도 (스레드 블로킹 방지)
+            let acquire_res = self.duplication.AcquireNextFrame(0, &mut frame_info, &mut resource);
 
             let staging = self.staging_texture.as_ref().ok_or("Staging texture missing")?;
 
-            if let Some(res) = resource {
-                let texture: ID3D11Texture2D = res.cast().map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
-                self.context.CopyResource(staging, &texture);
+            if acquire_res.is_ok() {
+                if let Some(res) = resource {
+                    let texture: ID3D11Texture2D = res.cast().map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
+                    self.context.CopyResource(staging, &texture);
+                    let _ = self.duplication.ReleaseFrame();
+                    
+                    // 새 프레임이 왔을 때만 크롭하여 캐시 업데이트
+                    match crop_texture_to_frame(&self.context, staging, self.width, self.height, rect) {
+                        Ok(frame) => {
+                            self.last_frame = Some(frame.clone());
+                            return Ok(frame);
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
                 let _ = self.duplication.ReleaseFrame();
             }
 
-            crop_texture_to_frame(&self.context, staging, self.width, self.height, rect)
+            // 새로운 프레임이 들어오지 않은 경우(또는 DXGI_ERROR_WAIT_TIMEOUT) 이전 캐시 프레임 재활용
+            if let Some(ref cached) = self.last_frame {
+                Ok(cached.clone())
+            } else {
+                // 캐시가 없는 첫 프레임 시점에서 획득 실패 시, staging 텍스처를 그대로 크롭 시도
+                let frame = crop_texture_to_frame(&self.context, staging, self.width, self.height, rect)?;
+                self.last_frame = Some(frame.clone());
+                Ok(frame)
+            }
         }
     }
 }
