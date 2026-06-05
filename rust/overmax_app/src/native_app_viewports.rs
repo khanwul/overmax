@@ -435,7 +435,25 @@ impl eframe::App for NativeApp {
                         let dx = (pos.x - start_cursor.0) as f32 / ppi;
                         let dy = (pos.y - start_cursor.1) as f32 / ppi;
                         let new_pos = start_win_pos + egui::vec2(dx, dy);
-                        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(new_pos));
+
+                        #[cfg(target_os = "windows")]
+                        {
+                            use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                            if let Some(hwnd_val) = self.cached_hwnd {
+                                let hwnd = hwnd_val as HWND;
+                                let px = (new_pos.x * ppi) as i32;
+                                let py = (new_pos.y * ppi) as i32;
+                                unsafe {
+                                    SetWindowPos(hwnd, HWND_TOPMOST, px, py, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+                                }
+                            } else {
+                                ctx.send_viewport_cmd(ViewportCommand::OuterPosition(new_pos));
+                            }
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(new_pos));
+                        }
                     }
                 }
 
