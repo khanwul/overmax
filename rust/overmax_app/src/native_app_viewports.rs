@@ -308,12 +308,12 @@ impl eframe::App for NativeApp {
             0.8
         };
 
-        // 라이트 모드 판정: 설정에서 명시적으로 활성화했거나 게임 세션이 전체화면일 때 강제 적용
+        // 라이트 모드 판정: 설정에서 명시적으로 활성화했을 때만 적용
         let is_lite = if let Ok(m) = self.settings.merged.lock() {
             m.get("lite_mode").and_then(|v| v.as_bool()).unwrap_or(false)
         } else {
             false
-        } || self.session.is_fullscreen;
+        };
 
         let height = overlay_ui::BASE_HEIGHT;
 
