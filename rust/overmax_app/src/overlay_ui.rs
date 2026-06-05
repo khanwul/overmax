@@ -22,6 +22,7 @@ pub struct OverlayActions {
     pub restore_game_focus: bool,
     pub command: Option<UiCommand>,
     pub response_rect: Option<Rect>,
+    pub drag_delta: Option<Vec2>,
 }
 
 struct Px {
@@ -408,6 +409,9 @@ fn draw_header(
     );
     if drag_response.drag_started() {
         actions.start_drag = true;
+    }
+    if drag_response.dragged() {
+        actions.drag_delta = Some(drag_response.drag_delta());
     }
     if drag_response.drag_stopped() {
         actions.restore_game_focus = true;

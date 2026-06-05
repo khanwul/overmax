@@ -415,9 +415,34 @@ impl eframe::App for NativeApp {
                 }
 
                 if actions.start_drag {
-                    ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                    if let Some(rect) = ctx.input(|i| i.viewport().outer_rect) {
+                        self.drag_start_win_pos = Some(rect.min);
+                        let mut pos = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+                        unsafe {
+                            windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pos);
+                        }
+                        self.drag_start_cursor = Some((pos.x, pos.y));
+                    }
                 }
+
+                if actions.drag_delta.is_some() {
+                    if let (Some(start_win_pos), Some(start_cursor)) = (self.drag_start_win_pos, self.drag_start_cursor) {
+                        let mut pos = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+                        unsafe {
+                            windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pos);
+                        }
+                        let ppi = ctx.pixels_per_point();
+                        let dx = (pos.x - start_cursor.0) as f32 / ppi;
+                        let dy = (pos.y - start_cursor.1) as f32 / ppi;
+                        let new_pos = start_win_pos + egui::vec2(dx, dy);
+                        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(new_pos));
+                    }
+                }
+
                 if actions.restore_game_focus {
+                    self.drag_start_cursor = None;
+                    self.drag_start_win_pos = None;
+
                     let max_log_lines = self.max_log_lines();
                     if let Ok(mut settings) = self.settings.merged.lock() {
                         window_tracker::restore_foreground_by_title(game_window_title(&settings));
