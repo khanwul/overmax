@@ -11,7 +11,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 - **인식 방식**: 화면 캡처 + Rust 네이티브 CV 이미지 매칭 (`overmax_cv`) + OCR (Windows OCR)
   - *캡처 엔진*: GDI 캡처 엔진 및 DXGI Desktop Duplication 캡처 엔진을 감싸는 `AdaptiveCaptureEngine` Facade 구성. 게임의 창/전체화면 상태에 따라 실시간 런타임 스위칭 및 GPU Lost 복구 기능 수행.
 - **UI**: egui / winit (하드웨어 가속 활용 멀티 뷰포트 네이티브 UI)
-  - 전체화면 포커스 차단: 게임 윈도우 최소화 방지를 위해 `WS_EX_NOACTIVATE` 및 `WS_EX_TOOLWINDOW` 확장 윈도우 스타일 강제 주입.
+  - 전체화면 포커스 차단 및 Z-Order 유지: 게임 윈도우 최소화 방지를 위해 `WS_EX_NOACTIVATE` 및 `WS_EX_TOOLWINDOW` 스타일을 주입하고, 게임 창을 오버레이 창의 Owner(`GWL_HWNDPARENT`)로 연결하여 전체 창 모드(Borderless Fullscreen) 플레이 시 드래그 앤 드롭 후 포커스가 게임으로 복귀해도 오버레이가 항상 최상단에 물리도록 보장함.
 - **데이터**: V-Archive DB (JSON) 및 로컬 기록 DB (SQLite)
 
 ---
@@ -119,7 +119,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 2. **감지 씬(Scene) 다양화**:
    - FREESTYLE 및 ONLINE 대기방 외에도 래더 매칭 씬이나 결과 화면 등 감지 가능 범위를 추가 확장 (`SceneType::LadderMatch` 등).
 3. **전체화면(Fullscreen) 호환성 검증 (완료)**:
-   - `AdaptiveCaptureEngine` 동적 위임 연동(DXGI 캡처 백엔드) 및 포커스 차단용 Win32 스타일 적용 완료.
+   - `AdaptiveCaptureEngine` 동적 위임 연동(DXGI 캡처 백엔드) 및 포커스 차단용 Win32 스타일 적용 완료. 전체 창 모드(Borderless Fullscreen)에서 드래그 종료 후 포커스 복원 시 Z-Order 밀림 현상을 Win32 Owner 윈도우 연동(`GWL_HWNDPARENT`)을 통해 해결 완료. 단, OS 설계 제약 및 안티치트 충돌로 인해 하드웨어 독점 전체화면(Exclusive Fullscreen) 모드에서의 오버레이 표시는 지원하지 않으며, 보더리스 모드 실행이 필수 권장 사항임.
 4. **OBS 방송 송출용 화면 모드 (OBS Mode)**:
    - 인터넷 방송 스트리머들을 위해 크로마키(Chroma key) 전용 스킨이나 OBS에서 캡처/배치가 편리한 방송 특화 레이아웃 모드 지원.
 5. **V-Archive 클라이언트 완전 대체 (장기 목표)**:
