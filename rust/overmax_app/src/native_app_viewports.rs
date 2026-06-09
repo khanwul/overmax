@@ -562,7 +562,35 @@ impl eframe::App for NativeApp {
                         TOPMOST_TIMER = now;
                     }
                 }
-                let found = self.apply_window_opacity(opacity, force_topmost);
+
+                // DJMAX 혹은 Overmax(본 프로세스 소유 윈도우들)가 포커스를 가지고 있는지 체크
+                let game_title = if let Ok(m) = self.settings.merged.lock() {
+                    game_window_title(&m).to_string()
+                } else {
+                    "DJMAX RESPECT V".to_string()
+                };
+                let title_wide = window_tracker::encode_wide(&game_title);
+                let game_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
+                
+                let is_active = if let Some(g_hwnd) = game_hwnd {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+                    unsafe {
+                        let fg = GetForegroundWindow();
+                        if fg == g_hwnd {
+                            true
+                        } else {
+                            let mut fg_pid = 0u32;
+                            GetWindowThreadProcessId(fg, &mut fg_pid);
+                            let my_pid = GetCurrentProcessId();
+                            fg_pid == my_pid
+                        }
+                    }
+                } else {
+                    false
+                };
+
+                let found = self.apply_window_opacity(opacity, force_topmost, is_active);
                 if !found {
                     static mut LOGGED: bool = false;
                     unsafe {
@@ -658,7 +686,7 @@ impl NativeApp {
         data.found_hwnd
     }
 
-    fn apply_window_opacity(&mut self, opacity: f32, force_topmost: bool) -> bool {
+    fn apply_window_opacity(&mut self, opacity: f32, force_topmost: bool, is_active: bool) -> bool {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
         // 1. 캐싱된 핸들이 있고 투명도가 올바르게 유지되고 있다면 조기 반환
@@ -677,14 +705,14 @@ impl NativeApp {
                     let current_owner = GetWindowLongPtrW(hwnd, GWL_HWNDPARENT) as HWND;
                     if current_owner != g_hwnd {
                         SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, g_hwnd as isize);
-                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                        SetWindowPos(hwnd, if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST }, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
                     }
                 }
             }
 
             if force_topmost {
                 unsafe {
-                    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                    SetWindowPos(hwnd, if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST }, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                 }
             }
             if self.check_cached_window_opacity(hwnd, opacity) {
@@ -694,12 +722,13 @@ impl NativeApp {
             // 캐시된 핸들은 유효하나 스타일이 풀린 경우: 바로 재적용 시도
             if unsafe { IsWindow(hwnd) } != 0 {
                 let style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
-                let target_style = style | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32 | WS_EX_TOPMOST as i32;
+                let target_style = style | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32 | (if is_active { WS_EX_TOPMOST as i32 } else { 0 });
+                let target_style = if !is_active { target_style & !WS_EX_TOPMOST as i32 } else { target_style };
                 if style != target_style {
                     unsafe { SetWindowLongW(hwnd, GWL_EXSTYLE, target_style) };
                 }
                 unsafe {
-                    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                    SetWindowPos(hwnd, if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST }, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
                 }
                 if unsafe { SetLayeredWindowAttributes(hwnd, 0, (opacity * 255.0) as u8, 0x00000002) } != 0 {
                     self.last_applied_opacity = Some(opacity);
@@ -731,11 +760,12 @@ impl NativeApp {
 
             unsafe {
                 let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-                let target_style = style | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32 | WS_EX_TOPMOST as i32;
+                let target_style = style | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32 | (if is_active { WS_EX_TOPMOST as i32 } else { 0 });
+                let target_style = if !is_active { target_style & !WS_EX_TOPMOST as i32 } else { target_style };
                 if style != target_style {
                     SetWindowLongW(hwnd, GWL_EXSTYLE, target_style);
                 }
-                SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                SetWindowPos(hwnd, if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST }, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
                 if SetLayeredWindowAttributes(hwnd, 0, (opacity * 255.0) as u8, 0x00000002) != 0 {
                     self.cached_hwnd = Some(hwnd as isize);
                     self.last_applied_opacity = Some(opacity);
