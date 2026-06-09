@@ -44,11 +44,20 @@ pub struct TrayIcon {
 struct TrayActions {
     command_tx: Sender<UiCommand>,
     settings: Arc<Mutex<Value>>,
+    ctx_holder: Arc<Mutex<Option<egui::Context>>>,
 }
 
 impl TrayIcon {
-    pub fn spawn(command_tx: Sender<UiCommand>, settings: Arc<Mutex<Value>>) -> Self {
-        let _ = ACTIONS.set(TrayActions { command_tx, settings });
+    pub fn spawn(
+        command_tx: Sender<UiCommand>,
+        settings: Arc<Mutex<Value>>,
+        ctx_holder: Arc<Mutex<Option<egui::Context>>>,
+    ) -> Self {
+        let _ = ACTIONS.set(TrayActions {
+            command_tx,
+            settings,
+            ctx_holder,
+        });
         let hwnd = Arc::new(AtomicIsize::new(0));
         let thread_hwnd = hwnd.clone();
         let thread = thread::spawn(move || unsafe {
@@ -301,6 +310,11 @@ fn handle_menu_command(cmd: usize) {
 
 fn send_command(actions: &TrayActions, command: UiCommand) {
     let _ = actions.command_tx.send(command);
+    if let Ok(guard) = actions.ctx_holder.lock() {
+        if let Some(ctx) = guard.as_ref() {
+            ctx.request_repaint();
+        }
+    }
 }
 
 fn wide(text: &str) -> Vec<u16> {

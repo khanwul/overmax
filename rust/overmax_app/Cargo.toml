@@ -17,6 +17,7 @@ eframe = { version = "0.33.2", default-features = false, features = [
     "default_fonts",
     "glow",
 ] }
+egui = "0.33.2"
 overmax-core = { path = "../overmax_core" }
 overmax-data = { path = "../overmax_data" }
 overmax_cv = { path = "../overmax_cv" }

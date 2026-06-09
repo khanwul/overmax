@@ -2313,6 +2313,7 @@ name = "overmax-app"
 version = "0.2.2"
 dependencies = [
  "eframe",
+ "egui",
  "image",
  "overmax-core",
  "overmax-data",

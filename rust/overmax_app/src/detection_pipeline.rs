@@ -58,7 +58,7 @@ impl DetectionPipeline {
         Self {
             image_db,
             rois: RoiManager::new(1920, 1080),
-            hysteresis: HysteresisBuffer::new(7, 0.6, 3, 0.35, 7),
+            hysteresis: HysteresisBuffer::new(5, 0.6, 3, 0.4, 3),
             play_state: PlayStateDetector::new(5),
             ocr: OcrDetector::new(),
             current_song_id: None,

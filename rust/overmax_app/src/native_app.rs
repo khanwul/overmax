@@ -125,6 +125,8 @@ fn is_position_on_screen(_x: f32, _y: f32) -> bool {
 }
 
 fn native_options(merged: &Value) -> eframe::NativeOptions {
+    let is_lite = merged.get("overlay").and_then(|o| o.get("lite_mode")).and_then(|v| v.as_bool()).unwrap_or(false);
+
     let mut builder = ViewportBuilder::default()
         .with_title("Overmax")
         .with_inner_size([overlay_ui::BASE_WIDTH, overlay_ui::BASE_HEIGHT])
@@ -132,21 +134,24 @@ fn native_options(merged: &Value) -> eframe::NativeOptions {
         .with_decorations(false)
         .with_transparent(true)
         .with_taskbar(false)
-        .with_always_on_top();
+        .with_always_on_top()
+        .with_visible(!is_lite);
 
     if let Some(icon) = load_icon() {
         builder = builder.with_icon(icon);
     }
 
-    if let Some(pos) = merged.get("overlay").and_then(|o| o.get("position")) {
-        if let (Some(x), Some(y)) = (
-            pos.get("x").and_then(|v| v.as_f64()),
-            pos.get("y").and_then(|v| v.as_f64()),
-        ) {
-            let px = x as f32;
-            let py = y as f32;
-            if is_position_on_screen(px, py) {
-                builder = builder.with_position(eframe::egui::pos2(px, py));
+    if !is_lite {
+        if let Some(pos) = merged.get("overlay").and_then(|o| o.get("position")) {
+            if let (Some(x), Some(y)) = (
+                pos.get("x").and_then(|v| v.as_f64()),
+                pos.get("y").and_then(|v| v.as_f64()),
+            ) {
+                let px = x as f32;
+                let py = y as f32;
+                if is_position_on_screen(px, py) {
+                    builder = builder.with_position(eframe::egui::pos2(px, py));
+                }
             }
         }
     }
@@ -439,9 +444,9 @@ impl NativeApp {
             recommender,
             game_found_rx,
             exit_requested: exit_requested.clone(),
-            ctx_holder,
+            ctx_holder: ctx_holder.clone(),
             #[cfg(target_os = "windows")]
-            _tray: Some(TrayIcon::spawn(ui_cmd_tx, merged_settings.clone())),
+            _tray: Some(TrayIcon::spawn(ui_cmd_tx, merged_settings.clone(), ctx_holder)),
             #[cfg(target_os = "windows")]
             cached_hwnd: None,
             #[cfg(target_os = "windows")]
