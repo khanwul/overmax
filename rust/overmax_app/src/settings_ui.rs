@@ -114,10 +114,55 @@ fn overlay_section(ui: &mut egui::Ui, draft: &mut Value) {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
             
-        if ui.checkbox(&mut lite_mode, "추천 숨기기 및 레이아웃 축소").changed() {
+        let response = ui.checkbox(&mut lite_mode, "활성화")
+            .on_hover_text("추천 숨기기 및 레이아웃 축소");
+            
+        if response.changed() {
             overlay.insert("lite_mode".into(), serde_json::json!(lite_mode));
         }
     });
+
+    let lite_mode = overlay
+        .get("lite_mode")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if lite_mode {
+        ui.add_space(Theme::ROW_SPACING);
+        form_row(ui, "라이트모드 위치", |ui| {
+            let mut lite_position = overlay
+                .get("lite_position")
+                .and_then(|v| v.as_str())
+                .unwrap_or("bottom_right")
+                .to_string();
+                
+            let mut changed = false;
+            ui.horizontal(|ui| {
+                ui.style_mut().spacing.item_spacing.x = 4.0;
+                ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
+                for (label, val) in [
+                    ("좌상단", "top_left"),
+                    ("우상단", "top_right"),
+                    ("좌하단", "bottom_left"),
+                    ("우하단", "bottom_right"),
+                ] {
+                    let is_active = lite_position == val;
+                    let btn = egui::Button::new(RichText::new(label).size(Theme::FONT_SMALL).strong())
+                        .fill(if is_active { Theme::TAB_ACTIVE_BG } else { Theme::TAB_DIM_BG })
+                        .stroke(Stroke::new(1.0, Theme::STROKE))
+                        .corner_radius(egui::CornerRadius::same(Theme::R_SM))
+                        .wrap();
+                    if ui.add_sized(egui::vec2(65.0, Theme::CONTROL_HEIGHT), btn).clicked() {
+                        lite_position = val.to_string();
+                        changed = true;
+                    }
+                }
+            });
+            if changed {
+                overlay.insert("lite_position".into(), serde_json::json!(lite_position));
+            }
+        });
+    }
 }
 
 fn varchive_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {

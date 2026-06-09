@@ -310,28 +310,44 @@ impl eframe::App for NativeApp {
 
         // 라이트 모드 판정: 설정에서 명시적으로 활성화했을 때만 적용
         let is_lite = if let Ok(m) = self.settings.merged.lock() {
-            m.get("lite_mode").and_then(|v| v.as_bool()).unwrap_or(false)
+            m.get("overlay").and_then(|o| o.get("lite_mode")).and_then(|v| v.as_bool()).unwrap_or(false)
         } else {
             false
         };
 
-        let height = overlay_ui::BASE_HEIGHT;
+        let lite_position = if let Ok(m) = self.settings.merged.lock() {
+            m.get("overlay")
+                .and_then(|o| o.get("lite_position"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("bottom_right")
+                .to_string()
+        } else {
+            "bottom_right".to_string()
+        };
+
+        let height = if is_lite {
+            overlay_ui::LITE_BASE_HEIGHT
+        } else {
+            overlay_ui::BASE_HEIGHT
+        };
 
         let game_found = self.game_rect.lock().map(|r| r.is_some()).unwrap_or(false);
         let overlay_on = game_found && self.confidence > 0.1;
 
         if overlay_on != self.prev_overlay_on 
-            || (overlay_on && (scale - self.prev_scale).abs() > 0.001)
+            || (overlay_on && ((scale - self.prev_scale).abs() > 0.001 || is_lite != self.prev_is_lite))
         {
             debug_ui::push_log(
                 &self.debug_state.log_lines,
                 1000,
                 format!(
-                    "[Overlay] 레이아웃 업데이트: ON={}->{}, Scale={:.2}->{:.2} (Game: {}, Conf: {:.2})",
+                    "[Overlay] 레이아웃 업데이트: ON={}->{}, Scale={:.2}->{:.2}, Lite={}->{} (Game: {}, Conf: {:.2})",
                     self.prev_overlay_on,
                     overlay_on,
                     self.prev_scale,
                     scale,
+                    self.prev_is_lite,
+                    is_lite,
                     game_found,
                     self.confidence
                 ),
@@ -487,6 +503,52 @@ impl eframe::App for NativeApp {
                 }
                 self.last_painted_rect = actions.response_rect;
             });
+
+        // Windows 전용: 라이트 모드 구석 고정 위치 강제 적용
+        #[cfg(target_os = "windows")]
+        {
+            if overlay_on && is_lite {
+                if let Some(hwnd_val) = self.cached_hwnd {
+                    if let Ok(g_rect_opt) = self.game_rect.lock() {
+                        if let Some(g_rect) = *g_rect_opt {
+                            use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                            let hwnd = hwnd_val as HWND;
+                            let ppi = ctx.pixels_per_point();
+                            let overlay_w_px = (((overlay_ui::BASE_WIDTH * scale).ceil() + 2.0) * ppi) as i32;
+                            let overlay_h_px = (((height * scale).ceil() + 2.0) * ppi) as i32;
+                            let margin_px = (16.0 * ppi) as i32;
+                            
+                            let (px, py) = match lite_position.as_str() {
+                                "top_left" => {
+                                    (g_rect.left + margin_px, g_rect.top + margin_px)
+                                }
+                                "top_right" => {
+                                    (g_rect.left + g_rect.width - overlay_w_px - margin_px, g_rect.top + margin_px)
+                                }
+                                "bottom_left" => {
+                                    (g_rect.left + margin_px, g_rect.top + g_rect.height - overlay_h_px - margin_px)
+                                }
+                                _ => { // bottom_right
+                                    (g_rect.left + g_rect.width - overlay_w_px - margin_px, g_rect.top + g_rect.height - overlay_h_px - margin_px)
+                                }
+                            };
+                            
+                            unsafe {
+                                SetWindowPos(
+                                    hwnd,
+                                    HWND_TOPMOST,
+                                    px,
+                                    py,
+                                    overlay_w_px,
+                                    overlay_h_px,
+                                    SWP_NOACTIVATE,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Windows 전용: 전체 창 투명도 및 최상위 권한 적용
         #[cfg(target_os = "windows")]
