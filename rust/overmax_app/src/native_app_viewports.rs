@@ -491,7 +491,7 @@ impl eframe::App for NativeApp {
         {
             if overlay_on && snap_position != "manual" {
                 if let Some(hwnd_val) = self.cached_hwnd {
-                    if let Ok(g_rect_opt) = self.game_rect.lock() {
+                    if let Ok(g_rect_opt) = self.game_rect.try_lock() {
                         if let Some(g_rect) = *g_rect_opt {
                             use windows_sys::Win32::UI::WindowsAndMessaging::*;
                             let hwnd = hwnd_val as HWND;
@@ -515,16 +515,24 @@ impl eframe::App for NativeApp {
                                 }
                             };
                             
-                            unsafe {
-                                SetWindowPos(
-                                    hwnd,
-                                    HWND_TOPMOST,
-                                    px,
-                                    py,
-                                    overlay_w_px,
-                                    overlay_h_px,
-                                    SWP_NOACTIVATE,
-                                );
+                            // 이전 설정 좌표 및 크기와 다른 경우에만 SetWindowPos 호출
+                            static mut PREV_SNAP_GEOMETRY: Option<(i32, i32, i32, i32)> = None;
+                            let current_geom = (px, py, overlay_w_px, overlay_h_px);
+                            let geom_changed = unsafe { PREV_SNAP_GEOMETRY != Some(current_geom) };
+
+                            if geom_changed {
+                                unsafe {
+                                    SetWindowPos(
+                                        hwnd,
+                                        HWND_TOPMOST,
+                                        px,
+                                        py,
+                                        overlay_w_px,
+                                        overlay_h_px,
+                                        SWP_NOACTIVATE,
+                                    );
+                                    PREV_SNAP_GEOMETRY = Some(current_geom);
+                                }
                             }
                         }
                     }
