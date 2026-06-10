@@ -62,23 +62,17 @@ fn get_local_mouse_pos(ctx: &egui::Context, hwnd_opt: Option<isize>) -> Option<e
 
 fn draw_custom_cursor(painter: &egui::Painter, p: egui::Pos2) {
     use egui::{Color32, Stroke};
-    // 화살표 꼭짓점 정의 (일반적인 Windows 화살표 커서 비율)
-    let points = vec![
-        p,
-        p + egui::vec2(0.0, 17.0),
-        p + egui::vec2(4.5, 12.5),
-        p + egui::vec2(9.0, 21.5),
-        p + egui::vec2(12.0, 20.0),
-        p + egui::vec2(7.5, 11.0),
-        p + egui::vec2(13.0, 11.0),
-    ];
-    // 흰색 채우기 및 검은색 테두리
-    painter.add(egui::epaint::PathShape {
-        points,
-        closed: true,
-        fill: Color32::WHITE,
-        stroke: Stroke::new(1.5, Color32::BLACK).into(),
-    });
+    let len = 6.0;
+
+    // 1. 대비 효과용 검은색 십자 (두껍게)
+    let stroke_black = Stroke::new(2.5, Color32::BLACK);
+    painter.line_segment([p - egui::vec2(len, 0.0), p + egui::vec2(len, 0.0)], stroke_black);
+    painter.line_segment([p - egui::vec2(0.0, len), p + egui::vec2(0.0, len)], stroke_black);
+
+    // 2. 가시성 확보용 흰색 십자 (얇게)
+    let stroke_white = Stroke::new(1.0, Color32::WHITE);
+    painter.line_segment([p - egui::vec2(len, 0.0), p + egui::vec2(len, 0.0)], stroke_white);
+    painter.line_segment([p - egui::vec2(0.0, len), p + egui::vec2(0.0, len)], stroke_white);
 }
 
 impl NativeApp {
