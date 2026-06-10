@@ -589,6 +589,31 @@ use windows_sys::Win32::Foundation::HWND;
 
 #[cfg(target_os = "windows")]
 impl NativeApp {
+    fn determine_active_state(&self, game_hwnd: Option<HWND>) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+
+        let Some(g_hwnd) = game_hwnd else {
+            return false;
+        };
+
+        let fg = unsafe { GetForegroundWindow() };
+        if fg.is_null() {
+            return false;
+        }
+
+        if fg == g_hwnd {
+            return true;
+        }
+
+        unsafe {
+            let mut fg_pid = 0u32;
+            GetWindowThreadProcessId(fg, &mut fg_pid);
+            let my_pid = GetCurrentProcessId();
+            fg_pid == my_pid
+        }
+    }
+
     fn check_cached_window_opacity(&self, hwnd: HWND, target_opacity: f32, is_active: bool) -> bool {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         if unsafe { IsWindow(hwnd) } == 0 {
@@ -673,15 +698,23 @@ impl NativeApp {
         if let Some(hwnd_val) = self.cached_hwnd {
             let hwnd = hwnd_val as HWND;
 
-            // 게임 창을 Owner로 지정하여 항상 오버레이가 게임 위에 렌더링되도록 보장
-            let game_title = if let Ok(m) = self.settings.merged.lock() {
-                game_window_title(&m).to_string()
-            } else {
-                "DJMAX RESPECT V".to_string()
+            // [성능 개선] 매 프레임 FindWindowW를 부르지 않도록 게임 HWND 캐싱 & 유효성 검사
+            let game_hwnd = {
+                let mut g_hwnd = self.cached_game_hwnd.map(|h| h as HWND);
+                if g_hwnd.is_none() || unsafe { IsWindow(g_hwnd.unwrap()) } == 0 {
+                    let game_title = if let Ok(m) = self.settings.merged.lock() {
+                        game_window_title(&m).to_string()
+                    } else {
+                        "DJMAX RESPECT V".to_string()
+                    };
+                    let title_wide = window_tracker::encode_wide(&game_title);
+                    g_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
+                    self.cached_game_hwnd = g_hwnd.map(|h| h as isize);
+                }
+                g_hwnd
             };
-            let title_wide = window_tracker::encode_wide(&game_title);
-            let game_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
 
+            // 게임 창을 Owner로 지정하여 항상 오버레이가 게임 위에 렌더링되도록 보장
             if let Some(g_hwnd) = game_hwnd {
                 unsafe {
                     let current_owner = GetWindowLongPtrW(hwnd, GWL_HWNDPARENT) as HWND;
@@ -693,22 +726,7 @@ impl NativeApp {
             }
 
             // 현재 활성 상태 검사
-            let is_active = if let Some(g_hwnd) = game_hwnd {
-                use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-                unsafe {
-                    let fg = GetForegroundWindow();
-                    if fg == g_hwnd {
-                        true
-                    } else {
-                        let mut fg_pid = 0u32;
-                        GetWindowThreadProcessId(fg, &mut fg_pid);
-                        let my_pid = GetCurrentProcessId();
-                        fg_pid == my_pid
-                    }
-                }
-            } else {
-                false
-            };
+            let is_active = self.determine_active_state(game_hwnd);
 
             if force_topmost {
                 unsafe {
@@ -746,36 +764,29 @@ impl NativeApp {
                 format!("[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})", opacity, hwnd),
             );
 
-            // 신규 오버레이 윈도우 감지 시 게임 창을 Owner로 연결
-            let game_title = if let Ok(m) = self.settings.merged.lock() {
-                game_window_title(&m).to_string()
-            } else {
-                "DJMAX RESPECT V".to_string()
+            // [성능 개선] 매 프레임 FindWindowW를 부르지 않도록 게임 HWND 캐싱 & 유효성 검사
+            let game_hwnd = {
+                let mut g_hwnd = self.cached_game_hwnd.map(|h| h as HWND);
+                if g_hwnd.is_none() || unsafe { IsWindow(g_hwnd.unwrap()) } == 0 {
+                    let game_title = if let Ok(m) = self.settings.merged.lock() {
+                        game_window_title(&m).to_string()
+                    } else {
+                        "DJMAX RESPECT V".to_string()
+                    };
+                    let title_wide = window_tracker::encode_wide(&game_title);
+                    g_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
+                    self.cached_game_hwnd = g_hwnd.map(|h| h as isize);
+                }
+                g_hwnd
             };
-            let title_wide = window_tracker::encode_wide(&game_title);
-            let game_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
+
             if let Some(g_hwnd) = game_hwnd {
                 unsafe {
                     SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, g_hwnd as isize);
                 }
             }
 
-            let is_active = if let Some(g_hwnd) = game_hwnd {
-                use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-                unsafe {
-                    let fg = GetForegroundWindow();
-                    if fg == g_hwnd {
-                        true
-                    } else {
-                        let mut fg_pid = 0u32;
-                        GetWindowThreadProcessId(fg, &mut fg_pid);
-                        let my_pid = GetCurrentProcessId();
-                        fg_pid == my_pid
-                    }
-                }
-            } else {
-                false
-            };
+            let is_active = self.determine_active_state(game_hwnd);
 
             unsafe {
                 let style = GetWindowLongW(hwnd, GWL_EXSTYLE);

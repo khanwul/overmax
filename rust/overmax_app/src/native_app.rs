@@ -249,6 +249,8 @@ pub struct NativeApp {
     #[cfg(target_os = "windows")]
     pub(crate) cached_hwnd: Option<isize>,
     #[cfg(target_os = "windows")]
+    pub(crate) cached_game_hwnd: Option<isize>,
+    #[cfg(target_os = "windows")]
     pub(crate) last_applied_opacity: Option<f32>,
     pub(crate) last_painted_rect: Option<egui::Rect>,
     pub(crate) drag_start_cursor: Option<(i32, i32)>,
@@ -459,6 +461,8 @@ impl NativeApp {
             _tray: Some(TrayIcon::spawn(ui_cmd_tx, merged_settings.clone(), ctx_holder)),
             #[cfg(target_os = "windows")]
             cached_hwnd: None,
+            #[cfg(target_os = "windows")]
+            cached_game_hwnd: None,
             #[cfg(target_os = "windows")]
             last_applied_opacity: None,
             last_painted_rect: None,
