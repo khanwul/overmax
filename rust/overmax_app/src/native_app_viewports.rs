@@ -20,41 +20,46 @@ fn game_window_title(settings: &serde_json::Value) -> &str {
         .unwrap_or("DJMAX RESPECT V")
 }
 
-fn is_mouse_over_overlay(ctx: &egui::Context, last_painted_rect: Option<egui::Rect>) -> bool {
+fn get_local_mouse_pos(ctx: &egui::Context, hwnd_opt: Option<isize>) -> Option<egui::Pos2> {
     #[cfg(target_os = "windows")]
     {
-        let Some(rect) = ctx.input(|i| i.viewport().outer_rect) else {
-            return false;
+        let Some(hwnd_val) = hwnd_opt else {
+            return None;
         };
+        use windows_sys::Win32::Foundation::HWND;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+
+        let hwnd = hwnd_val as HWND;
         let mut pos = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
         unsafe {
-            windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pos);
+            if GetCursorPos(&mut pos) == 0 {
+                return None;
+            }
+            if ScreenToClient(hwnd, &mut pos) == 0 {
+                return None;
+            }
         }
+
         let ppi = ctx.pixels_per_point();
-        let mouse_pos = egui::pos2(pos.x as f32 / ppi, pos.y as f32 / ppi);
-        if let Some(paint_rect) = last_painted_rect {
-            let global_paint_rect = paint_rect.translate(rect.min.to_vec2());
-            global_paint_rect.contains(mouse_pos)
-        } else {
-            rect.contains(mouse_pos)
+        let local_pos = egui::pos2(pos.x as f32 / ppi, pos.y as f32 / ppi);
+
+        if let Some(rect) = ctx.input(|i| i.viewport().outer_rect) {
+            let size = rect.size();
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            if bounds.contains(local_pos) {
+                return Some(local_pos);
+            }
         }
+        None
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        ctx.input(|i| {
-            if let Some(mouse_pos) = i.pointer.latest_pos() {
-                if let Some(paint_rect) = last_painted_rect {
-                    paint_rect.contains(mouse_pos)
-                } else {
-                    true
-                }
-            } else {
-                false
-            }
-        })
+        ctx.input(|i| i.pointer.latest_pos())
     }
 }
+
 
 impl NativeApp {
     fn auxiliary_viewport(title: &str, size: [f32; 2]) -> ViewportBuilder {
@@ -393,26 +398,17 @@ impl eframe::App for NativeApp {
         let _hidden_size = Vec2::new(1.0, 1.0);
 
         // 마우스가 오버레이 영역 위에 있을 때만 상호작용 가능하게 함 (보조창 조작을 위해)
-        let is_over = is_mouse_over_overlay(ctx, self.last_painted_rect);
+        let local_mouse = get_local_mouse_pos(ctx, self.cached_hwnd);
+        let is_over = local_mouse.is_some();
         let passthrough = !overlay_on || !is_over;
         if self.prev_passthrough != Some(passthrough) {
             ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(passthrough));
             self.prev_passthrough = Some(passthrough);
         }
 
-        // Windows 전용: 게임이 활성화된 상태에서 비활성 상태인 오버레이 위에 마우스가 올라갔을 때,
-        // 게임 창에 의해 숨겨진 커서가 오버레이 위에서도 보이지 않는 문제를 해결하기 위해 Win32 SetCursor 호출
-        #[cfg(target_os = "windows")]
-        {
-            if overlay_on && is_over {
-                use windows_sys::Win32::UI::WindowsAndMessaging::*;
-                unsafe {
-                    let arrow_cursor = LoadCursorW(std::ptr::null_mut(), IDC_ARROW);
-                    if !arrow_cursor.is_null() {
-                        SetCursor(arrow_cursor);
-                    }
-                }
-            }
+        // 비활성 윈도우(WS_EX_NOACTIVATE) 상태에서 마우스가 위에 있을 때 egui/winit이 커서 아이콘을 실시간으로 갱신하도록 렌더링 강제
+        if overlay_on && is_over {
+            ctx.request_repaint();
         }
 
         let mut force_topmost = false;
