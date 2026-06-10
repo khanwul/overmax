@@ -60,6 +60,26 @@ fn get_local_mouse_pos(ctx: &egui::Context, hwnd_opt: Option<isize>) -> Option<e
     }
 }
 
+fn draw_custom_cursor(painter: &egui::Painter, p: egui::Pos2) {
+    use egui::{Color32, Stroke};
+    // 화살표 꼭짓점 정의 (일반적인 Windows 화살표 커서 비율)
+    let points = vec![
+        p,
+        p + egui::vec2(0.0, 17.0),
+        p + egui::vec2(4.5, 12.5),
+        p + egui::vec2(9.0, 21.5),
+        p + egui::vec2(12.0, 20.0),
+        p + egui::vec2(7.5, 11.0),
+        p + egui::vec2(13.0, 11.0),
+    ];
+    // 흰색 채우기 및 검은색 테두리
+    painter.add(egui::epaint::PathShape {
+        points,
+        closed: true,
+        fill: Color32::WHITE,
+        stroke: Stroke::new(1.5, Color32::BLACK).into(),
+    });
+}
 
 impl NativeApp {
     fn auxiliary_viewport(title: &str, size: [f32; 2]) -> ViewportBuilder {
@@ -428,8 +448,10 @@ impl eframe::App for NativeApp {
                     return;
                 }
 
-                // 오버레이 창 위에 마우스가 올라갔을 때(passthrough 해제 시) 커서가 보이지 않는 현상 방지
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+                // 하드웨어 커서가 나타나 가상 커서와 이중으로 보이는 현상을 예방하기 위해 하드웨어 커서를 숨김
+                if local_mouse.is_some() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+                }
 
                 let actions = overlay_ui::draw_overlay_panel(
                     ui,
@@ -500,6 +522,10 @@ impl eframe::App for NativeApp {
                 }
                 if actions.restore_game_focus || actions.start_drag {
                     force_topmost = true;
+                }
+                if let Some(mouse_pos) = local_mouse {
+                    // 비활성 윈도우 마우스 커서 숨김 제약을 우회하기 위해 가상 커서를 마우스 위치에 직접 렌더링
+                    draw_custom_cursor(ui.painter(), mouse_pos);
                 }
                 self.last_painted_rect = actions.response_rect;
             });
