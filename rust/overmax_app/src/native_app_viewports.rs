@@ -400,6 +400,21 @@ impl eframe::App for NativeApp {
             self.prev_passthrough = Some(passthrough);
         }
 
+        // Windows 전용: 게임이 활성화된 상태에서 비활성 상태인 오버레이 위에 마우스가 올라갔을 때,
+        // 게임 창에 의해 숨겨진 커서가 오버레이 위에서도 보이지 않는 문제를 해결하기 위해 Win32 SetCursor 호출
+        #[cfg(target_os = "windows")]
+        {
+            if overlay_on && is_over {
+                use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                unsafe {
+                    let arrow_cursor = LoadCursorW(std::ptr::null_mut(), IDC_ARROW);
+                    if !arrow_cursor.is_null() {
+                        SetCursor(arrow_cursor);
+                    }
+                }
+            }
+        }
+
         let mut force_topmost = false;
         if overlay_on && !self.prev_overlay_on {
             force_topmost = true;
