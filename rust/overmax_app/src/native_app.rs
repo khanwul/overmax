@@ -72,7 +72,17 @@ pub fn run_native_app() -> eframe::Result<()> {
     }
     match updater::check_and_apply_update_blocking(root.as_path(), &upd_cfg) {
         Ok(true) => {}
-        Ok(false) => std::process::exit(0),
+        Ok(false) => {
+            drop(_single);
+            if let Ok(exe) = std::env::current_exe() {
+                if let Err(e) = std::process::Command::new(exe).spawn() {
+                    eprintln!("[AppUpdater] 재시작 실패: {}", e);
+                }
+            } else {
+                eprintln!("[AppUpdater] 실행 경로를 찾을 수 없습니다.");
+            }
+            std::process::exit(0);
+        }
         Err(e) => {
             eprintln!("[AppUpdater] {e}");
             std::process::exit(1);

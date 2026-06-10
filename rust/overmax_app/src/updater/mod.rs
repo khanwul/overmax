@@ -161,19 +161,6 @@ pub fn check_and_apply_update_blocking(
 
     if updated {
         eprintln!("[AppUpdater] 업데이트 완료! 앱을 재시작합니다.");
-        let exe = match std::env::current_exe() {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("[AppUpdater] 실행 경로를 찾을 수 없습니다: {}", e);
-                return Ok(true);
-            }
-        };
-
-        // 재시작 (Restart)
-        if let Err(e) = std::process::Command::new(exe).spawn() {
-            eprintln!("[AppUpdater] 재시작 실패: {}", e);
-            return Ok(true); 
-        }
         return Ok(false); // Signal to exit immediately
     } else {
         eprintln!("[AppUpdater] 이미 최신 버전입니다.");
