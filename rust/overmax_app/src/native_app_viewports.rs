@@ -416,6 +416,10 @@ impl eframe::App for NativeApp {
                     self.last_painted_rect = None;
                     return;
                 }
+
+                // 오버레이 창 위에 마우스가 올라갔을 때(passthrough 해제 시) 커서가 보이지 않는 현상 방지
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+
                 let actions = overlay_ui::draw_overlay_panel(
                     ui,
                     &overlay_ui::OverlayProps {
