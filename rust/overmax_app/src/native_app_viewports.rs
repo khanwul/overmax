@@ -559,44 +559,8 @@ impl eframe::App for NativeApp {
         // Windows 전용: 전체 창 투명도 및 최상위 권한 적용
         #[cfg(target_os = "windows")]
         {
-            let now = ctx.input(|i| i.time);
-            static mut TOPMOST_TIMER: f64 = 0.0;
             if overlay_on {
-                unsafe {
-                    if now - TOPMOST_TIMER > 1.0 {
-                        force_topmost = true;
-                        TOPMOST_TIMER = now;
-                    }
-                }
-
-                // DJMAX 혹은 Overmax(본 프로세스 소유 윈도우들)가 포커스를 가지고 있는지 체크
-                let game_title = if let Ok(m) = self.settings.merged.lock() {
-                    game_window_title(&m).to_string()
-                } else {
-                    "DJMAX RESPECT V".to_string()
-                };
-                let title_wide = window_tracker::encode_wide(&game_title);
-                let game_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
-                
-                let is_active = if let Some(g_hwnd) = game_hwnd {
-                    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-                    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-                    unsafe {
-                        let fg = GetForegroundWindow();
-                        if fg == g_hwnd {
-                            true
-                        } else {
-                            let mut fg_pid = 0u32;
-                            GetWindowThreadProcessId(fg, &mut fg_pid);
-                            let my_pid = GetCurrentProcessId();
-                            fg_pid == my_pid
-                        }
-                    }
-                } else {
-                    false
-                };
-
-                let found = self.apply_window_opacity(opacity, force_topmost, is_active);
+                let found = self.apply_window_opacity(opacity, force_topmost);
                 if !found {
                     static mut LOGGED: bool = false;
                     unsafe {
@@ -625,14 +589,24 @@ use windows_sys::Win32::Foundation::HWND;
 
 #[cfg(target_os = "windows")]
 impl NativeApp {
-    fn check_cached_window_opacity(&self, hwnd: HWND, target_opacity: f32) -> bool {
+    fn check_cached_window_opacity(&self, hwnd: HWND, target_opacity: f32, is_active: bool) -> bool {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         if unsafe { IsWindow(hwnd) } == 0 {
             return false;
         }
         let style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
-        let target_mask = WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32 | WS_EX_TOPMOST as i32;
-        if (style & target_mask) != target_mask {
+        let mut target_mask = WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32;
+        if is_active {
+            target_mask |= WS_EX_TOPMOST as i32;
+        }
+        
+        let topmost_ok = if is_active {
+            (style & WS_EX_TOPMOST as i32) != 0
+        } else {
+            (style & WS_EX_TOPMOST as i32) == 0
+        };
+
+        if (style & target_mask) != target_mask || !topmost_ok {
             return false;
         }
         let mut alpha = 0u8;
@@ -692,7 +666,7 @@ impl NativeApp {
         data.found_hwnd
     }
 
-    fn apply_window_opacity(&mut self, opacity: f32, force_topmost: bool, is_active: bool) -> bool {
+    fn apply_window_opacity(&mut self, opacity: f32, force_topmost: bool) -> bool {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
         // 1. 캐싱된 핸들이 있고 투명도가 올바르게 유지되고 있다면 조기 반환
@@ -706,30 +680,51 @@ impl NativeApp {
                 "DJMAX RESPECT V".to_string()
             };
             let title_wide = window_tracker::encode_wide(&game_title);
-            if let Some(g_hwnd) = window_tracker::find_hwnd_by_title(&title_wide) {
+            let game_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
+
+            if let Some(g_hwnd) = game_hwnd {
                 unsafe {
                     let current_owner = GetWindowLongPtrW(hwnd, GWL_HWNDPARENT) as HWND;
                     if current_owner != g_hwnd {
                         SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, g_hwnd as isize);
-                        SetWindowPos(hwnd, if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST }, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
                     }
                 }
             }
+
+            // 현재 활성 상태 검사
+            let is_active = if let Some(g_hwnd) = game_hwnd {
+                use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+                unsafe {
+                    let fg = GetForegroundWindow();
+                    if fg == g_hwnd {
+                        true
+                    } else {
+                        let mut fg_pid = 0u32;
+                        GetWindowThreadProcessId(fg, &mut fg_pid);
+                        let my_pid = GetCurrentProcessId();
+                        fg_pid == my_pid
+                    }
+                }
+            } else {
+                false
+            };
 
             if force_topmost {
                 unsafe {
                     SetWindowPos(hwnd, if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST }, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                 }
             }
-            if self.check_cached_window_opacity(hwnd, opacity) {
+
+            if self.check_cached_window_opacity(hwnd, opacity, is_active) {
                 return true;
             }
             
-            // 캐시된 핸들은 유효하나 스타일이 풀린 경우: 바로 재적용 시도
+            // 캐시된 핸들은 유효하나 스타일이나 투명도가 풀린 경우: 바로 재적용 시도
             if unsafe { IsWindow(hwnd) } != 0 {
                 let style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
-                let target_style = style | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32 | (if is_active { WS_EX_TOPMOST as i32 } else { 0 });
-                let target_style = if !is_active { target_style & !WS_EX_TOPMOST as i32 } else { target_style };
+                let topmost_flag = if is_active { WS_EX_TOPMOST as i32 } else { 0 };
+                let target_style = (style & !(WS_EX_TOPMOST as i32)) | topmost_flag | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32;
                 if style != target_style {
                     unsafe { SetWindowLongW(hwnd, GWL_EXSTYLE, target_style) };
                 }
@@ -758,16 +753,34 @@ impl NativeApp {
                 "DJMAX RESPECT V".to_string()
             };
             let title_wide = window_tracker::encode_wide(&game_title);
-            if let Some(g_hwnd) = window_tracker::find_hwnd_by_title(&title_wide) {
+            let game_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
+            if let Some(g_hwnd) = game_hwnd {
                 unsafe {
                     SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, g_hwnd as isize);
                 }
             }
 
+            let is_active = if let Some(g_hwnd) = game_hwnd {
+                use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+                unsafe {
+                    let fg = GetForegroundWindow();
+                    if fg == g_hwnd {
+                        true
+                    } else {
+                        let mut fg_pid = 0u32;
+                        GetWindowThreadProcessId(fg, &mut fg_pid);
+                        let my_pid = GetCurrentProcessId();
+                        fg_pid == my_pid
+                    }
+                }
+            } else {
+                false
+            };
+
             unsafe {
                 let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-                let target_style = style | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32 | (if is_active { WS_EX_TOPMOST as i32 } else { 0 });
-                let target_style = if !is_active { target_style & !WS_EX_TOPMOST as i32 } else { target_style };
+                let topmost_flag = if is_active { WS_EX_TOPMOST as i32 } else { 0 };
+                let target_style = (style & !(WS_EX_TOPMOST as i32)) | topmost_flag | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32;
                 if style != target_style {
                     SetWindowLongW(hwnd, GWL_EXSTYLE, target_style);
                 }
