@@ -274,6 +274,9 @@ impl eframe::App for NativeApp {
         }
 
         if self.exit_requested.load(Ordering::Relaxed) {
+            self.ui_state.settings_open.store(false, Ordering::Relaxed);
+            self.ui_state.sync_open.store(false, Ordering::Relaxed);
+            self.ui_state.debug_open.store(false, Ordering::Relaxed);
             ctx.send_viewport_cmd(ViewportCommand::Close);
             return;
         }
