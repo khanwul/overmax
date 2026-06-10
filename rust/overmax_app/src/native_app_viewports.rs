@@ -21,20 +21,38 @@ fn game_window_title(settings: &serde_json::Value) -> &str {
 }
 
 fn is_mouse_over_overlay(ctx: &egui::Context, last_painted_rect: Option<egui::Rect>) -> bool {
-    let Some(rect) = ctx.input(|i| i.viewport().outer_rect) else {
-        return false;
-    };
-    let mut pos = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
-    unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pos);
+    #[cfg(target_os = "windows")]
+    {
+        let Some(rect) = ctx.input(|i| i.viewport().outer_rect) else {
+            return false;
+        };
+        let mut pos = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pos);
+        }
+        let ppi = ctx.pixels_per_point();
+        let mouse_pos = egui::pos2(pos.x as f32 / ppi, pos.y as f32 / ppi);
+        if let Some(paint_rect) = last_painted_rect {
+            let global_paint_rect = paint_rect.translate(rect.min.to_vec2());
+            global_paint_rect.contains(mouse_pos)
+        } else {
+            rect.contains(mouse_pos)
+        }
     }
-    let ppi = ctx.pixels_per_point();
-    let mouse_pos = egui::pos2(pos.x as f32 / ppi, pos.y as f32 / ppi);
-    if let Some(paint_rect) = last_painted_rect {
-        let global_paint_rect = paint_rect.translate(rect.min.to_vec2());
-        global_paint_rect.contains(mouse_pos)
-    } else {
-        rect.contains(mouse_pos)
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        ctx.input(|i| {
+            if let Some(mouse_pos) = i.pointer.latest_pos() {
+                if let Some(paint_rect) = last_painted_rect {
+                    paint_rect.contains(mouse_pos)
+                } else {
+                    true
+                }
+            } else {
+                false
+            }
+        })
     }
 }
 
