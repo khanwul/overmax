@@ -214,7 +214,7 @@ fn ask_update_confirm(current: &str, latest_tag: &str) -> bool {
 
     let title = "Overmax Update";
     let msg = format!(
-        "새 앱 업데이트가 있습니다.\n\n현재 버전: v{current}\n최신 버전: {latest_tag}\n\n지금 업데이트를 진행할까요?"
+        "새 앱 업데이트가 있습니다.\n\n현재 버전: {current}\n최신 버전: {latest_tag}\n\n지금 업데이트를 진행할까요?"
     );
     let title_w: Vec<u16> = OsStr::new(title).encode_wide().chain(Some(0)).collect();
     let msg_w: Vec<u16> = OsStr::new(&msg).encode_wide().chain(Some(0)).collect();
