@@ -33,14 +33,17 @@ impl Default for GlobalRoiConfig {
         freestyle_rois.insert("diff_panel".to_string(), RoiRect { x: 98, y: 488, width: 110, height: 28 });
         scenes.insert(SceneType::Freestyle, SceneRoiConfig { rois: freestyle_rois });
 
-        // Online ROI
-        let mut online_rois = HashMap::new();
-        online_rois.insert("jacket".to_string(), RoiRect { x: 664, y: 534, width: 60, height: 58 });
-        online_rois.insert("rate".to_string(), RoiRect { x: 191, y: 554, width: 94, height: 27 });
-        online_rois.insert("btn_mode".to_string(), RoiRect { x: 60, y: 130, width: 5, height: 5 });
-        online_rois.insert("max_combo_badge".to_string(), RoiRect { x: 397, y: 601, width: 36, height: 36 });
-        online_rois.insert("diff_panel".to_string(), RoiRect { x: 82, y: 467, width: 116, height: 31 });
-        scenes.insert(SceneType::Online, SceneRoiConfig { rois: online_rois });
+        // OpenMatch ROI
+        let mut open_match_rois = HashMap::new();
+        open_match_rois.insert("jacket".to_string(), RoiRect { x: 664, y: 534, width: 60, height: 58 });
+        open_match_rois.insert("rate".to_string(), RoiRect { x: 191, y: 554, width: 94, height: 27 });
+        open_match_rois.insert("btn_mode".to_string(), RoiRect { x: 60, y: 130, width: 5, height: 5 });
+        open_match_rois.insert("max_combo_badge".to_string(), RoiRect { x: 397, y: 601, width: 36, height: 36 });
+        open_match_rois.insert("diff_panel".to_string(), RoiRect { x: 82, y: 467, width: 116, height: 31 });
+        scenes.insert(SceneType::OpenMatch, SceneRoiConfig { rois: open_match_rois.clone() });
+
+        // LadderMatch ROI
+        scenes.insert(SceneType::LadderMatch, SceneRoiConfig { rois: open_match_rois });
         
         // ResultFreestyle ROI
         let mut result_freestyle_rois = HashMap::new();

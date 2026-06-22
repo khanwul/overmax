@@ -164,7 +164,13 @@ fn match_logo_scene(text: &str) -> Option<(SceneType, String)> {
     } else if normalized.contains("freestyle") {
         Some((SceneType::Freestyle, normalized))
     } else if normalized.contains("online") {
-        Some((SceneType::Online, normalized))
+        if normalized.contains("open") || normalized.contains("openmatch") {
+            Some((SceneType::OpenMatch, normalized))
+        } else if normalized.contains("ladder") || normalized.contains("laddermatch") {
+            Some((SceneType::LadderMatch, normalized))
+        } else {
+            Some((SceneType::OpenMatch, normalized))
+        }
     } else if normalized.contains("tunes") {
         let has_number = normalized.chars().any(|c| c.is_ascii_digit());
         if has_number {
@@ -180,7 +186,8 @@ fn match_logo_scene(text: &str) -> Option<(SceneType, String)> {
 fn scene_label(scene: SceneType) -> String {
     match scene {
         SceneType::Freestyle => "FREESTYLE".to_string(),
-        SceneType::Online => "ONLINE".to_string(),
+        SceneType::OpenMatch => "OPEN_MATCH".to_string(),
+        SceneType::LadderMatch => "LADDER_MATCH".to_string(),
         SceneType::ResultFreestyle => "RESULT_FREESTYLE".to_string(),
         SceneType::ResultOpen3 => "RESULT_OPEN3".to_string(),
         SceneType::ResultOpen2 => "RESULT_OPEN2".to_string(),
