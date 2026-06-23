@@ -134,6 +134,34 @@ impl OcrDetector {
         self.engine.recognize_logo_color(region).ok()
     }
 
+    pub fn recognize_text_all_passes(&self, region: &ImageRegion) -> Option<String> {
+        // 1. Try Color OCR
+        if let Ok(t) = self.engine.recognize_logo_color(region) {
+            if !t.trim().is_empty() {
+                return Some(t);
+            }
+        }
+        // 2. Try Grayscale (no binarization)
+        if let Ok(t) = self.engine.recognize_logo(region, false, false) {
+            if !t.trim().is_empty() {
+                return Some(t);
+            }
+        }
+        // 3. Try Binarized normal
+        if let Ok(t) = self.engine.recognize_logo(region, false, true) {
+            if !t.trim().is_empty() {
+                return Some(t);
+            }
+        }
+        // 4. Try Binarized inverted
+        if let Ok(t) = self.engine.recognize_logo(region, true, true) {
+            if !t.trim().is_empty() {
+                return Some(t);
+            }
+        }
+        None
+    }
+
     pub fn recognize_bottom_half_with_rate_x(&self, region: &ImageRegion) -> Option<(String, Option<f32>)> {
         self.engine.recognize_bottom_half_with_rate_x(region)
     }

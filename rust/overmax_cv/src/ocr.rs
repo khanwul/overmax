@@ -1,5 +1,23 @@
 use crate::image::resize_bilinear_u8;
 
+fn autocontrast_gray(data: &mut [u8]) {
+    if data.is_empty() {
+        return;
+    }
+    let mut min = 255u8;
+    let mut max = 0u8;
+    for &p in data.iter() {
+        if p < min { min = p; }
+        if p > max { max = p; }
+    }
+    if max > min {
+        let range = (max - min) as f32;
+        for p in data.iter_mut() {
+            *p = ((*p - min) as f32 * 255.0 / range).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
 pub fn preprocess_logo_bgra(
     data: &[u8],
     width: usize,
@@ -7,8 +25,15 @@ pub fn preprocess_logo_bgra(
     force_invert: bool,
     binarize: bool,
 ) -> Vec<u8> {
-    let gray = to_gray_ocr(data, 4);
-    let upscaled = resize_bilinear_u8(&gray, width, height, width * 3, height * 3);
+    let mut gray = to_gray_ocr(data, 4);
+    autocontrast_gray(&mut gray);
+    
+    // Dynamic scaling: target height ~120px, minimum 5x scale
+    let scale = (120.0 / height as f64).ceil().max(5.0) as usize;
+    let upscaled_w = width * scale;
+    let upscaled_h = height * scale;
+    let upscaled = resize_bilinear_u8(&gray, width, height, upscaled_w, upscaled_h);
+    
     let pixels = if binarize {
         let threshold = otsu_threshold(&upscaled);
         let bg_mean = mean_u8(&upscaled);
@@ -18,8 +43,8 @@ pub fn preprocess_logo_bgra(
     } else {
         upscaled
     };
-    let padded = pad_gray(&pixels, width * 3, height * 3, 10);
-    encode_bmp_gray(&padded, width * 3 + 20, height * 3 + 20)
+    let padded = pad_gray(&pixels, upscaled_w, upscaled_h, 10);
+    encode_bmp_gray(&padded, upscaled_w + 20, upscaled_h + 20)
 }
 
 pub fn preprocess_bgra(data: &[u8], width: usize, height: usize, force_invert: bool, binarize: bool) -> Vec<u8> {
@@ -33,11 +58,18 @@ pub fn preprocess_bgra_with_telemetry(
     force_invert: bool,
     binarize: bool,
 ) -> (Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize) {
-    let gray = to_gray_ocr(data, 4);
-    let upscaled = resize_bilinear_u8(&gray, width, height, width * 3, height * 3);
-    let blurred = box_blur_3x3(&upscaled, width * 3, height * 3);
+    let mut gray = to_gray_ocr(data, 4);
+    autocontrast_gray(&mut gray);
+    
+    // Dynamic scaling: target height ~120px, minimum 5x scale
+    let scale = (120.0 / height as f64).ceil().max(5.0) as usize;
+    let upscaled_w = width * scale;
+    let upscaled_h = height * scale;
+    let upscaled = resize_bilinear_u8(&gray, width, height, upscaled_w, upscaled_h);
+    
+    let blurred = box_blur_3x3(&upscaled, upscaled_w, upscaled_h);
     let threshold = otsu_threshold(&blurred);
-    let bg_mean = calculate_border_mean(&blurred, width * 3, height * 3);
+    let bg_mean = calculate_border_mean(&blurred, upscaled_w, upscaled_h);
     
     // 배경(테두리) 밝기가 오츠 임계값 이하면 (어두운 배경 + 밝은 글씨),
     // "흰 배경에 검은 글씨"로 만들기 위해 반전(invert)을 수행합니다.
@@ -54,10 +86,10 @@ pub fn preprocess_bgra_with_telemetry(
         }
     };
     
-    let padded = pad_gray(&pixels, width * 3, height * 3, 10);
-    let bmp = encode_bmp_gray(&padded, width * 3 + 20, height * 3 + 20);
-    let padded_width = width * 3 + 20;
-    let padded_height = height * 3 + 20;
+    let padded = pad_gray(&pixels, upscaled_w, upscaled_h, 10);
+    let bmp = encode_bmp_gray(&padded, upscaled_w + 20, upscaled_h + 20);
+    let padded_width = upscaled_w + 20;
+    let padded_height = upscaled_h + 20;
     (bmp, threshold, bg_mean, use_invert, padded, padded_width, padded_height)
 }
 
@@ -70,9 +102,13 @@ pub fn preprocess_color_bgra_with_telemetry(
     width: usize,
     height: usize,
 ) -> (Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize) {
-    let upscaled = resize_bilinear_bgra(data, width, height, width * 3, height * 3);
-    let padded = pad_bgra(&upscaled, width * 3, height * 3, 10);
-    let bmp = encode_bmp_bgra(&padded, width * 3 + 20, height * 3 + 20);
+    // Color preprocess upscaler also dynamically scaled for small regions
+    let scale = (120.0 / height as f64).ceil().max(5.0) as usize;
+    let upscaled_w = width * scale;
+    let upscaled_h = height * scale;
+    let upscaled = resize_bilinear_bgra(data, width, height, upscaled_w, upscaled_h);
+    let padded = pad_bgra(&upscaled, upscaled_w, upscaled_h, 10);
+    let bmp = encode_bmp_bgra(&padded, upscaled_w + 20, upscaled_h + 20);
     
     (
         bmp,
@@ -80,8 +116,8 @@ pub fn preprocess_color_bgra_with_telemetry(
         0.0,
         false,
         padded,
-        width * 3 + 20,
-        height * 3 + 20,
+        upscaled_w + 20,
+        upscaled_h + 20,
     )
 }
 

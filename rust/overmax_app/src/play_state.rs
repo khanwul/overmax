@@ -75,59 +75,90 @@ impl PlayStateDetector {
                 SceneType::ResultFreestyle => {
                     if let Some(mode_roi) = rois.get_roi("mode") {
                         if let Some(mode_img) = crop_roi(frame, mode_roi) {
-                            if let Some(text) = ocr.recognize_text_color(&mode_img) {
+                            if let Some(text) = ocr.recognize_text_all_passes(&mode_img) {
+                                println!("    [detect] Freestyle mode OCR raw: '{}'", text);
                                 let norm = text.to_lowercase();
                                 if norm.contains('4') { mode = Some("4B".to_string()); }
                                 else if norm.contains('5') { mode = Some("5B".to_string()); }
                                 else if norm.contains('6') { mode = Some("6B".to_string()); }
                                 else if norm.contains('8') { mode = Some("8B".to_string()); }
+                            } else {
+                                println!("    [detect] Freestyle mode OCR failed (None)");
                             }
                         }
                     }
                     if let Some(diff_roi) = rois.get_roi("diff_panel") {
                         if let Some(diff_img) = crop_roi(frame, diff_roi) {
-                            if let Some(text) = ocr.recognize_text_color(&diff_img) {
+                            if let Some(text) = ocr.recognize_text_all_passes(&diff_img) {
+                                println!("    [detect] Freestyle diff OCR raw: '{}'", text);
                                 let norm = text.to_lowercase();
                                 if norm.contains("hard") || norm.contains("hd") { diff = Some("HD".to_string()); }
                                 else if norm.contains("maximum") || norm.contains("mx") { diff = Some("MX".to_string()); }
                                 else if norm.contains("sc") { diff = Some("SC".to_string()); }
                                 else if norm.contains("normal") || norm.contains("nm") { diff = Some("NM".to_string()); }
+                            } else {
+                                println!("    [detect] Freestyle diff OCR failed (None)");
                             }
                         }
                     }
                 }
                 SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
-                    let mut badge_text = None;
+                    let mut mode_text = None;
+                    let mut diff_text = None;
                     if let Some(badge_roi) = rois.get_roi("mode_diff_badge") {
-                        if let Some(badge_img) = crop_roi(frame, badge_roi) {
-                            if let Some(text) = ocr.recognize_text_color(&badge_img) {
-                                badge_text = Some(text);
+                        let w = badge_roi.x2 - badge_roi.x1;
+                        let mode_w = (w as f32 * 0.60) as i32;
+                        let mode_rect = crate::roi::RoiRect {
+                            x1: badge_roi.x1,
+                            y1: badge_roi.y1,
+                            x2: badge_roi.x1 + mode_w,
+                            y2: badge_roi.y2,
+                        };
+                        let diff_rect = crate::roi::RoiRect {
+                            x1: badge_roi.x1 + mode_w,
+                            y1: badge_roi.y1,
+                            x2: badge_roi.x2,
+                            y2: badge_roi.y2,
+                        };
+                        
+                        if let Some(mode_img) = crop_roi(frame, mode_rect) {
+                            if let Some(txt) = ocr.recognize_text_all_passes(&mode_img) {
+                                println!("    [detect] ResultOpen mode_badge OCR raw: '{}'", txt);
+                                mode_text = Some(txt);
+                            }
+                        }
+                        if let Some(diff_img) = crop_roi(frame, diff_rect) {
+                            if let Some(txt) = ocr.recognize_text_all_passes(&diff_img) {
+                                println!("    [detect] ResultOpen diff_badge OCR raw: '{}'", txt);
+                                diff_text = Some(txt);
                             }
                         }
                     }
-                    if badge_text.is_none() && scene == SceneType::ResultOpen2 {
+                    if mode_text.is_none() && scene == SceneType::ResultOpen2 {
                         if let Some(logo_roi) = rois.get_roi("logo") {
                             if let Some(logo_img) = crop_roi(frame, logo_roi) {
-                                if let Some(text) = ocr.recognize_text_color(&logo_img) {
-                                    badge_text = Some(text);
+                                if let Some(txt) = ocr.recognize_text_all_passes(&logo_img) {
+                                    println!("    [detect] ResultOpen2 logo OCR raw: '{}'", txt);
+                                    mode_text = Some(txt);
                                 }
                             }
                         }
                     }
 
-                    if let Some(text) = badge_text {
+                    if let Some(text) = mode_text {
                         let norm = text.to_lowercase();
-                        if norm.contains("tunes") || norm.contains("tune") {
-                            if norm.contains("4b") || norm.contains('4') { mode = Some("4B".to_string()); }
-                            else if norm.contains("5b") || norm.contains('5') { mode = Some("5B".to_string()); }
-                            else if norm.contains("6b") || norm.contains('6') { mode = Some("6B".to_string()); }
-                            else if norm.contains("8b") || norm.contains('8') { mode = Some("8B".to_string()); }
-                            
-                            if norm.contains("sc") { diff = Some("SC".to_string()); }
-                            else if norm.contains("mx") || norm.contains("maximum") { diff = Some("MX".to_string()); }
-                            else if norm.contains("hd") || norm.contains("hard") { diff = Some("HD".to_string()); }
-                            else if norm.contains("nm") || norm.contains("normal") { diff = Some("NM".to_string()); }
-                        }
+                        if norm.contains("4b") || norm.contains('4') { mode = Some("4B".to_string()); }
+                        else if norm.contains("5b") || norm.contains('5') { mode = Some("5B".to_string()); }
+                        else if norm.contains("6b") || norm.contains('6') { mode = Some("6B".to_string()); }
+                        else if norm.contains("8b") || norm.contains('8') { mode = Some("8B".to_string()); }
+                    }
+                    
+                    if let Some(text) = diff_text {
+                        let norm = text.to_lowercase();
+                        if norm.contains("sc") { diff = Some("SC".to_string()); }
+                        else if norm.contains("mx") || norm.contains("maximum") || norm.contains("max") || norm.contains('w') || norm.contains('j') { diff = Some("MX".to_string()); }
+                        else if norm.contains("hd") || norm.contains("hard") { diff = Some("HD".to_string()); }
+                        else if norm.contains("nm") || norm.contains("normal") { diff = Some("NM".to_string()); }
                     }
                 }
                 _ => {}
@@ -141,6 +172,7 @@ impl PlayStateDetector {
         }
 
         let mut telemetry = None;
+        println!("    [detect] song_id={:?}, mode={:?}, diff={:?}, confident={}", song_id, mode, diff, confident);
         let context = if let (Some(sid), Some(m), Some(d)) = (song_id, mode, diff) {
             if confident {
                 let mut rate = 0.0;
@@ -167,6 +199,7 @@ impl PlayStateDetector {
                         if should_ocr {
                             if now - self.last_rate_ocr_ts >= 0.20 {
                                 let res = ocr.detect_rate(&rate_img);
+                                println!("    [detect] rate OCR run. res={:?}", res);
                                 self.last_rate_result = res;
                                 self.last_rate_thumb = thumb;
                                 self.last_rate_ocr_ts = now;

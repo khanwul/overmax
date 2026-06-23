@@ -53,7 +53,7 @@ impl Default for GlobalRoiConfig {
         result_freestyle_rois.insert("jacket".to_string(), RoiRect { x: 630, y: 10, width: 60, height: 60 });
         result_freestyle_rois.insert("rate".to_string(), RoiRect { x: 430, y: 580, width: 100, height: 30 });
         result_freestyle_rois.insert("mode".to_string(), RoiRect { x: 20, y: 15, width: 320, height: 75 });
-        result_freestyle_rois.insert("diff_panel".to_string(), RoiRect { x: 700, y: 75, width: 110, height: 33 });
+        result_freestyle_rois.insert("diff_panel".to_string(), RoiRect { x: 723, y: 83, width: 64, height: 17 });
         result_freestyle_rois.insert("max_combo_badge".to_string(), RoiRect { x: 760, y: 650, width: 200, height: 220 });
         scenes.insert(SceneType::ResultFreestyle, SceneRoiConfig { rois: result_freestyle_rois });
 
@@ -61,7 +61,7 @@ impl Default for GlobalRoiConfig {
         let mut result_open3_rois = HashMap::new();
         result_open3_rois.insert("jacket".to_string(), RoiRect { x: 705, y: 15, width: 60, height: 60 });
         result_open3_rois.insert("rate".to_string(), RoiRect { x: 220, y: 640, width: 120, height: 30 });
-        result_open3_rois.insert("mode_diff_badge".to_string(), RoiRect { x: 108, y: 765, width: 166, height: 45 });
+        result_open3_rois.insert("mode_diff_badge".to_string(), RoiRect { x: 210, y: 835, width: 300, height: 36 });
         result_open3_rois.insert("max_combo_badge".to_string(), RoiRect { x: 200, y: 530, width: 90, height: 80 });
         scenes.insert(SceneType::ResultOpen3, SceneRoiConfig { rois: result_open3_rois });
 
@@ -69,7 +69,7 @@ impl Default for GlobalRoiConfig {
         let mut result_open2_rois = HashMap::new();
         result_open2_rois.insert("jacket".to_string(), RoiRect { x: 690, y: 15, width: 60, height: 60 });
         result_open2_rois.insert("rate".to_string(), RoiRect { x: 420, y: 640, width: 120, height: 30 });
-        result_open2_rois.insert("mode_diff_badge".to_string(), RoiRect { x: 156, y: 800, width: 166, height: 45 });
+        result_open2_rois.insert("mode_diff_badge".to_string(), RoiRect { x: 260, y: 835, width: 300, height: 36 });
         result_open2_rois.insert("max_combo_badge".to_string(), RoiRect { x: 250, y: 560, width: 90, height: 80 });
         scenes.insert(SceneType::ResultOpen2, SceneRoiConfig { rois: result_open2_rois });
 
