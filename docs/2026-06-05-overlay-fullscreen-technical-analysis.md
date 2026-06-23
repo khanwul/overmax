@@ -18,7 +18,7 @@
 테두리 없는 전체화면 모드에서는 데스크톱 창 관리자(DWM, Desktop Window Manager)가 계속 활성화되어 있으므로, Win32 API를 활용해 오버레이 창을 게임 창의 **종속 창(Owned Window)**으로 등록함으로써 Z-Order 정렬 문제를 영구적으로 해결했습니다.
 
 ### 구현 내용
-* **파일**: [native_app_viewports.rs](file:///C:/Users/jeongwoong/dev/overmax/rust/overmax_app/src/native_app_viewports.rs), [window_tracker.rs](file:///C:/Users/jeongwoong/dev/overmax/rust/overmax_app/src/window_tracker.rs)
+* **파일**: [native_app_viewports.rs](../rust/overmax_app/src/native_app_viewports.rs), [window_tracker.rs](../rust/overmax_app/src/window_tracker.rs)
 * **메커니즘**:
   1. `find_hwnd_by_title`로 게임 프로세스의 윈도우 핸들(`g_hwnd`)을 획득합니다.
   2. 오버레이 창(`hwnd`)이 활성화되거나 변경될 때 `SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, g_hwnd as isize)`를 호출하여 게임 창을 **Owner(소유자)**로 지정합니다.

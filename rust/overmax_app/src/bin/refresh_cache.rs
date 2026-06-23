@@ -4,7 +4,7 @@ use serde_json::Value;
 use overmax_app::cache_update;
 
 fn main() {
-    // Current directory is C:\Users\jeongwoong\dev\overmax\rust when run from cargo
+    // Current directory is the workspace rust directory when run from cargo
     // We should use the workspace root directory (which is "..")
     let root = Path::new("..");
     let defaults: Value = serde_json::from_str(include_str!(concat!(

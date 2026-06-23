@@ -389,12 +389,11 @@ mod tests {
     #[test]
     #[ignore]
     fn test_scratch_images() {
-        use std::path::Path;
         use image::GenericImageView;
         use overmax_core::SceneType;
         use crate::frame_utils::crop_roi;
 
-        let scratch_dir = Path::new(r"C:\Users\jeongwoong\dev\overmax\scratch");
+        let scratch_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
         let images = [
             "6.png", "7.png", "8.png",
             "dc_1.png", "dc_2.png", "dc_3.png", "dc_4.png", "dc_5.jpg", "new_test.jpg",

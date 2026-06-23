@@ -17,7 +17,7 @@
 현재 Overmax의 아키텍처 상 이 기능을 즉시 도입하기 어려운 구체적인 한계는 다음과 같다.
 
 ### 2.1. 결과 화면 씬 감지 기능의 부재 (`SceneType` 미지원)
-* **현황**: 현재 `SceneType`은 [game_state.rs](file:///C:/Users/jeongwoong/dev/overmax/rust/overmax_core/src/game_state.rs#L5-L9)에 정의된 것처럼 `Freestyle` 및 `Online` 대기방만 지원한다.
+* **현황**: 현재 `SceneType`은 [game_state.rs](../rust/overmax_core/src/game_state.rs#L5-L9)에 정의된 것처럼 `Freestyle` 및 `Online` 대기방만 지원한다.
 * **한계**: 결과 화면에 진입했는지 여부를 판별할 수 있는 OCR 키워드(예: "RESULT", "CLEAR", "MAX PLAY" 등) 및 씬 판정 알고리즘이 구현되어 있지 않다.
 
 ### 2.2. ROI(관심 영역) 및 OCR 좌표의 불일치
