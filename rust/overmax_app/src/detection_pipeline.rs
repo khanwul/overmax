@@ -184,8 +184,16 @@ impl DetectionPipeline {
 
         let mut scene_res = scene;
         
-        // If logo is Unknown, check the bottom guide bar to see if it's OpenMatch 3+ result screen
-        if scene_res == SceneType::Unknown {
+        let is_result = matches!(
+            self.last_logo_scene,
+            SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
+        );
+        let is_active_session = self.hysteresis.is_active || is_result;
+        
+        // Only run expensive fallback OCRs when we are in an active song select or result session.
+        // During actual gameplay (when is_active_session is false), we skip these to protect in-game frame rates.
+        if is_active_session && scene_res == SceneType::Unknown {
+            // If logo is Unknown, check the bottom guide bar to see if it's OpenMatch 3+ result screen
             if let Some(bottom_roi) = self.rois.get_roi("bottom_guide") {
                 if let Some(bottom_img) = crop_roi(frame, bottom_roi) {
                     if self.ocr.detect_bottom_guide_space(&bottom_img) {
@@ -196,7 +204,7 @@ impl DetectionPipeline {
         }
         
         // If still Unknown, check the bottom part of the screen as a fallback (y starting from 35%)
-        if scene_res == SceneType::Unknown {
+        if is_active_session && scene_res == SceneType::Unknown {
             let bottom_half_roi = crate::roi::RoiRect {
                 x1: 0,
                 y1: frame.height * 35 / 100,
