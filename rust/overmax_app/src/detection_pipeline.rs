@@ -53,8 +53,6 @@ pub struct DetectionPipeline {
     last_jacket_thumb: Option<Vec<u8>>,
     result_scene_streak: u32,
     last_detected_result_scene: SceneType,
-    is_playing: bool,
-    is_playing_start_time: f64,
 }
 
 impl DetectionPipeline {
@@ -73,8 +71,6 @@ impl DetectionPipeline {
             last_jacket_thumb: None,
             result_scene_streak: 0,
             last_detected_result_scene: SceneType::Unknown,
-            is_playing: false,
-            is_playing_start_time: 0.0,
         }
     }
 
@@ -133,11 +129,6 @@ impl DetectionPipeline {
         let confidence = self.hysteresis.confidence;
 
         if !is_song_select {
-            if let Some(song_id) = self.current_song_id {
-                self.is_playing = true;
-                self.is_playing_start_time = now;
-                println!("    [process_frame_shared] game play started for song_id={}, now={}", song_id, now);
-            }
             self.reset_on_screen_exit();
             return self.output(
                 logo_detected,
@@ -191,31 +182,9 @@ impl DetectionPipeline {
         println!("    [detect_logo_if_due] now={}, crop_size={}x{}, OCR raw='{}', scene={:?}",
                  now, logo.width, logo.height, raw_text, scene);
 
-        if matches!(scene, SceneType::Freestyle | SceneType::Online | SceneType::OpenMatch | SceneType::LadderMatch) {
-            if self.is_playing {
-                println!("    [detect_logo_if_due] reset is_playing = false due to scene match {:?}", scene);
-                self.is_playing = false;
-            }
-        }
-
         let mut scene_res = scene;
         
-        let is_result = matches!(
-            self.last_logo_scene,
-            SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
-        );
-        let mut is_active_session = self.hysteresis.is_active || is_result;
-
-        if self.is_playing {
-            let play_duration = now - self.is_playing_start_time;
-            if play_duration >= 45.0 {
-                is_active_session = true;
-            }
-        }
-        
-        // Only run expensive fallback OCRs when we are in an active song select or result session.
-        // During actual gameplay (when is_active_session is false), we skip these to protect in-game frame rates.
-        if is_active_session && scene_res == SceneType::Unknown {
+        if scene_res == SceneType::Unknown {
             let mut is_result_candidate = false;
             let mut is_freestyle_candidate = false;
 
@@ -231,12 +200,80 @@ impl DetectionPipeline {
             }
 
             // 2. Only if the candidate flag is set, classify the fallback scene.
-            // Since ResultOpen2 is always captured via primary logo OCR (due to 1P card alignment),
-            // any fallback Result scene triggered by bottom guide space is definitively ResultOpen3.
             if is_result_candidate {
-                scene_res = SceneType::ResultOpen3;
+                // Compare mode_diff_badge ROIs between ResultOpen3 and ResultOpen2 using fast color OCR
+                let open3_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen3);
+                let open2_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen2);
+
+                let mut open3_matched = false;
+                if let Some(roi) = open3_badge_roi {
+                    if let Some(img) = crop_roi(frame, roi) {
+                        if let Some(txt) = self.ocr.recognize_text_color(&img) {
+                            let txt_lower = txt.to_lowercase();
+                            if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                open3_matched = true;
+                            }
+                        }
+                    }
+                }
+
+                let mut open2_matched = false;
+                if let Some(roi) = open2_badge_roi {
+                    if let Some(img) = crop_roi(frame, roi) {
+                        if let Some(txt) = self.ocr.recognize_text_color(&img) {
+                            let txt_lower = txt.to_lowercase();
+                            if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                open2_matched = true;
+                            }
+                        }
+                    }
+                }
+
+                let fallback_scene = if open3_matched && !open2_matched {
+                    println!("    [detect_logo_if_due] fallback match ResultOpen3 via mode_diff_badge OCR");
+                    SceneType::ResultOpen3
+                } else if open2_matched && !open3_matched {
+                    println!("    [detect_logo_if_due] fallback match ResultOpen2 via mode_diff_badge OCR");
+                    SceneType::ResultOpen2
+                } else {
+                    // Try second-pass multi-pass OCR if fast color OCR failed or was ambiguous
+                    let mut open3_all_matched = false;
+                    if let Some(roi) = open3_badge_roi {
+                        if let Some(img) = crop_roi(frame, roi) {
+                            if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
+                                let txt_lower = txt.to_lowercase();
+                                if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                    open3_all_matched = true;
+                                }
+                            }
+                        }
+                    }
+
+                    let mut open2_all_matched = false;
+                    if let Some(roi) = open2_badge_roi {
+                        if let Some(img) = crop_roi(frame, roi) {
+                            if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
+                                let txt_lower = txt.to_lowercase();
+                                if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                    open2_all_matched = true;
+                                }
+                            }
+                        }
+                    }
+
+                    let s = if open3_all_matched && !open2_all_matched {
+                        SceneType::ResultOpen3
+                    } else if open2_all_matched && !open3_all_matched {
+                        SceneType::ResultOpen2
+                    } else {
+                        SceneType::ResultOpen3
+                    };
+                    println!("    [detect_logo_if_due] fallback match {:?} via 2nd pass badge OCR", s);
+                    s
+                };
+
+                scene_res = fallback_scene;
                 self.rois.set_scene(scene_res); // Sync configurations
-                println!("    [detect_logo_if_due] fallback match ResultOpen3 directly via bottom guide space");
             } else if is_freestyle_candidate {
                 scene_res = SceneType::ResultFreestyle;
             }
@@ -248,7 +285,6 @@ impl DetectionPipeline {
         );
 
         if is_detected_result {
-            self.is_playing = false;
             if scene_res == self.last_detected_result_scene {
                 self.result_scene_streak += 1;
             } else {
@@ -557,8 +593,6 @@ mod tests {
             pipeline.hysteresis = HysteresisBuffer::new(5, 0.6, 3, 0.4, 3);
             pipeline.play_state.reset();
             pipeline.current_song_id = None;
-            pipeline.is_playing = true;
-            pipeline.is_playing_start_time = -100.0; // Force-enable play duration criteria for test images
             pipeline.last_jacket_ts = 0.0;
             pipeline.last_jacket_match_ts = 0.0;
             pipeline.last_jacket_thumb = None;

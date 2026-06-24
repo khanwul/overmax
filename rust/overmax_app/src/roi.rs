@@ -67,18 +67,22 @@ impl RoiManager {
         self.calculate_transform();
     }
 
-    pub fn get_roi(&self, name: &str) -> Option<RoiRect> {
+    pub fn get_roi_for_scene(&self, name: &str, scene: SceneType) -> Option<RoiRect> {
         if name == "logo" {
             return Some(self.transform_roi(RoiRect { x1: 20, y1: 15, x2: 340, y2: 90 }));
         }
         if name == "bottom_guide" {
             return Some(self.transform_roi(RoiRect { x1: 1300, y1: 1010, x2: 1900, y2: 1070 }));
         }
-        let roi = self.config.scenes.get(&self.current_scene)?.rois.get(name)?;
+        let roi = self.config.scenes.get(&scene)?.rois.get(name)?;
         Some(self.transform_roi(RoiRect::from(roi.clone())))
     }
 
-    pub fn get_diff_panel_roi(&self, diff: &str) -> Option<RoiRect> {
+    pub fn get_roi(&self, name: &str) -> Option<RoiRect> {
+        self.get_roi_for_scene(name, self.current_scene)
+    }
+
+    pub fn get_diff_panel_roi_for_scene(&self, diff: &str, scene: SceneType) -> Option<RoiRect> {
         let offset = match diff {
             "NM" => 0,
             "HD" => 120,
@@ -86,13 +90,17 @@ impl RoiManager {
             "SC" => 360,
             _ => return None,
         };
-        let roi = self.config.scenes.get(&self.current_scene)?.rois.get("diff_panel")?;
+        let roi = self.config.scenes.get(&scene)?.rois.get("diff_panel")?;
         Some(self.transform_roi(RoiRect {
             x1: roi.x + offset,
             y1: roi.y,
             x2: roi.x + roi.width + offset,
             y2: roi.y + roi.height,
         }))
+    }
+
+    pub fn get_diff_panel_roi(&self, diff: &str) -> Option<RoiRect> {
+        self.get_diff_panel_roi_for_scene(diff, self.current_scene)
     }
 
     fn calculate_transform(&mut self) {
