@@ -53,6 +53,8 @@ pub struct DetectionPipeline {
     last_jacket_thumb: Option<Vec<u8>>,
     result_scene_streak: u32,
     last_detected_result_scene: SceneType,
+    is_playing: bool,
+    is_playing_start_time: f64,
 }
 
 impl DetectionPipeline {
@@ -71,6 +73,8 @@ impl DetectionPipeline {
             last_jacket_thumb: None,
             result_scene_streak: 0,
             last_detected_result_scene: SceneType::Unknown,
+            is_playing: false,
+            is_playing_start_time: 0.0,
         }
     }
 
@@ -129,6 +133,11 @@ impl DetectionPipeline {
         let confidence = self.hysteresis.confidence;
 
         if !is_song_select {
+            if let Some(song_id) = self.current_song_id {
+                self.is_playing = true;
+                self.is_playing_start_time = now;
+                println!("    [process_frame_shared] game play started for song_id={}, now={}", song_id, now);
+            }
             self.reset_on_screen_exit();
             return self.output(
                 logo_detected,
@@ -182,13 +191,27 @@ impl DetectionPipeline {
         println!("    [detect_logo_if_due] now={}, crop_size={}x{}, OCR raw='{}', scene={:?}",
                  now, logo.width, logo.height, raw_text, scene);
 
+        if matches!(scene, SceneType::Freestyle | SceneType::Online | SceneType::OpenMatch | SceneType::LadderMatch) {
+            if self.is_playing {
+                println!("    [detect_logo_if_due] reset is_playing = false due to scene match {:?}", scene);
+                self.is_playing = false;
+            }
+        }
+
         let mut scene_res = scene;
         
         let is_result = matches!(
             self.last_logo_scene,
             SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
         );
-        let is_active_session = self.hysteresis.is_active || is_result;
+        let mut is_active_session = self.hysteresis.is_active || is_result;
+
+        if self.is_playing {
+            let play_duration = now - self.is_playing_start_time;
+            if play_duration >= 45.0 {
+                is_active_session = true;
+            }
+        }
         
         // Only run expensive fallback OCRs when we are in an active song select or result session.
         // During actual gameplay (when is_active_session is false), we skip these to protect in-game frame rates.
@@ -259,6 +282,7 @@ impl DetectionPipeline {
         );
 
         if is_detected_result {
+            self.is_playing = false;
             if scene_res == self.last_detected_result_scene {
                 self.result_scene_streak += 1;
             } else {
@@ -567,6 +591,8 @@ mod tests {
             pipeline.hysteresis = HysteresisBuffer::new(5, 0.6, 3, 0.4, 3);
             pipeline.play_state.reset();
             pipeline.current_song_id = None;
+            pipeline.is_playing = true;
+            pipeline.is_playing_start_time = -100.0; // Force-enable play duration criteria for test images
             pipeline.last_jacket_ts = 0.0;
             pipeline.last_jacket_match_ts = 0.0;
             pipeline.last_jacket_thumb = None;
