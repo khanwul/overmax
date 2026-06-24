@@ -408,10 +408,33 @@ impl WindowsOcrEngine {
         if region.width <= 0 || region.height <= 0 {
             return None;
         }
+
+        // Downsample the region by 2 to reduce OCR pixel count by 75% for massive CPU speedup
+        let new_w = region.width / 2;
+        let new_h = region.height / 2;
+        let mut new_bgra = Vec::with_capacity((new_w * new_h * 4) as usize);
+        for y in 0..new_h {
+            let src_y = y * 2;
+            let src_row_start = (src_y * region.width * 4) as usize;
+            for x in 0..new_w {
+                let src_x = x * 2;
+                let src_idx = src_row_start + (src_x * 4) as usize;
+                new_bgra.push(region.bgra[src_idx]);
+                new_bgra.push(region.bgra[src_idx + 1]);
+                new_bgra.push(region.bgra[src_idx + 2]);
+                new_bgra.push(region.bgra[src_idx + 3]);
+            }
+        }
+        let downsampled = ImageRegion {
+            width: new_w,
+            height: new_h,
+            bgra: new_bgra,
+        };
+
         let bmp = overmax_cv::preprocess_ocr_color_bgra(
-            &region.bgra,
-            region.width as usize,
-            region.height as usize,
+            &downsampled.bgra,
+            downsampled.width as usize,
+            downsampled.height as usize,
         ).ok()?;
 
         let stream = InMemoryRandomAccessStream::new().ok()?;
