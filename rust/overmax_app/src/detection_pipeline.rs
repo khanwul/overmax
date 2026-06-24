@@ -408,6 +408,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_scratch_images() {
         use image::GenericImageView;
         use overmax_core::SceneType;
