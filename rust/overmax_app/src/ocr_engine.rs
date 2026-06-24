@@ -168,13 +168,22 @@ impl OcrDetector {
 
     pub fn detect_bottom_guide_space(&self, bottom_guide: &ImageRegion) -> bool {
         let check = |t: &str| {
+            let t_lower = t.to_lowercase();
+            // 1. English normalized check
             let norm = normalize_alnum(t).to_lowercase();
-            norm.contains("space")
+            let has_english = norm.contains("space")
                 || norm.contains("pace")
                 || norm.contains("spac")
                 || norm.contains("spce")
                 || norm.contains("5pace")
-                || sequence_ratio("space", &norm) >= 0.70
+                || sequence_ratio("space", &norm) >= 0.70;
+
+            if has_english {
+                return true;
+            }
+
+            t_lower.contains("상세정보")
+                || (t_lower.contains("상세") && t_lower.contains("정보"))
         };
 
         if let Ok(t) = self.engine.recognize_logo_color(bottom_guide) {
@@ -188,11 +197,24 @@ impl OcrDetector {
 
     pub fn detect_bottom_guide_f5(&self, bottom_guide: &ImageRegion) -> bool {
         let check = |t: &str| {
+            let t_lower = t.to_lowercase();
+            // 1. English normalized check
             let norm = normalize_alnum(t).to_lowercase();
-            norm.contains("f5")
+            let has_english = norm.contains("f5")
                 || norm.contains("fs")
                 || norm.contains("es")
-                || sequence_ratio("f5", &norm) >= 0.60
+                || sequence_ratio("f5", &norm) >= 0.60;
+
+            if has_english {
+                return true;
+            }
+
+            t_lower.contains("레더보드")
+                || t_lower.contains("래더보드")
+                || (t_lower.contains("레더") && t_lower.contains("보드"))
+                || (t_lower.contains("래더") && t_lower.contains("보드"))
+                || t_lower.contains("즐겨찾기")
+                || (t_lower.contains("즐겨") && t_lower.contains("찾기"))
         };
 
         if let Ok(t) = self.engine.recognize_logo_color(bottom_guide) {

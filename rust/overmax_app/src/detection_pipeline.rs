@@ -193,31 +193,44 @@ impl DetectionPipeline {
         // Only run expensive fallback OCRs when we are in an active song select or result session.
         // During actual gameplay (when is_active_session is false), we skip these to protect in-game frame rates.
         if is_active_session && scene_res == SceneType::Unknown {
-            // If logo is Unknown, check the bottom guide bar to see if it's OpenMatch 3+ result screen
+            let mut is_result_candidate = false;
+            let mut is_freestyle_candidate = false;
+
+            // 1. Proactively probe the small bottom_guide ROI (lightweight)
             if let Some(bottom_roi) = self.rois.get_roi("bottom_guide") {
                 if let Some(bottom_img) = crop_roi(frame, bottom_roi) {
                     if self.ocr.detect_bottom_guide_space(&bottom_img) {
-                        scene_res = SceneType::ResultOpen3;
+                        is_result_candidate = true;
+                    } else if self.ocr.detect_bottom_guide_f5(&bottom_img) {
+                        is_freestyle_candidate = true;
                     }
                 }
             }
-        }
-        
-        // If still Unknown, check the bottom part of the screen as a fallback (y starting from 35%)
-        if is_active_session && scene_res == SceneType::Unknown {
-            let bottom_half_roi = crate::roi::RoiRect {
-                x1: 0,
-                y1: frame.height * 35 / 100,
-                x2: frame.width,
-                y2: frame.height,
-            };
-            if let Some(bottom_half_img) = crop_roi(frame, bottom_half_roi) {
-                if let Some((text, rate_x_ratio)) = self.ocr.recognize_bottom_half_with_rate_x(&bottom_half_img) {
-                    if let Some(s) = self.ocr.classify_fallback_scene(&text, rate_x_ratio) {
-                        println!("    [detect_logo_if_due] fallback match: scene={:?}, text='{}', rate_x_ratio={:?}", s, text.trim(), rate_x_ratio);
-                        scene_res = s;
+
+            // 2. Only if the candidate flag is set, run the heavy OCR for detailed scene classification
+            if is_result_candidate {
+                let bottom_half_roi = crate::roi::RoiRect {
+                    x1: 0,
+                    y1: frame.height * 35 / 100,
+                    x2: frame.width,
+                    y2: frame.height,
+                };
+                if let Some(bottom_half_img) = crop_roi(frame, bottom_half_roi) {
+                    if let Some((text, rate_x_ratio)) = self.ocr.recognize_bottom_half_with_rate_x(&bottom_half_img) {
+                        if let Some(s) = self.ocr.classify_fallback_scene(&text, rate_x_ratio) {
+                            println!("    [detect_logo_if_due] fallback match (OpenMatch): scene={:?}, text='{}', rate_x_ratio={:?}", s, text.trim(), rate_x_ratio);
+                            scene_res = s;
+                        } else {
+                            scene_res = SceneType::ResultOpen3; // Default fallback to open match 3p
+                        }
+                    } else {
+                        scene_res = SceneType::ResultOpen3;
                     }
+                } else {
+                    scene_res = SceneType::ResultOpen3;
                 }
+            } else if is_freestyle_candidate {
+                scene_res = SceneType::ResultFreestyle;
             }
         }
         
@@ -395,7 +408,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_scratch_images() {
         use image::GenericImageView;
         use overmax_core::SceneType;
@@ -403,9 +415,8 @@ mod tests {
 
         let scratch_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
         let images = [
-            "6.png", "7.png", "8.png",
-            "dc_1.png", "dc_2.png", "dc_3.png", "dc_4.png", "dc_5.jpg", "new_test.jpg",
-            "freestyle.png", "openmatch.png", "openmatch_2p.png"
+            "hd_test_1.png", "hd_test_2.png", "hd_test_3.png", "hd_test_4.png", "hd_test_5.png",
+            "hd_test_2p_1.png", "hd_test_2p_2.png"
         ];
 
         let db_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../cache/image_index.db");
@@ -422,7 +433,9 @@ mod tests {
                 continue;
             }
 
-            let img = image::open(&path).expect("Failed to open image");
+            let img = image::io::Reader::open(&path).expect("Failed to open file")
+                .with_guessed_format().expect("Failed to guess format")
+                .decode().expect("Failed to decode image");
             let (w, h) = img.dimensions();
             let mut bgra = vec![0u8; (w * h * 4) as usize];
             
@@ -447,13 +460,13 @@ mod tests {
             // Public logo OCR attempt
             let (logo_scene, logo_txt, _logo_label) = pipeline.ocr.detect_logo(&logo_img);
 
-            // Entire screen OCR to see what text exists
-            let entire_region = crate::frame_utils::ImageRegion {
-                bgra: frame.bgra.clone(),
-                width: w as i32,
-                height: h as i32,
-            };
-            let entire_txt = pipeline.ocr.recognize_text_color(&entire_region).unwrap_or_default();
+            // Entire screen OCR disabled for speed
+            // let entire_region = crate::frame_utils::ImageRegion {
+            //     bgra: frame.bgra.clone(),
+            //     width: w as i32,
+            //     height: h as i32,
+            // };
+            // let _entire_txt = pipeline.ocr.recognize_text_color(&entire_region).unwrap_or_default();
 
             // Public bottom guide OCR attempt (if logo is Unknown)
             let mut has_space = false;
@@ -524,7 +537,7 @@ mod tests {
             println!("Resolution: {}x{}", w, h);
             println!("OCR Logo Final Match:        '{}' (Scene={:?})", logo_txt, logo_scene);
             println!("OCR Bottom Space Detected: {} (Text={:?})", has_space, bottom_text_opt);
-            println!("Entire Screen OCR Text:\n{}", entire_txt);
+            // println!("Entire Screen OCR Text:\n{}", entire_txt);
 
             // Run detection
             pipeline.result_scene_streak = 0;
