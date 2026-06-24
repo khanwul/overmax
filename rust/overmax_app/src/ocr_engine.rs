@@ -162,9 +162,6 @@ impl OcrDetector {
         None
     }
 
-    pub fn recognize_bottom_half_with_rate_x(&self, region: &ImageRegion) -> Option<(String, Option<f32>)> {
-        self.engine.recognize_bottom_half_with_rate_x(region)
-    }
 
     pub fn detect_bottom_guide_space(&self, bottom_guide: &ImageRegion) -> bool {
         let check = |t: &str| {
@@ -225,61 +222,6 @@ impl OcrDetector {
         }
         false
     }
-    pub fn classify_fallback_scene(&self, text: &str, rate_x_ratio: Option<f32>) -> Option<SceneType> {
-        let norm = text.to_lowercase();
-        
-        let has_percent = norm.contains('%') || norm.contains("99.") || norm.contains("98.") || norm.contains("97.") || norm.contains("100%");
-        let has_judgement = norm.contains("judgement") || norm.contains("details") || norm.contains("restart") || norm.contains("save");
-        
-        if norm.contains("button") && (norm.contains("tunes") || norm.contains("tune") || has_judgement) {
-            return Some(SceneType::ResultFreestyle);
-        }
-        
-        let has_mode = norm.contains("4b") || norm.contains("5b") || norm.contains("6b") || norm.contains("8b");
-        let has_high_score = norm.contains("99") || norm.contains("98") || norm.contains("97") || norm.contains("1000000");
-        
-        if has_percent || norm.contains("tunes") || norm.contains("tune") || (has_mode && has_high_score) {
-            // 1. Layout-based classification (ResultOpen3 clear zones: 1st card < 0.15, 2nd+ card >= 0.20)
-            if let Some(ratio) = rate_x_ratio {
-                if ratio < 0.15 || ratio >= 0.20 {
-                    return Some(SceneType::ResultOpen3);
-                }
-            }
-
-            // 2. Text-based fallback heuristics
-            let distinct_scores = count_distinct_scores(&norm);
-            let has_bottom_bar = norm.contains("space") || norm.contains("상세정보") || norm.contains("details") ||
-                                 norm.contains("상4") || norm.contains("섬보") || norm.contains("출계") || norm.contains("등록") || norm.contains("젤져");
-            
-            if has_bottom_bar || distinct_scores >= 3 {
-                return Some(SceneType::ResultOpen3);
-            }
-
-            // 3. If ratio is in the 2-player range (0.15 ~ 0.20) and no other ResultOpen3 clues exist, classify as ResultOpen2
-            if let Some(ratio) = rate_x_ratio {
-                if ratio >= 0.15 && ratio < 0.20 {
-                    return Some(SceneType::ResultOpen2);
-                }
-            }
-
-            return Some(SceneType::ResultOpen2);
-        }
-        None
-    }
-}
-
-fn count_distinct_scores(text: &str) -> usize {
-    use std::collections::HashSet;
-    let mut scores = HashSet::new();
-    for word in text.split_whitespace() {
-        let clean: String = word.chars().filter(|c| c.is_ascii_digit()).collect();
-        if clean.len() == 6 && (clean.starts_with('9') || clean.starts_with('8')) {
-            scores.insert(clean);
-        } else if clean == "1000000" {
-            scores.insert(clean);
-        }
-    }
-    scores.len()
 }
 
 fn match_logo_scene(text: &str) -> Option<(SceneType, String)> {
@@ -403,92 +345,6 @@ impl WindowsOcrEngine {
         Ok((text, threshold, bg_mean, use_invert, pixels, w, h))
     }
 
-    fn recognize_bottom_half_with_rate_x(&self, region: &ImageRegion) -> Option<(String, Option<f32>)> {
-        let engine = self.engine.as_ref()?;
-        if region.width <= 0 || region.height <= 0 {
-            return None;
-        }
-
-        // Downsample the region by 2 to reduce OCR pixel count by 75% for massive CPU speedup
-        let new_w = region.width / 2;
-        let new_h = region.height / 2;
-        let mut new_bgra = Vec::with_capacity((new_w * new_h * 4) as usize);
-        for y in 0..new_h {
-            let src_y = y * 2;
-            let src_row_start = (src_y * region.width * 4) as usize;
-            for x in 0..new_w {
-                let src_x = x * 2;
-                let src_idx = src_row_start + (src_x * 4) as usize;
-                new_bgra.push(region.bgra[src_idx]);
-                new_bgra.push(region.bgra[src_idx + 1]);
-                new_bgra.push(region.bgra[src_idx + 2]);
-                new_bgra.push(region.bgra[src_idx + 3]);
-            }
-        }
-        let downsampled = ImageRegion {
-            width: new_w,
-            height: new_h,
-            bgra: new_bgra,
-        };
-
-        let bmp = overmax_cv::preprocess_ocr_color_bgra(
-            &downsampled.bgra,
-            downsampled.width as usize,
-            downsampled.height as usize,
-        ).ok()?;
-
-        let stream = InMemoryRandomAccessStream::new().ok()?;
-        let writer = DataWriter::CreateDataWriter(&stream).ok()?;
-        writer.WriteBytes(&bmp).ok()?;
-        writer.StoreAsync().ok()?.join().ok()?;
-        writer.DetachStream().ok()?;
-        stream.Seek(0).ok()?;
-
-        let decoder = BitmapDecoder::CreateAsync(&stream).ok()?.join().ok()?;
-        let bitmap = decoder.GetSoftwareBitmapAsync().ok()?.join().ok()?;
-        let result = engine.RecognizeAsync(&bitmap).ok()?.join().ok()?;
-
-        let full_text = result.Text().ok()?.to_string_lossy();
-        let width = bitmap.PixelWidth().ok()? as f32;
-
-        let mut rate_x_ratio = None;
-
-        if let Ok(lines) = result.Lines() {
-            for line in lines {
-                if let Ok(words) = line.Words() {
-                    for word in words {
-                        let Ok(w_text) = word.Text() else { continue; };
-                        let text_str = w_text.to_string_lossy().to_lowercase();
-                        
-                        let clean_digits: String = text_str.chars().filter(|c| c.is_ascii_digit()).collect();
-                        let is_score = (clean_digits.len() == 6 && (clean_digits.starts_with('9') || clean_digits.starts_with('8')))
-                            || clean_digits == "1000000";
-                        let is_rate = text_str.contains('%') 
-                            || text_str.contains("99.") 
-                            || text_str.contains("98.") 
-                            || text_str.contains("97.") 
-                            || text_str.contains("100%");
-
-                        if is_score || is_rate {
-                            if let Ok(rect) = word.BoundingRect() {
-                                let ratio = rect.X as f32 / width;
-                                if ratio < 0.5 {
-                                    rate_x_ratio = Some(ratio);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                if rate_x_ratio.is_some() {
-                    break;
-                }
-            }
-        }
-
-        let _ = stream.Close();
-        Some((full_text, rate_x_ratio))
-    }
 }
 
 fn preprocess_ocr_bmp_with_telemetry(

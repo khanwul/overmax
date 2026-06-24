@@ -207,28 +207,47 @@ impl DetectionPipeline {
                 }
             }
 
-            // 2. Only if the candidate flag is set, run the heavy OCR for detailed scene classification
+            // 2. Only if the candidate flag is set, run target-ROI OCR for detailed scene classification
             if is_result_candidate {
-                let bottom_half_roi = crate::roi::RoiRect {
-                    x1: 0,
-                    y1: frame.height * 35 / 100,
-                    x2: frame.width,
-                    y2: frame.height,
-                };
-                if let Some(bottom_half_img) = crop_roi(frame, bottom_half_roi) {
-                    if let Some((text, rate_x_ratio)) = self.ocr.recognize_bottom_half_with_rate_x(&bottom_half_img) {
-                        if let Some(s) = self.ocr.classify_fallback_scene(&text, rate_x_ratio) {
-                            println!("    [detect_logo_if_due] fallback match (OpenMatch): scene={:?}, text='{}', rate_x_ratio={:?}", s, text.trim(), rate_x_ratio);
-                            scene_res = s;
-                        } else {
-                            scene_res = SceneType::ResultOpen3; // Default fallback to open match 3p
-                        }
+                let mut fallback_scene = SceneType::ResultOpen3; // Default
+                
+                // A. Try to detect mode in ResultOpen3 layout (mode_diff_badge ROI)
+                self.rois.set_scene(SceneType::ResultOpen3);
+                let open3_matched = if let Some(open3_badge_roi) = self.rois.get_roi("mode_diff_badge") {
+                    if let Some(open3_img) = crop_roi(frame, open3_badge_roi) {
+                        let txt = self.ocr.recognize_text_all_passes(&open3_img).unwrap_or_default().to_lowercase();
+                        txt.contains("4b") || txt.contains("5b") || txt.contains("6b") || txt.contains("8b")
                     } else {
-                        scene_res = SceneType::ResultOpen3;
+                        false
                     }
                 } else {
-                    scene_res = SceneType::ResultOpen3;
+                    false
+                };
+
+                if open3_matched {
+                    fallback_scene = SceneType::ResultOpen3;
+                    println!("    [detect_logo_if_due] fallback match via Open3 mode_diff_badge ROI");
+                } else {
+                    // B. If Open3 fails, try ResultOpen2 layout (mode_diff_badge ROI)
+                    self.rois.set_scene(SceneType::ResultOpen2);
+                    let open2_matched = if let Some(open2_badge_roi) = self.rois.get_roi("mode_diff_badge") {
+                        if let Some(open2_img) = crop_roi(frame, open2_badge_roi) {
+                            let txt = self.ocr.recognize_text_all_passes(&open2_img).unwrap_or_default().to_lowercase();
+                            txt.contains("4b") || txt.contains("5b") || txt.contains("6b") || txt.contains("8b")
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if open2_matched {
+                        fallback_scene = SceneType::ResultOpen2;
+                        println!("    [detect_logo_if_due] fallback match via Open2 mode_diff_badge ROI");
+                    }
                 }
+                scene_res = fallback_scene;
+                self.rois.set_scene(scene_res); // Sync configurations
             } else if is_freestyle_candidate {
                 scene_res = SceneType::ResultFreestyle;
             }
