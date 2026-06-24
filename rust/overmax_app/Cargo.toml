@@ -4,6 +4,9 @@ version = "0.2.4"
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [lib]
 name = "overmax_app"
 path = "src/lib.rs"

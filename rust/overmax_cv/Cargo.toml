@@ -1,7 +1,11 @@
 [package]
 name = "overmax_cv"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
 
 [lib]
 name = "overmax_cv"

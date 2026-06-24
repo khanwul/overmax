@@ -1,0 +1,9 @@
+{
+  "hooks": [
+    {
+      "event": "pre-save",
+      "command": "powershell -ExecutionPolicy Bypass -File .antigravity/hooks/pre-save.ps1",
+      "description": "Prevent local optimums, complex duct-tapes, and layering bypasses"
+    }
+  ]
+}
