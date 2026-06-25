@@ -2,7 +2,6 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, Result};
 use std::path::{Path, PathBuf};
 
-const DEFAULT_TOP_K: usize = 10;
 const HOG_LEN: usize = 1764;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,110 +76,6 @@ impl ImageIndexDb {
     pub fn is_ready(&self) -> bool {
         !self.entries.is_empty()
     }
-
-    pub fn search(
-        &self,
-        data: &[u8],
-        width: usize,
-        height: usize,
-        channels: usize,
-    ) -> Option<ImageMatch> {
-        self.search_with_top_k(data, width, height, channels, DEFAULT_TOP_K)
-    }
-
-    pub fn search_with_top_k(
-        &self,
-        data: &[u8],
-        width: usize,
-        height: usize,
-        channels: usize,
-        top_k: usize,
-    ) -> Option<ImageMatch> {
-        if self.entries.is_empty() || top_k == 0 {
-            return None;
-        }
-
-        // 1단계: 해시 특징량만 먼저 계산
-        let (q_phash, q_dhash, q_ahash) =
-            overmax_cv::compute_image_hashes(data, width, height, channels).ok()?;
-
-        // 2단계: 전체 DB 곡에 대해 해시 거리(Hamming Distance) 스코어링
-        let mut candidates = self
-            .entries
-            .iter()
-            .enumerate()
-            .map(|(idx, entry)| {
-                let p_dist = (entry.phash ^ q_phash).count_ones() as f32;
-                let d_dist = (entry.dhash ^ q_dhash).count_ones() as f32;
-                let a_dist = (entry.ahash ^ q_ahash).count_ones() as f32;
-                let score = 0.5 * p_dist + 0.3 * d_dist + 0.2 * a_dist;
-                (idx, score)
-            })
-            .collect::<Vec<_>>();
-
-        // 해시 스코어 정렬 (낮을수록 가까움)
-        candidates.sort_by(|a, b| a.1.total_cmp(&b.1));
-
-        if candidates.is_empty() {
-            return None;
-        }
-
-        let first_idx = candidates[0].0;
-        let first_score = candidates[0].1;
-        let first_hash_sim = (1.0 - first_score / 64.0).clamp(0.0, 1.0);
-
-        // 3단계: HOG 연산 스킵 여부 판정
-        let skip_hog = if self.disable_hog {
-            true
-        } else if candidates.len() > 1 {
-            let second_score = candidates[1].1;
-            let margin = second_score - first_score;
-            // 1위 후보와 2위 후보의 스코어 차이가 margin_threshold 이상이거나,
-            // 1위 후보가 완전 일치(0.0)하는 경우 HOG 계산 생략
-            margin >= self.margin_threshold || first_score == 0.0
-        } else {
-            true
-        };
-
-        if skip_hog {
-            // HOG 생략 시 최종 유사도는 해시 유사도 자체로 평가
-            let similarity = first_hash_sim;
-            return (similarity >= self.similarity_threshold).then(|| ImageMatch {
-                image_id: self.entries[first_idx].image_id.clone(),
-                similarity,
-            });
-        }
-
-        // 4단계: HOG 정밀 매칭 (Margin이 좁은 경우에만 게으르게 HOG 피처 계산)
-        let q_hog = overmax_cv::compute_image_hog(data, width, height, channels).ok()?;
-        let q_hog_norm = vector_norm(&q_hog).max(1.0);
-
-        // 상위 top_k개 후보군에 대해서만 HOG Dot product 연산 적용
-        let mut final_candidates = candidates
-            .into_iter()
-            .take(top_k.min(self.entries.len()))
-            .map(|(idx, score)| {
-                let entry = &self.entries[idx];
-                let hash_sim = (1.0 - score / 64.0).clamp(0.0, 1.0);
-                let hog_sim = dot(&entry.hog, &q_hog) / (entry.hog_norm * q_hog_norm);
-                let similarity = 0.45 * hash_sim + 0.55 * hog_sim;
-                (idx, similarity)
-            })
-            .collect::<Vec<_>>();
-
-        // 최종 유사도 기준 내림차순 정렬 (높을수록 좋음)
-        final_candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
-
-        final_candidates
-            .into_iter()
-            .next()
-            .and_then(|(idx, similarity)| {
-                (similarity >= self.similarity_threshold).then(|| ImageMatch {
-                    image_id: self.entries[idx].image_id.clone(),
-                    similarity,
-                })
-            })
-    }
 }
 
 fn load_entries(conn: &Connection) -> Result<Vec<ImageEntry>> {
@@ -246,10 +141,6 @@ fn parse_hash(value: &str) -> Option<u64> {
     u64::from_str_radix(value, 16).ok()
 }
 
-fn dot(left: &[f32], right: &[f32]) -> f32 {
-    left.iter().zip(right).map(|(a, b)| a * b).sum()
-}
-
 fn vector_norm(values: &[f32]) -> f32 {
     values.iter().map(|value| value * value).sum::<f32>().sqrt()
 }
@@ -300,7 +191,7 @@ mod tests {
         let mut db = ImageIndexDb::new(&db_path, 0.7);
         assert_eq!(db.load().unwrap(), 0);
         assert!(!db.is_ready());
-        assert!(db.search(&[0; 64], 8, 8, 1).is_none());
+        assert!(db.matcher().match_jacket(&[0; 64], 8, 8, 1).is_none());
     }
 
     #[test]
@@ -325,7 +216,7 @@ mod tests {
         db.load().unwrap();
         fs::remove_file(&db_path).unwrap();
 
-        let found = db.search(&image, 8, 8, 1).unwrap();
+        let found = db.matcher().match_jacket(&image, 8, 8, 1).unwrap();
         assert_eq!(found.image_id, "target");
         assert!(found.similarity >= 0.99);
     }
