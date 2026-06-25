@@ -12,13 +12,13 @@ pub struct ImageMatch {
 }
 
 #[derive(Clone, Debug)]
-struct ImageEntry {
-    image_id: String,
-    phash: u64,
-    dhash: u64,
-    ahash: u64,
-    hog: Vec<f32>,
-    hog_norm: f32,
+pub struct ImageEntry {
+    pub image_id: String,
+    pub phash: u64,
+    pub dhash: u64,
+    pub ahash: u64,
+    pub hog: Vec<f32>,
+    pub hog_norm: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -26,6 +26,7 @@ pub struct ImageIndexDb {
     db_path: PathBuf,
     similarity_threshold: f32,
     pub disable_hog: bool,
+    pub margin_threshold: f32,
     entries: Vec<ImageEntry>,
 }
 
@@ -35,6 +36,7 @@ impl ImageIndexDb {
             db_path: db_path.as_ref().to_path_buf(),
             similarity_threshold,
             disable_hog: false,
+            margin_threshold: 3.0,
             entries: Vec::new(),
         }
     }
@@ -42,6 +44,24 @@ impl ImageIndexDb {
     pub fn with_disable_hog(mut self, disable_hog: bool) -> Self {
         self.disable_hog = disable_hog;
         self
+    }
+
+    pub fn with_margin_threshold(mut self, margin_threshold: f32) -> Self {
+        self.margin_threshold = margin_threshold;
+        self
+    }
+
+    pub fn entries(&self) -> &[ImageEntry] {
+        &self.entries
+    }
+
+    pub fn matcher(&self) -> crate::jacket_matcher::JacketMatcher {
+        let config = crate::jacket_matcher::JacketMatcherConfig {
+            similarity_threshold: self.similarity_threshold,
+            margin_threshold: self.margin_threshold,
+            disable_hog: self.disable_hog,
+        };
+        crate::jacket_matcher::JacketMatcher::new(self.entries.clone(), config)
     }
 
     pub fn load(&mut self) -> Result<usize> {
@@ -115,9 +135,9 @@ impl ImageIndexDb {
         } else if candidates.len() > 1 {
             let second_score = candidates[1].1;
             let margin = second_score - first_score;
-            // 1위 후보와 2위 후보의 스코어 차이가 3.0 이상이거나,
+            // 1위 후보와 2위 후보의 스코어 차이가 margin_threshold 이상이거나,
             // 1위 후보가 완전 일치(0.0)하는 경우 HOG 계산 생략
-            margin >= 3.0 || first_score == 0.0
+            margin >= self.margin_threshold || first_score == 0.0
         } else {
             true
         };

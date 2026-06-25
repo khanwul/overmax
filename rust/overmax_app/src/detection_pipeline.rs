@@ -41,6 +41,7 @@ pub enum JacketMatchStatus {
 
 pub struct DetectionPipeline {
     image_db: ImageIndexDb,
+    jacket_matcher: overmax_data::JacketMatcher,
     rois: RoiManager,
     hysteresis: HysteresisBuffer,
     play_state: PlayStateDetector,
@@ -57,8 +58,10 @@ pub struct DetectionPipeline {
 
 impl DetectionPipeline {
     pub fn new(image_db: ImageIndexDb) -> Self {
+        let jacket_matcher = image_db.matcher();
         Self {
             image_db,
+            jacket_matcher,
             rois: RoiManager::new(1920, 1080),
             hysteresis: HysteresisBuffer::new(5, 0.6, 3, 0.4, 3),
             play_state: PlayStateDetector::new(5),
@@ -374,7 +377,7 @@ impl DetectionPipeline {
         &mut self,
         jacket: &crate::frame_utils::ImageRegion,
     ) -> JacketMatchStatus {
-        let Some(result) = self.image_db.search(
+        let Some(result) = self.jacket_matcher.match_jacket(
             &jacket.bgra,
             jacket.width as usize,
             jacket.height as usize,

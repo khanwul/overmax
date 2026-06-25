@@ -122,7 +122,8 @@ impl DetectionWorker {
             db_path.display()
         ));
         let mut db = ImageIndexDb::new(db_path, threshold(&self.settings))
-            .with_disable_hog(disable_hog(&self.settings));
+            .with_disable_hog(disable_hog(&self.settings))
+            .with_margin_threshold(margin_threshold(&self.settings));
         match db.load() {
             Ok(n) => self.log(format!("[Detection] image_index loaded: {n} images")),
             Err(e) => self.log(format!("[Detection] image_index load failed: {e}")),
@@ -348,4 +349,12 @@ fn disable_hog(settings: &Value) -> bool {
         .and_then(|v| v.get("disable_hog"))
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+fn margin_threshold(settings: &Value) -> f32 {
+    settings
+        .get("jacket_matcher")
+        .and_then(|v| v.get("margin_threshold"))
+        .and_then(Value::as_f64)
+        .unwrap_or(3.0) as f32
 }

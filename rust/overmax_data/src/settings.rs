@@ -134,6 +134,13 @@ pub fn normalize_settings(settings: &mut Value) {
         } else if jacket.contains_key("similarity_threshold") {
             jacket.insert("similarity_threshold".to_string(), json!(0.6));
         }
+
+        if let Some(margin) = jacket.get("margin_threshold").and_then(|v| v.as_f64()) {
+            let clamped = margin.max(0.0);
+            jacket.insert("margin_threshold".to_string(), json!(clamped));
+        } else if jacket.contains_key("margin_threshold") {
+            jacket.insert("margin_threshold".to_string(), json!(3.0));
+        }
     }
 
     if let Some(Value::Object(varchive)) = map.get_mut("varchive") {
