@@ -98,45 +98,13 @@ impl GdiCaptureEngine {
 
 impl CaptureEngine for GdiCaptureEngine {
     fn capture_bgra(&mut self, rect: WindowRect) -> Result<CapturedFrame, String> {
-        if !rect.is_valid() {
-            return Err("capture rect must have positive dimensions".to_string());
-        }
-
-        // 해상도가 변경되었거나 리소스가 아예 초기화되지 않은 상태면 재생성
-        if self.width != rect.width || self.height != rect.height || self.hbitmap.is_none() {
-            self.release_resources();
-            self.init_resources(rect.width, rect.height)?;
-        }
-
-        let screen_dc = self.screen_dc.ok_or("Screen DC not initialized")?;
-        let memory_dc = self.memory_dc.ok_or("Memory DC not initialized")?;
-
-        let ok = unsafe {
-            BitBlt(
-                memory_dc,
-                0,
-                0,
-                rect.width,
-                rect.height,
-                screen_dc,
-                rect.left,
-                rect.top,
-                SRCCOPY | CAPTUREBLT,
-            )
+        let mut frame = CapturedFrame {
+            width: 0,
+            height: 0,
+            bgra: Vec::new(),
         };
-
-        if ok == 0 {
-            return Err("BitBlt failed".to_string());
-        }
-
-        let len = (rect.width as usize) * (rect.height as usize) * 4;
-        let bgra = unsafe { std::slice::from_raw_parts(self.bits, len).to_vec() };
-
-        Ok(CapturedFrame {
-            width: rect.width,
-            height: rect.height,
-            bgra,
-        })
+        self.capture_bgra_inplace(rect, &mut frame)?;
+        Ok(frame)
     }
 
     fn capture_bgra_inplace(

@@ -21,7 +21,6 @@ pub struct DxgiCaptureEngine {
     staging_texture: Option<ID3D11Texture2D>,
     width: u32,
     height: u32,
-    last_frame: Option<CapturedFrame>,
 }
 
 unsafe impl Send for DxgiCaptureEngine {}
@@ -65,7 +64,6 @@ impl DxgiCaptureEngine {
                 staging_texture: None,
                 width: desc.ModeDesc.Width,
                 height: desc.ModeDesc.Height,
-                last_frame: None,
             })
         }
     }
@@ -98,58 +96,13 @@ impl DxgiCaptureEngine {
 
 impl CaptureEngine for DxgiCaptureEngine {
     fn capture_bgra(&mut self, rect: WindowRect) -> Result<CapturedFrame, String> {
-        if !rect.is_valid() {
-            return Err("Capture rect must have positive dimensions".to_string());
-        }
-
-        unsafe {
-            self.ensure_staging_texture(self.width, self.height)?;
-
-            let mut resource = None;
-            let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
-
-            // 0ms 대기하여 비차단으로 프레임 즉시 획득 시도 (스레드 블로킹 방지)
-            let acquire_res = self.duplication.AcquireNextFrame(0, &mut frame_info, &mut resource);
-
-            let staging = self.staging_texture.as_ref().ok_or("Staging texture missing")?;
-
-            match acquire_res {
-                Ok(_) => {
-                    if let Some(res) = resource {
-                        let texture: ID3D11Texture2D = res.cast().map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
-                        self.context.CopyResource(staging, &texture);
-                        let _ = self.duplication.ReleaseFrame();
-                        
-                        // 새 프레임이 왔을 때만 크롭하여 캐시 업데이트
-                        match crop_texture_to_frame(&self.context, staging, self.width, self.height, rect) {
-                            Ok(frame) => {
-                                self.last_frame = Some(frame.clone());
-                                return Ok(frame);
-                            }
-                            Err(e) => return Err(e),
-                        }
-                    }
-                    let _ = self.duplication.ReleaseFrame();
-                }
-                Err(err) => {
-                    // DXGI_ERROR_WAIT_TIMEOUT (0x887A0027) 이외의 치명적인 에러인 경우 에러 상위 전파하여 GDI 백엔드로 폴백 유도
-                    let code = err.code().0 as u32;
-                    if code != 0x887A0027 {
-                        return Err(format!("DXGI AcquireNextFrame failed with HRESULT 0x{:X}: {}", code, err));
-                    }
-                }
-            }
-
-            // 새로운 프레임이 들어오지 않은 경우(DXGI_ERROR_WAIT_TIMEOUT) 이전 캐시 프레임 재활용
-            if let Some(ref cached) = self.last_frame {
-                Ok(cached.clone())
-            } else {
-                // 캐시가 없는 첫 프레임 시점에서 획득 실패 시, staging 텍스처를 그대로 크롭 시도
-                let frame = crop_texture_to_frame(&self.context, staging, self.width, self.height, rect)?;
-                self.last_frame = Some(frame.clone());
-                Ok(frame)
-            }
-        }
+        let mut frame = CapturedFrame {
+            width: 0,
+            height: 0,
+            bgra: Vec::new(),
+        };
+        self.capture_bgra_inplace(rect, &mut frame)?;
+        Ok(frame)
     }
 
     fn capture_bgra_inplace(
@@ -178,13 +131,7 @@ impl CaptureEngine for DxgiCaptureEngine {
                         self.context.CopyResource(staging, &texture);
                         let _ = self.duplication.ReleaseFrame();
                         
-                        match crop_texture_to_buffer(&self.context, staging, self.width, self.height, rect, out_frame) {
-                            Ok(_) => {
-                                self.last_frame = Some(out_frame.clone());
-                                return Ok(());
-                            }
-                            Err(e) => return Err(e),
-                        }
+                        return crop_texture_to_buffer(&self.context, staging, self.width, self.height, rect, out_frame);
                     }
                     let _ = self.duplication.ReleaseFrame();
                 }
@@ -196,59 +143,11 @@ impl CaptureEngine for DxgiCaptureEngine {
                 }
             }
 
-            if let Some(ref cached) = self.last_frame {
-                out_frame.width = cached.width;
-                out_frame.height = cached.height;
-                out_frame.bgra.resize(cached.bgra.len(), 0);
-                out_frame.bgra.copy_from_slice(&cached.bgra);
-                Ok(())
-            } else {
-                crop_texture_to_buffer(&self.context, staging, self.width, self.height, rect, out_frame)?;
-                self.last_frame = Some(out_frame.clone());
-                Ok(())
-            }
+            crop_texture_to_buffer(&self.context, staging, self.width, self.height, rect, out_frame)
         }
     }
 }
 
-unsafe fn crop_texture_to_frame(
-    context: &ID3D11DeviceContext,
-    staging: &ID3D11Texture2D,
-    desktop_width: u32,
-    desktop_height: u32,
-    rect: WindowRect,
-) -> Result<CapturedFrame, String> {
-    let mut mapped = Default::default();
-    context
-        .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-        .map_err(|e| format!("Map texture failed: {e}"))?;
-
-    let row_pitch = mapped.RowPitch as usize;
-    let data_ptr = mapped.pData as *const u8;
-
-    let start_x = rect.left.clamp(0, desktop_width as i32) as usize;
-    let start_y = rect.top.clamp(0, desktop_height as i32) as usize;
-    let crop_width = (rect.width as usize).min(desktop_width as usize - start_x);
-    let crop_height = (rect.height as usize).min(desktop_height as usize - start_y);
-
-    let mut bgra = vec![0u8; crop_width * crop_height * 4];
-
-    for y in 0..crop_height {
-        let src_offset = (start_y + y) * row_pitch + start_x * 4;
-        let dst_offset = y * crop_width * 4;
-        let src_row = data_ptr.add(src_offset);
-        let dst_row = bgra.as_mut_ptr().add(dst_offset);
-        std::ptr::copy_nonoverlapping(src_row, dst_row, crop_width * 4);
-    }
-
-    context.Unmap(staging, 0);
-
-    Ok(CapturedFrame {
-        width: crop_width as i32,
-        height: crop_height as i32,
-        bgra,
-    })
-}
 
 unsafe fn crop_texture_to_buffer(
     context: &ID3D11DeviceContext,
