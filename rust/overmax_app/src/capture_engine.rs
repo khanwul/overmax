@@ -4,6 +4,11 @@ use crate::dxgi_capture::DxgiCaptureEngine;
 
 pub trait CaptureEngine: Send + Sync {
     fn capture_bgra(&mut self, rect: WindowRect) -> Result<CapturedFrame, String>;
+    fn capture_bgra_inplace(
+        &mut self,
+        rect: WindowRect,
+        out_frame: &mut CapturedFrame,
+    ) -> Result<(), String>;
 }
 
 pub struct AdaptiveCaptureEngine {
@@ -69,6 +74,55 @@ impl CaptureEngine for AdaptiveCaptureEngine {
 
             if let Some(ref mut gdi) = self.gdi_backend {
                 gdi.capture_bgra(rect)
+            } else {
+                Err("GdiCaptureEngine not initialized".to_string())
+            }
+        }
+    }
+
+    fn capture_bgra_inplace(
+        &mut self,
+        rect: WindowRect,
+        out_frame: &mut CapturedFrame,
+    ) -> Result<(), String> {
+        let is_fs = self.tracker.is_fullscreen();
+        self.current_is_fullscreen = is_fs;
+
+        if is_fs {
+            if self.dxgi_backend.is_none() {
+                match DxgiCaptureEngine::new() {
+                    Ok(dxgi) => self.dxgi_backend = Some(dxgi),
+                    Err(e) => {
+                        if let Some(ref mut gdi) = self.gdi_backend {
+                            return gdi.capture_bgra_inplace(rect, out_frame);
+                        }
+                        return Err(format!("DXGI init failed ({e}) and GDI fallback unavailable"));
+                    }
+                }
+            }
+
+            if let Some(ref mut dxgi) = self.dxgi_backend {
+                match dxgi.capture_bgra_inplace(rect, out_frame) {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        self.dxgi_backend = None;
+                        if let Some(ref mut gdi) = self.gdi_backend {
+                            gdi.capture_bgra_inplace(rect, out_frame)
+                        } else {
+                            Err(format!("DXGI capture failed ({e}) and GDI fallback unavailable"))
+                        }
+                    }
+                }
+            } else {
+                Err("DXGI backend initialized but missing".to_string())
+            }
+        } else {
+            if self.dxgi_backend.is_some() {
+                self.dxgi_backend = None;
+            }
+
+            if let Some(ref mut gdi) = self.gdi_backend {
+                gdi.capture_bgra_inplace(rect, out_frame)
             } else {
                 Err("GdiCaptureEngine not initialized".to_string())
             }

@@ -151,6 +151,64 @@ impl CaptureEngine for DxgiCaptureEngine {
             }
         }
     }
+
+    fn capture_bgra_inplace(
+        &mut self,
+        rect: WindowRect,
+        out_frame: &mut CapturedFrame,
+    ) -> Result<(), String> {
+        if !rect.is_valid() {
+            return Err("Capture rect must have positive dimensions".to_string());
+        }
+
+        unsafe {
+            self.ensure_staging_texture(self.width, self.height)?;
+
+            let mut resource = None;
+            let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+
+            let acquire_res = self.duplication.AcquireNextFrame(0, &mut frame_info, &mut resource);
+
+            let staging = self.staging_texture.as_ref().ok_or("Staging texture missing")?;
+
+            match acquire_res {
+                Ok(_) => {
+                    if let Some(res) = resource {
+                        let texture: ID3D11Texture2D = res.cast().map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
+                        self.context.CopyResource(staging, &texture);
+                        let _ = self.duplication.ReleaseFrame();
+                        
+                        match crop_texture_to_buffer(&self.context, staging, self.width, self.height, rect, out_frame) {
+                            Ok(_) => {
+                                self.last_frame = Some(out_frame.clone());
+                                return Ok(());
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    let _ = self.duplication.ReleaseFrame();
+                }
+                Err(err) => {
+                    let code = err.code().0 as u32;
+                    if code != 0x887A0027 {
+                        return Err(format!("DXGI AcquireNextFrame failed with HRESULT 0x{:X}: {}", code, err));
+                    }
+                }
+            }
+
+            if let Some(ref cached) = self.last_frame {
+                out_frame.width = cached.width;
+                out_frame.height = cached.height;
+                out_frame.bgra.resize(cached.bgra.len(), 0);
+                out_frame.bgra.copy_from_slice(&cached.bgra);
+                Ok(())
+            } else {
+                crop_texture_to_buffer(&self.context, staging, self.width, self.height, rect, out_frame)?;
+                self.last_frame = Some(out_frame.clone());
+                Ok(())
+            }
+        }
+    }
 }
 
 unsafe fn crop_texture_to_frame(
@@ -190,4 +248,42 @@ unsafe fn crop_texture_to_frame(
         height: crop_height as i32,
         bgra,
     })
+}
+
+unsafe fn crop_texture_to_buffer(
+    context: &ID3D11DeviceContext,
+    staging: &ID3D11Texture2D,
+    desktop_width: u32,
+    desktop_height: u32,
+    rect: WindowRect,
+    out_frame: &mut CapturedFrame,
+) -> Result<(), String> {
+    let mut mapped = Default::default();
+    context
+        .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+        .map_err(|e| format!("Map texture failed: {e}"))?;
+
+    let row_pitch = mapped.RowPitch as usize;
+    let data_ptr = mapped.pData as *const u8;
+
+    let start_x = rect.left.clamp(0, desktop_width as i32) as usize;
+    let start_y = rect.top.clamp(0, desktop_height as i32) as usize;
+    let crop_width = (rect.width as usize).min(desktop_width as usize - start_x);
+    let crop_height = (rect.height as usize).min(desktop_height as usize - start_y);
+
+    let len = crop_width * crop_height * 4;
+    out_frame.width = crop_width as i32;
+    out_frame.height = crop_height as i32;
+    out_frame.bgra.resize(len, 0);
+
+    for y in 0..crop_height {
+        let src_offset = (start_y + y) * row_pitch + start_x * 4;
+        let dst_offset = y * crop_width * 4;
+        let src_row = data_ptr.add(src_offset);
+        let dst_row = out_frame.bgra.as_mut_ptr().add(dst_offset);
+        std::ptr::copy_nonoverlapping(src_row, dst_row, crop_width * 4);
+    }
+
+    context.Unmap(staging, 0);
+    Ok(())
 }

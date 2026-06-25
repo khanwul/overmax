@@ -2,6 +2,7 @@
 
 use crate::detection_pipeline::{DetectionOutput, DetectionPipeline, JacketMatchStatus};
 use crate::capture_engine::{CaptureEngine, AdaptiveCaptureEngine};
+use crate::screen_capture::CapturedFrame;
 use crate::window_tracker::WindowTracker;
 use overmax_core::GameSessionState;
 use overmax_data::{DataCompatibility, ImageIndexDb};
@@ -58,6 +59,7 @@ struct DetectionWorker {
     last_logo_detected: bool,
     last_jacket_status: JacketMatchStatus,
     last_is_fullscreen: bool,
+    frame_buffer: CapturedFrame,
 }
 
 impl DetectionWorker {
@@ -86,6 +88,11 @@ impl DetectionWorker {
             last_logo_detected: false,
             last_jacket_status: JacketMatchStatus::NotSongSelect,
             last_is_fullscreen: false,
+            frame_buffer: CapturedFrame {
+                width: 0,
+                height: 0,
+                bgra: Vec::new(),
+            },
         }
     }
 
@@ -144,9 +151,9 @@ impl DetectionWorker {
         if !self.on_window_found(rect, tracker.is_foreground()) {
             return;
         }
-        match capturer.capture_bgra(rect) {
-            Ok(frame) => {
-                let mut out = pipeline.detect(&frame, self.start.elapsed().as_secs_f64());
+        match capturer.capture_bgra_inplace(rect, &mut self.frame_buffer) {
+            Ok(_) => {
+                let mut out = pipeline.detect(&self.frame_buffer, self.start.elapsed().as_secs_f64());
                 out.game_rect = Some(rect);
                 out.state.is_fullscreen = tracker.is_fullscreen();
                 self.log_detection_summary(&out);

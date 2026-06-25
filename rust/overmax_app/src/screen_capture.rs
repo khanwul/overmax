@@ -138,6 +138,55 @@ impl CaptureEngine for GdiCaptureEngine {
             bgra,
         })
     }
+
+    fn capture_bgra_inplace(
+        &mut self,
+        rect: WindowRect,
+        out_frame: &mut CapturedFrame,
+    ) -> Result<(), String> {
+        if !rect.is_valid() {
+            return Err("capture rect must have positive dimensions".to_string());
+        }
+
+        if self.width != rect.width || self.height != rect.height || self.hbitmap.is_none() {
+            self.release_resources();
+            self.init_resources(rect.width, rect.height)?;
+        }
+
+        let screen_dc = self.screen_dc.ok_or("Screen DC not initialized")?;
+        let memory_dc = self.memory_dc.ok_or("Memory DC not initialized")?;
+
+        let ok = unsafe {
+            BitBlt(
+                memory_dc,
+                0,
+                0,
+                rect.width,
+                rect.height,
+                screen_dc,
+                rect.left,
+                rect.top,
+                SRCCOPY | CAPTUREBLT,
+            )
+        };
+
+        if ok == 0 {
+            return Err("BitBlt failed".to_string());
+        }
+
+        let len = (rect.width as usize) * (rect.height as usize) * 4;
+
+        out_frame.width = rect.width;
+        out_frame.height = rect.height;
+        out_frame.bgra.resize(len, 0);
+
+        unsafe {
+            let src_slice = std::slice::from_raw_parts(self.bits, len);
+            out_frame.bgra.copy_from_slice(src_slice);
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for GdiCaptureEngine {

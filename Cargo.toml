@@ -21,5 +21,6 @@ type_complexity = "allow"
 opt-level = 3
 lto = true
 codegen-units = 1
-strip = true
+debug = true
+strip = false
 panic = "abort"
