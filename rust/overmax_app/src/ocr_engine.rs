@@ -5,7 +5,9 @@ use windows::Media::Ocr::OcrEngine;
 use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 
 
-#[derive(Clone, Debug, Default, PartialEq)]
+use std::fmt;
+
+#[derive(Clone, Default, PartialEq)]
 pub struct OcrTelemetry {
     pub rate_text: String,
     pub threshold: u8,
@@ -14,6 +16,20 @@ pub struct OcrTelemetry {
     pub image_pixels: Vec<u8>,
     pub image_width: usize,
     pub image_height: usize,
+}
+
+impl fmt::Debug for OcrTelemetry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OcrTelemetry")
+            .field("rate_text", &self.rate_text)
+            .field("threshold", &self.threshold)
+            .field("bg_mean", &self.bg_mean)
+            .field("use_invert", &self.use_invert)
+            .field("image_pixels_len", &self.image_pixels.len())
+            .field("image_width", &self.image_width)
+            .field("image_height", &self.image_height)
+            .finish()
+    }
 }
 
 pub struct OcrDetector {

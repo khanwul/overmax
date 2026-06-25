@@ -199,7 +199,7 @@ impl PlayStateDetector {
                         if should_ocr {
                             if now - self.last_rate_ocr_ts >= 0.20 {
                                 let res = ocr.detect_rate(&rate_img);
-                                println!("    [detect] rate OCR run. res={:?}", res);
+                                println!("    [detect] rate OCR run. rate={:?}, text='{}'", res.0, res.1);
                                 self.last_rate_result = res;
                                 self.last_rate_thumb = thumb;
                                 self.last_rate_ocr_ts = now;
