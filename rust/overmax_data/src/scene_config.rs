@@ -52,7 +52,7 @@ impl Default for GlobalRoiConfig {
         let mut result_freestyle_rois = HashMap::new();
         result_freestyle_rois.insert("jacket".to_string(), RoiRect { x: 705, y: 14, width: 60, height: 60 });
         result_freestyle_rois.insert("rate".to_string(), RoiRect { x: 430, y: 580, width: 100, height: 30 });
-        result_freestyle_rois.insert("mode".to_string(), RoiRect { x: 20, y: 15, width: 320, height: 75 });
+        result_freestyle_rois.insert("mode".to_string(), RoiRect { x: 5, y: 18, width: 335, height: 75 });
         result_freestyle_rois.insert("diff_panel".to_string(), RoiRect { x: 723, y: 83, width: 64, height: 17 });
         result_freestyle_rois.insert("max_combo_badge".to_string(), RoiRect { x: 760, y: 650, width: 200, height: 220 });
         scenes.insert(SceneType::ResultFreestyle, SceneRoiConfig { rois: result_freestyle_rois });
@@ -69,7 +69,7 @@ impl Default for GlobalRoiConfig {
         let mut result_open2_rois = HashMap::new();
         result_open2_rois.insert("jacket".to_string(), RoiRect { x: 705, y: 14, width: 60, height: 60 });
         result_open2_rois.insert("rate".to_string(), RoiRect { x: 420, y: 640, width: 120, height: 30 });
-        result_open2_rois.insert("mode_diff_badge".to_string(), RoiRect { x: 260, y: 835, width: 300, height: 36 });
+        result_open2_rois.insert("mode_diff_badge".to_string(), RoiRect { x: 275, y: 835, width: 360, height: 36 });
         result_open2_rois.insert("max_combo_badge".to_string(), RoiRect { x: 250, y: 560, width: 90, height: 80 });
         scenes.insert(SceneType::ResultOpen2, SceneRoiConfig { rois: result_open2_rois });
 

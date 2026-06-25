@@ -199,36 +199,41 @@ impl DetectionPipeline {
                 }
             }
 
-            // 2. Only if the candidate flag is set, classify the fallback scene.
-            if is_result_candidate {
-                // Compare mode_diff_badge ROIs between ResultOpen3 and ResultOpen2 using fast color OCR
-                let open3_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen3);
-                let open2_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen2);
+            // Fallback: If bottom guide didn't match, check mode_diff_badge as a fallback candidate detector.
+            let mut open3_matched = false;
+            let mut open2_matched = false;
+            let open3_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen3);
+            let open2_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen2);
 
-                let mut open3_matched = false;
+            if !is_result_candidate && !is_freestyle_candidate {
                 if let Some(roi) = open3_badge_roi {
                     if let Some(img) = crop_roi(frame, roi) {
                         if let Some(txt) = self.ocr.recognize_text_color(&img) {
                             let txt_lower = txt.to_lowercase();
                             if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
                                 open3_matched = true;
+                                is_result_candidate = true;
                             }
                         }
                     }
                 }
-
-                let mut open2_matched = false;
-                if let Some(roi) = open2_badge_roi {
-                    if let Some(img) = crop_roi(frame, roi) {
-                        if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                            let txt_lower = txt.to_lowercase();
-                            if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
-                                open2_matched = true;
+                if !is_result_candidate {
+                    if let Some(roi) = open2_badge_roi {
+                        if let Some(img) = crop_roi(frame, roi) {
+                            if let Some(txt) = self.ocr.recognize_text_color(&img) {
+                                let txt_lower = txt.to_lowercase();
+                                if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                    open2_matched = true;
+                                    is_result_candidate = true;
+                                }
                             }
                         }
                     }
                 }
+            }
 
+            // 2. Only if the candidate flag is set, classify the fallback scene.
+            if is_result_candidate {
                 let fallback_scene = if open3_matched && !open2_matched {
                     println!("    [detect_logo_if_due] fallback match ResultOpen3 via mode_diff_badge OCR");
                     SceneType::ResultOpen3
@@ -236,40 +241,74 @@ impl DetectionPipeline {
                     println!("    [detect_logo_if_due] fallback match ResultOpen2 via mode_diff_badge OCR");
                     SceneType::ResultOpen2
                 } else {
-                    // Try second-pass multi-pass OCR if fast color OCR failed or was ambiguous
-                    let mut open3_all_matched = false;
-                    if let Some(roi) = open3_badge_roi {
-                        if let Some(img) = crop_roi(frame, roi) {
-                            if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
-                                let txt_lower = txt.to_lowercase();
-                                if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
-                                    open3_all_matched = true;
+                    let mut o3_m = open3_matched;
+                    let mut o2_m = open2_matched;
+
+                    if !o3_m && !o2_m {
+                        if let Some(roi) = open3_badge_roi {
+                            if let Some(img) = crop_roi(frame, roi) {
+                                if let Some(txt) = self.ocr.recognize_text_color(&img) {
+                                    let txt_lower = txt.to_lowercase();
+                                    if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                        o3_m = true;
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(roi) = open2_badge_roi {
+                            if let Some(img) = crop_roi(frame, roi) {
+                                if let Some(txt) = self.ocr.recognize_text_color(&img) {
+                                    let txt_lower = txt.to_lowercase();
+                                    if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                        o2_m = true;
+                                    }
                                 }
                             }
                         }
                     }
 
-                    let mut open2_all_matched = false;
-                    if let Some(roi) = open2_badge_roi {
-                        if let Some(img) = crop_roi(frame, roi) {
-                            if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
-                                let txt_lower = txt.to_lowercase();
-                                if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
-                                    open2_all_matched = true;
-                                }
-                            }
-                        }
-                    }
-
-                    let s = if open3_all_matched && !open2_all_matched {
+                    if o3_m && !o2_m {
+                        println!("    [detect_logo_if_due] fallback match ResultOpen3 via mode_diff_badge OCR");
                         SceneType::ResultOpen3
-                    } else if open2_all_matched && !open3_all_matched {
+                    } else if o2_m && !o3_m {
+                        println!("    [detect_logo_if_due] fallback match ResultOpen2 via mode_diff_badge OCR");
                         SceneType::ResultOpen2
                     } else {
-                        SceneType::ResultOpen3
-                    };
-                    println!("    [detect_logo_if_due] fallback match {:?} via 2nd pass badge OCR", s);
-                    s
+                        // Try second-pass multi-pass OCR if fast color OCR failed or was ambiguous
+                        let mut open3_all_matched = false;
+                        if let Some(roi) = open3_badge_roi {
+                            if let Some(img) = crop_roi(frame, roi) {
+                                if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
+                                    let txt_lower = txt.to_lowercase();
+                                    if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                        open3_all_matched = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        let mut open2_all_matched = false;
+                        if let Some(roi) = open2_badge_roi {
+                            if let Some(img) = crop_roi(frame, roi) {
+                                if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
+                                    let txt_lower = txt.to_lowercase();
+                                    if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                        open2_all_matched = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        let s = if open3_all_matched && !open2_all_matched {
+                            SceneType::ResultOpen3
+                        } else if open2_all_matched && !open3_all_matched {
+                            SceneType::ResultOpen2
+                        } else {
+                            SceneType::ResultOpen3
+                        };
+                        println!("    [detect_logo_if_due] fallback match {:?} via 2nd pass badge OCR", s);
+                        s
+                    }
                 };
 
                 scene_res = fallback_scene;
