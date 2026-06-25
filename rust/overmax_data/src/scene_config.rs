@@ -59,7 +59,7 @@ impl Default for GlobalRoiConfig {
 
         // ResultOpen3 ROI (오픈매치 3인+)
         let mut result_open3_rois = HashMap::new();
-        result_open3_rois.insert("jacket".to_string(), RoiRect { x: 705, y: 15, width: 60, height: 60 });
+        result_open3_rois.insert("jacket".to_string(), RoiRect { x: 705, y: 14, width: 60, height: 60 });
         result_open3_rois.insert("rate".to_string(), RoiRect { x: 220, y: 640, width: 120, height: 30 });
         result_open3_rois.insert("mode_diff_badge".to_string(), RoiRect { x: 210, y: 835, width: 300, height: 36 });
         result_open3_rois.insert("max_combo_badge".to_string(), RoiRect { x: 200, y: 530, width: 90, height: 80 });
@@ -67,7 +67,7 @@ impl Default for GlobalRoiConfig {
 
         // ResultOpen2 ROI (오픈매치 2인)
         let mut result_open2_rois = HashMap::new();
-        result_open2_rois.insert("jacket".to_string(), RoiRect { x: 690, y: 15, width: 60, height: 60 });
+        result_open2_rois.insert("jacket".to_string(), RoiRect { x: 705, y: 14, width: 60, height: 60 });
         result_open2_rois.insert("rate".to_string(), RoiRect { x: 420, y: 640, width: 120, height: 30 });
         result_open2_rois.insert("mode_diff_badge".to_string(), RoiRect { x: 260, y: 835, width: 300, height: 36 });
         result_open2_rois.insert("max_combo_badge".to_string(), RoiRect { x: 250, y: 560, width: 90, height: 80 });
