@@ -209,8 +209,7 @@ impl DetectionPipeline {
                 if let Some(roi) = open3_badge_roi {
                     if let Some(img) = crop_roi(frame, roi) {
                         if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                            let txt_lower = txt.to_lowercase();
-                            if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                            if self.ocr.contains_mode_keyword(&txt) {
                                 open3_matched = true;
                                 is_result_candidate = true;
                             }
@@ -221,8 +220,7 @@ impl DetectionPipeline {
                     if let Some(roi) = open2_badge_roi {
                         if let Some(img) = crop_roi(frame, roi) {
                             if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                                let txt_lower = txt.to_lowercase();
-                                if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                if self.ocr.contains_mode_keyword(&txt) {
                                     open2_matched = true;
                                     is_result_candidate = true;
                                 }
@@ -248,8 +246,7 @@ impl DetectionPipeline {
                         if let Some(roi) = open3_badge_roi {
                             if let Some(img) = crop_roi(frame, roi) {
                                 if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                                    let txt_lower = txt.to_lowercase();
-                                    if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                    if self.ocr.contains_mode_keyword(&txt) {
                                         o3_m = true;
                                     }
                                 }
@@ -258,8 +255,7 @@ impl DetectionPipeline {
                         if let Some(roi) = open2_badge_roi {
                             if let Some(img) = crop_roi(frame, roi) {
                                 if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                                    let txt_lower = txt.to_lowercase();
-                                    if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                    if self.ocr.contains_mode_keyword(&txt) {
                                         o2_m = true;
                                     }
                                 }
@@ -279,8 +275,7 @@ impl DetectionPipeline {
                         if let Some(roi) = open3_badge_roi {
                             if let Some(img) = crop_roi(frame, roi) {
                                 if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
-                                    let txt_lower = txt.to_lowercase();
-                                    if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                    if self.ocr.contains_mode_keyword(&txt) {
                                         open3_all_matched = true;
                                     }
                                 }
@@ -291,8 +286,7 @@ impl DetectionPipeline {
                         if let Some(roi) = open2_badge_roi {
                             if let Some(img) = crop_roi(frame, roi) {
                                 if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
-                                    let txt_lower = txt.to_lowercase();
-                                    if txt_lower.contains("4b") || txt_lower.contains("5b") || txt_lower.contains("6b") || txt_lower.contains("8b") {
+                                    if self.ocr.contains_mode_keyword(&txt) {
                                         open2_all_matched = true;
                                     }
                                 }

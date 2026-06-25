@@ -150,6 +150,22 @@ impl OcrDetector {
         self.engine.recognize_logo_color(region).ok()
     }
 
+    /// 텍스트 내에 유효한 버튼 모드 키워드가 포함되어 있는지 판단합니다.
+    pub fn contains_mode_keyword(&self, text: &str) -> bool {
+        let norm = text.to_lowercase();
+        norm.contains("4b") || norm.contains("5b") || norm.contains("6b") || norm.contains("8b")
+    }
+
+    /// 텍스트에서 매칭되는 버튼 모드를 문자열로 파싱합니다.
+    pub fn parse_mode_from_text(&self, text: &str) -> Option<String> {
+        let norm = text.to_lowercase();
+        if norm.contains("4b") || norm.contains('4') { Some("4B".to_string()) }
+        else if norm.contains("5b") || norm.contains('5') { Some("5B".to_string()) }
+        else if norm.contains("6b") || norm.contains('6') { Some("6B".to_string()) }
+        else if norm.contains("8b") || norm.contains('8') { Some("8B".to_string()) }
+        else { None }
+    }
+
     pub fn recognize_text_all_passes(&self, region: &ImageRegion) -> Option<String> {
         // 1. Try Color OCR
         if let Ok(t) = self.engine.recognize_logo_color(region) {

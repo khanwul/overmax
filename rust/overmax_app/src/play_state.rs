@@ -146,11 +146,7 @@ impl PlayStateDetector {
                     }
 
                     if let Some(text) = mode_text {
-                        let norm = text.to_lowercase();
-                        if norm.contains("4b") || norm.contains('4') { mode = Some("4B".to_string()); }
-                        else if norm.contains("5b") || norm.contains('5') { mode = Some("5B".to_string()); }
-                        else if norm.contains("6b") || norm.contains('6') { mode = Some("6B".to_string()); }
-                        else if norm.contains("8b") || norm.contains('8') { mode = Some("8B".to_string()); }
+                        mode = ocr.parse_mode_from_text(&text);
                     }
                     
                     if let Some(text) = diff_text {
