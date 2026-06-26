@@ -277,9 +277,18 @@ impl PlayStateDetector {
             for x in (x1..x2).step_by(step) {
                 let idx = ((y * frame.width + x) * 4) as usize;
                 if idx + 2 < frame.bgra.len() {
-                    sum += frame.bgra[idx] as u64;     // B
-                    sum += frame.bgra[idx + 1] as u64; // G
-                    sum += frame.bgra[idx + 2] as u64; // R
+                    let b = frame.bgra[idx] as u32;
+                    let g = frame.bgra[idx + 1] as u32;
+                    let r = frame.bgra[idx + 2] as u32;
+                    
+                    // 픽셀 밝기(Luminance) 연산
+                    let brightness = (r * 299 + g * 587 + b * 114) / 1000;
+                    
+                    // 텍스트 수준의 고대비 밝은 픽셀(밝기 160 이상)만 누적.
+                    // 이로써 반투명 플레이트 뒤로 흐르는 어둡게 블러 처리된 BGA 노이즈는 완벽히 무시됨.
+                    if brightness >= 160 {
+                        sum += brightness as u64;
+                    }
                 }
             }
         }
