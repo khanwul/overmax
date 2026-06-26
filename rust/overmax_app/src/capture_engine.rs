@@ -16,6 +16,7 @@ pub struct AdaptiveCaptureEngine {
     gdi_backend: Option<GdiCaptureEngine>,
     dxgi_backend: Option<DxgiCaptureEngine>,
     current_is_fullscreen: bool,
+    last_dxgi_init_attempt: std::time::Instant,
 }
 
 impl AdaptiveCaptureEngine {
@@ -25,6 +26,9 @@ impl AdaptiveCaptureEngine {
             gdi_backend: Some(GdiCaptureEngine::new()?),
             dxgi_backend: None,
             current_is_fullscreen: false,
+            last_dxgi_init_attempt: std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(5))
+                .unwrap_or_else(std::time::Instant::now),
         })
     }
 }
@@ -38,15 +42,24 @@ impl CaptureEngine for AdaptiveCaptureEngine {
         if is_fs {
             // 전체화면인 경우: DXGI 백엔드 사용
             if self.dxgi_backend.is_none() {
-                match DxgiCaptureEngine::new() {
-                    Ok(dxgi) => self.dxgi_backend = Some(dxgi),
-                    Err(e) => {
-                        // DXGI 디바이스 생성 실패 시 GDI로 즉시 임시 폴백
-                        if let Some(ref mut gdi) = self.gdi_backend {
-                            return gdi.capture_bgra(rect);
+                if self.last_dxgi_init_attempt.elapsed() >= std::time::Duration::from_secs(3) {
+                    self.last_dxgi_init_attempt = std::time::Instant::now();
+                    match DxgiCaptureEngine::new() {
+                        Ok(dxgi) => self.dxgi_backend = Some(dxgi),
+                        Err(e) => {
+                            // DXGI 디바이스 생성 실패 시 GDI로 즉시 임시 폴백
+                            if let Some(ref mut gdi) = self.gdi_backend {
+                                return gdi.capture_bgra(rect);
+                            }
+                            return Err(format!("DXGI init failed ({e}) and GDI fallback unavailable"));
                         }
-                        return Err(format!("DXGI init failed ({e}) and GDI fallback unavailable"));
                     }
+                } else {
+                    // 쿨다운 대기 중인 경우 생성을 시도하지 않고 즉시 GDI 폴백
+                    if let Some(ref mut gdi) = self.gdi_backend {
+                        return gdi.capture_bgra(rect);
+                    }
+                    return Err("DXGI retry cooldown active and GDI fallback unavailable".to_string());
                 }
             }
 
@@ -90,14 +103,22 @@ impl CaptureEngine for AdaptiveCaptureEngine {
 
         if is_fs {
             if self.dxgi_backend.is_none() {
-                match DxgiCaptureEngine::new() {
-                    Ok(dxgi) => self.dxgi_backend = Some(dxgi),
-                    Err(e) => {
-                        if let Some(ref mut gdi) = self.gdi_backend {
-                            return gdi.capture_bgra_inplace(rect, out_frame);
+                if self.last_dxgi_init_attempt.elapsed() >= std::time::Duration::from_secs(3) {
+                    self.last_dxgi_init_attempt = std::time::Instant::now();
+                    match DxgiCaptureEngine::new() {
+                        Ok(dxgi) => self.dxgi_backend = Some(dxgi),
+                        Err(e) => {
+                            if let Some(ref mut gdi) = self.gdi_backend {
+                                return gdi.capture_bgra_inplace(rect, out_frame);
+                            }
+                            return Err(format!("DXGI init failed ({e}) and GDI fallback unavailable"));
                         }
-                        return Err(format!("DXGI init failed ({e}) and GDI fallback unavailable"));
                     }
+                } else {
+                    if let Some(ref mut gdi) = self.gdi_backend {
+                        return gdi.capture_bgra_inplace(rect, out_frame);
+                    }
+                    return Err("DXGI retry cooldown active and GDI fallback unavailable".to_string());
                 }
             }
 

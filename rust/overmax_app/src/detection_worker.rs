@@ -60,6 +60,7 @@ struct DetectionWorker {
     last_jacket_status: JacketMatchStatus,
     last_is_fullscreen: bool,
     frame_buffer: CapturedFrame,
+    window_scheduler: WindowQueryScheduler,
 }
 
 impl DetectionWorker {
@@ -93,6 +94,7 @@ impl DetectionWorker {
                 height: 0,
                 bgra: Vec::new(),
             },
+            window_scheduler: WindowQueryScheduler::new(true),
         }
     }
 
@@ -144,11 +146,20 @@ impl DetectionWorker {
         capturer: &mut Box<dyn CaptureEngine>,
         pipeline: &mut DetectionPipeline,
     ) {
-        let Some(rect) = tracker.game_rect() else {
+        let (rect, foreground) = if self.window_scheduler.should_query() {
+            let r = tracker.game_rect();
+            let f = tracker.is_foreground();
+            self.window_scheduler.update(r, f);
+            (r, f)
+        } else {
+            (self.window_scheduler.cached_rect, self.window_scheduler.cached_foreground)
+        };
+
+        let Some(rect) = rect else {
             self.on_window_missing();
             return;
         };
-        if !self.on_window_found(rect, tracker.is_foreground()) {
+        if !self.on_window_found(rect, foreground) {
             return;
         }
         match capturer.capture_bgra_inplace(rect, &mut self.frame_buffer) {
@@ -364,4 +375,60 @@ fn margin_threshold(settings: &Value) -> f32 {
         .and_then(|v| v.get("margin_threshold"))
         .and_then(Value::as_f64)
         .unwrap_or(3.0) as f32
+}
+
+struct WindowQueryScheduler {
+    last_query_ts: Instant,
+    cached_rect: Option<crate::window_tracker::WindowRect>,
+    cached_foreground: bool,
+    is_window_moving: bool,
+    enabled: bool,
+}
+
+impl WindowQueryScheduler {
+    fn new(enabled: bool) -> Self {
+        Self {
+            last_query_ts: Instant::now().checked_sub(Duration::from_secs(5)).unwrap_or_else(Instant::now),
+            cached_rect: None,
+            cached_foreground: false,
+            is_window_moving: false,
+            enabled,
+        }
+    }
+
+    fn get_query_interval(&self) -> Duration {
+        if !self.enabled {
+            return Duration::from_millis(0);
+        }
+        if self.is_window_moving {
+            Duration::from_millis(16) // 드래그 시 고속 폴링 (60FPS)
+        } else if self.cached_rect.is_some() {
+            Duration::from_millis(300) // 멈춤 시 이완 (300ms)
+        } else {
+            Duration::from_millis(1000) // 창 미발견 시 1초 대기
+        }
+    }
+
+    fn should_query(&self) -> bool {
+        self.last_query_ts.elapsed() >= self.get_query_interval()
+    }
+
+    fn update(&mut self, rect: Option<crate::window_tracker::WindowRect>, foreground: bool) {
+        if !self.enabled {
+            self.cached_rect = rect;
+            self.cached_foreground = foreground;
+            return;
+        }
+
+        self.last_query_ts = Instant::now();
+
+        if let (Some(prev), Some(curr)) = (self.cached_rect, rect) {
+            self.is_window_moving = prev.left != curr.left || prev.top != curr.top;
+        } else {
+            self.is_window_moving = false;
+        }
+
+        self.cached_rect = rect;
+        self.cached_foreground = foreground;
+    }
 }

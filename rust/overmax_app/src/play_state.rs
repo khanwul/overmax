@@ -22,7 +22,7 @@ pub struct PlayStateDetector {
     history_size: usize,
     history: VecDeque<Option<RawPlayState>>,
     last_stable_state: Option<GameSessionState>,
-    last_rate_thumb: Option<Vec<u8>>,
+    last_rate_checksum: Option<u64>,
     last_rate_result: (Option<f32>, String, Option<OcrTelemetry>),
     last_rate_ocr_ts: f64,
 }
@@ -33,7 +33,7 @@ impl PlayStateDetector {
             history_size: history_size.max(1),
             history: VecDeque::new(),
             last_stable_state: None,
-            last_rate_thumb: None,
+            last_rate_checksum: None,
             last_rate_result: (None, String::new(), None),
             last_rate_ocr_ts: 0.0,
         }
@@ -42,7 +42,7 @@ impl PlayStateDetector {
     pub fn reset(&mut self) {
         self.history.clear();
         self.last_stable_state = None;
-        self.last_rate_thumb = None;
+        self.last_rate_checksum = None;
         self.last_rate_result = (None, String::new(), None);
         self.last_rate_ocr_ts = 0.0;
     }
@@ -173,38 +173,28 @@ impl PlayStateDetector {
             if confident {
                 let mut rate = 0.0;
                 if let Some(rate_roi) = rois.get_roi("rate") {
-                    if let Some(rate_img) = crop_roi(frame, rate_roi) {
-                        let thumb = crate::frame_utils::make_thumbnail(&rate_img);
-                        let changed = if let Some(ref prev) = self.last_rate_thumb {
-                            if let Some(ref t) = thumb {
-                                crate::frame_utils::thumbnail_changed(
-                                    t,
-                                    Some(prev),
-                                    2.0,
-                                )
-                            } else {
-                                true
-                            }
-                        } else {
-                            true
-                        };
+                    let current_checksum = self.compute_pixel_checksum(frame, rate_roi);
+                    let changed = if let (Some(prev), Some(curr)) = (self.last_rate_checksum, current_checksum) {
+                        (prev as i64 - curr as i64).abs() > 50
+                    } else {
+                        true
+                    };
 
-                        let should_ocr = changed
-                            || (self.last_rate_result.0.is_none() && now - self.last_rate_ocr_ts >= 5.0);
+                    let should_ocr = changed
+                        || (self.last_rate_result.0.is_none() && now - self.last_rate_ocr_ts >= 5.0);
 
-                        if should_ocr {
-                            if now - self.last_rate_ocr_ts >= 0.20 {
-                                let res = ocr.detect_rate(&rate_img);
-                                println!("    [detect] rate OCR run. rate={:?}, text='{}'", res.0, res.1);
-                                self.last_rate_result = res;
-                                self.last_rate_thumb = thumb;
-                                self.last_rate_ocr_ts = now;
-                            }
+                    if should_ocr && now - self.last_rate_ocr_ts >= 0.20 {
+                        if let Some(rate_img) = crop_roi(frame, rate_roi) {
+                            let res = ocr.detect_rate(&rate_img);
+                            println!("    [detect] rate OCR run. rate={:?}, text='{}'", res.0, res.1);
+                            self.last_rate_result = res;
+                            self.last_rate_checksum = current_checksum;
+                            self.last_rate_ocr_ts = now;
                         }
-
-                        rate = self.last_rate_result.0.unwrap_or(0.0);
-                        telemetry = self.last_rate_result.2.clone();
                     }
+
+                    rate = self.last_rate_result.0.unwrap_or(0.0);
+                    telemetry = self.last_rate_result.2.clone();
                 }
 
                 let mut rate_valid = true;
@@ -270,6 +260,30 @@ impl PlayStateDetector {
             .iter()
             .all(|item| item.as_ref() == Some(first))
             .then_some(first)
+    }
+
+    fn compute_pixel_checksum(&self, frame: &CapturedFrame, roi: crate::roi::RoiRect) -> Option<u64> {
+        let x1 = roi.x1.clamp(0, frame.width);
+        let y1 = roi.y1.clamp(0, frame.height);
+        let x2 = roi.x2.clamp(0, frame.width);
+        let y2 = roi.y2.clamp(0, frame.height);
+        if x2 <= x1 || y2 <= y1 {
+            return None;
+        }
+
+        let mut sum = 0u64;
+        let step = 2; // 2픽셀 간격으로 샘플링
+        for y in (y1..y2).step_by(step) {
+            for x in (x1..x2).step_by(step) {
+                let idx = ((y * frame.width + x) * 4) as usize;
+                if idx + 2 < frame.bgra.len() {
+                    sum += frame.bgra[idx] as u64;     // B
+                    sum += frame.bgra[idx + 1] as u64; // G
+                    sum += frame.bgra[idx + 2] as u64; // R
+                }
+            }
+        }
+        Some(sum)
     }
 }
 
