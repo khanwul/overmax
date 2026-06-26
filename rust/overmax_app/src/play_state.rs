@@ -274,29 +274,12 @@ impl PlayStateDetector {
         let mut sum = 0u64;
         let step = 2; // 2픽셀 간격으로 샘플링
         for y in (y1..y2).step_by(step) {
-            for x in (x1..(x2 - 1)).step_by(step) {
-                let idx1 = ((y * frame.width + x) * 4) as usize;
-                let idx2 = ((y * frame.width + x + 1) * 4) as usize;
-                if idx2 + 2 < frame.bgra.len() {
-                    let b1 = frame.bgra[idx1] as i32;
-                    let g1 = frame.bgra[idx1 + 1] as i32;
-                    let r1 = frame.bgra[idx1 + 2] as i32;
-
-                    let b2 = frame.bgra[idx2] as i32;
-                    let g2 = frame.bgra[idx2 + 1] as i32;
-                    let r2 = frame.bgra[idx2 + 2] as i32;
-
-                    // 인접 픽셀 간의 RGB 채널별 절대 편차 계산
-                    let diff_b = (b1 - b2).abs();
-                    let diff_g = (g1 - g2).abs();
-                    let diff_r = (r1 - r2).abs();
-                    let max_diff = diff_b.max(diff_g).max(diff_r);
-
-                    // 블러 처리된 배경 BGA는 변화도(Gradient)가 완만해 차단되나,
-                    // 스킨별 텍스트 색상(분홍, 보라, 파랑 등)에 관계없이 폰트 경계면(Edge)은 대비값(30 이상)을 강력하게 초과함
-                    if max_diff >= 30 {
-                        sum += (r1 + g1 + b1) as u64;
-                    }
+            for x in (x1..x2).step_by(step) {
+                let idx = ((y * frame.width + x) * 4) as usize;
+                if idx + 2 < frame.bgra.len() {
+                    sum += frame.bgra[idx] as u64;     // B
+                    sum += frame.bgra[idx + 1] as u64; // G
+                    sum += frame.bgra[idx + 2] as u64; // R
                 }
             }
         }
