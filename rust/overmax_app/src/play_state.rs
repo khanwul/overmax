@@ -173,7 +173,7 @@ impl PlayStateDetector {
             if confident {
                 let mut rate = 0.0;
                 if let Some(rate_roi) = rois.get_roi("rate") {
-                    let current_checksum = self.compute_pixel_checksum(frame, rate_roi);
+                    let current_checksum = crate::frame_utils::compute_pixel_checksum(frame, rate_roi);
                     let changed = if let (Some(prev), Some(curr)) = (self.last_rate_checksum, current_checksum) {
                         (prev as i64 - curr as i64).abs() > 50
                     } else {
@@ -260,30 +260,6 @@ impl PlayStateDetector {
             .iter()
             .all(|item| item.as_ref() == Some(first))
             .then_some(first)
-    }
-
-    fn compute_pixel_checksum(&self, frame: &CapturedFrame, roi: crate::roi::RoiRect) -> Option<u64> {
-        let x1 = roi.x1.clamp(0, frame.width);
-        let y1 = roi.y1.clamp(0, frame.height);
-        let x2 = roi.x2.clamp(0, frame.width);
-        let y2 = roi.y2.clamp(0, frame.height);
-        if x2 <= x1 || y2 <= y1 {
-            return None;
-        }
-
-        let mut sum = 0u64;
-        let step = 2; // 2픽셀 간격으로 샘플링
-        for y in (y1..y2).step_by(step) {
-            for x in (x1..x2).step_by(step) {
-                let idx = ((y * frame.width + x) * 4) as usize;
-                if idx + 2 < frame.bgra.len() {
-                    sum += frame.bgra[idx] as u64;     // B
-                    sum += frame.bgra[idx + 1] as u64; // G
-                    sum += frame.bgra[idx + 2] as u64; // R
-                }
-            }
-        }
-        Some(sum)
     }
 }
 

@@ -54,6 +54,30 @@ pub fn thumbnail_changed(current: &[u8], previous: Option<&[u8]>, threshold: f32
     mean_abs_diff(current, previous) >= threshold
 }
 
+pub fn compute_pixel_checksum(frame: &CapturedFrame, roi: RoiRect) -> Option<u64> {
+    let x1 = roi.x1.clamp(0, frame.width);
+    let y1 = roi.y1.clamp(0, frame.height);
+    let x2 = roi.x2.clamp(0, frame.width);
+    let y2 = roi.y2.clamp(0, frame.height);
+    if x2 <= x1 || y2 <= y1 {
+        return None;
+    }
+
+    let mut sum = 0u64;
+    let step = 2; // 2픽셀 간격으로 샘플링
+    for y in (y1..y2).step_by(step) {
+        for x in (x1..x2).step_by(step) {
+            let idx = ((y * frame.width + x) * 4) as usize;
+            if idx + 2 < frame.bgra.len() {
+                sum += frame.bgra[idx] as u64;     // B
+                sum += frame.bgra[idx + 1] as u64; // G
+                sum += frame.bgra[idx + 2] as u64; // R
+            }
+        }
+    }
+    Some(sum)
+}
+
 fn mean_bgr(bgra: &[u8]) -> (u8, u8, u8) {
     if bgra.len() < 4 {
         return (0, 0, 0);

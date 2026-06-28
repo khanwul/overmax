@@ -10,6 +10,7 @@ use overmax_data::ImageIndexDb;
 const JACKET_MATCH_INTERVAL: f64 = 0.25;
 const JACKET_CHANGE_THRESHOLD: f32 = 2.5;
 const JACKET_FORCE_RECHECK_SEC: f64 = 2.0;
+const JACKET_FORCE_RECHECK_LONG_SEC: f64 = 30.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DetectionOutput {
@@ -54,6 +55,7 @@ pub struct DetectionPipeline {
     last_jacket_thumb: Option<Vec<u8>>,
     result_scene_streak: u32,
     last_detected_result_scene: SceneType,
+    last_logo_checksum: Option<u64>,
 }
 
 impl DetectionPipeline {
@@ -74,6 +76,7 @@ impl DetectionPipeline {
             last_jacket_thumb: None,
             result_scene_streak: 0,
             last_detected_result_scene: SceneType::Unknown,
+            last_logo_checksum: None,
         }
     }
 
@@ -170,14 +173,29 @@ impl DetectionPipeline {
             return None;
         }
 
-        let Some(logo) = self
-            .rois
-            .get_roi("logo")
-            .and_then(|roi| crop_roi(frame, roi))
-        else {
+        let logo_roi = match self.rois.get_roi("logo") {
+            Some(roi) => roi,
+            None => return None,
+        };
+
+        let current_checksum = match crate::frame_utils::compute_pixel_checksum(frame, logo_roi) {
+            Some(cs) => cs,
+            None => return None,
+        };
+
+        if let Some(last_checksum) = self.last_logo_checksum {
+            let diff = (current_checksum as i64 - last_checksum as i64).abs();
+            if diff <= 30 && self.last_logo_scene != SceneType::Unknown {
+                self.last_logo_ocr_ts = now;
+                return Some(self.last_logo_scene);
+            }
+        }
+
+        let Some(logo) = crop_roi(frame, logo_roi) else {
             println!("    [detect_logo_if_due] logo crop failed! now={}", now);
             self.last_logo_scene = SceneType::Unknown;
             self.last_logo_ocr_ts = now;
+            self.last_logo_checksum = None;
             return Some(SceneType::Unknown);
         };
         
@@ -338,6 +356,7 @@ impl DetectionPipeline {
         }
 
         self.last_logo_ocr_ts = now;
+        self.last_logo_checksum = Some(current_checksum);
         Some(self.last_logo_scene)
     }
 
@@ -413,7 +432,12 @@ impl DetectionPipeline {
     }
 
     fn should_match_jacket(&self, image_changed: bool, now: f64) -> bool {
-        image_changed || now - self.last_jacket_match_ts >= JACKET_FORCE_RECHECK_SEC
+        let limit = if self.current_song_id.is_some() {
+            JACKET_FORCE_RECHECK_LONG_SEC
+        } else {
+            JACKET_FORCE_RECHECK_SEC
+        };
+        image_changed || now - self.last_jacket_match_ts >= limit
     }
 
     fn output(
