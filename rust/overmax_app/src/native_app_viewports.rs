@@ -395,11 +395,13 @@ impl eframe::App for NativeApp {
             );
 
             if overlay_on {
+                ctx.send_viewport_cmd(ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(
                     (overlay_ui::BASE_WIDTH * scale).ceil() + 2.0,
                     (height * scale).ceil() + 2.0,
                 )));
             } else {
+                ctx.send_viewport_cmd(ViewportCommand::Visible(false));
                 ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(1.0, 1.0)));
             }
         }
@@ -593,6 +595,12 @@ impl eframe::App for NativeApp {
                     }
                 }
             } else {
+                // 숨겨질 때: 투명도를 즉시 0.0(완전 투명)으로 덮어씌워 윈도우 잔상 소멸을 보장
+                if let Some(hwnd) = self.find_overlay_window() {
+                    unsafe {
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes(hwnd as _, 0, 0, 0x00000002);
+                    }
+                }
                 self.cached_hwnd = None;
                 self.last_applied_opacity = None;
             }
