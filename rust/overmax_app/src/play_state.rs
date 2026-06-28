@@ -25,6 +25,8 @@ pub struct PlayStateDetector {
     last_rate_checksum: Option<u64>,
     last_rate_result: (Option<f32>, String, Option<OcrTelemetry>),
     last_rate_ocr_ts: f64,
+    last_detected_mode: Option<String>,
+    last_detected_diff: Option<String>,
 }
 
 impl PlayStateDetector {
@@ -36,6 +38,8 @@ impl PlayStateDetector {
             last_rate_checksum: None,
             last_rate_result: (None, String::new(), None),
             last_rate_ocr_ts: 0.0,
+            last_detected_mode: None,
+            last_detected_diff: None,
         }
     }
 
@@ -45,6 +49,8 @@ impl PlayStateDetector {
         self.last_rate_checksum = None;
         self.last_rate_result = (None, String::new(), None);
         self.last_rate_ocr_ts = 0.0;
+        self.last_detected_mode = None;
+        self.last_detected_diff = None;
     }
 
     pub fn detect(
@@ -71,70 +77,83 @@ impl PlayStateDetector {
         if is_result {
             is_max_combo = detect_max_combo_result(frame, rois);
             
-            match scene {
-                SceneType::ResultFreestyle => {
-                    if let Some(mode_roi) = rois.get_roi("mode") {
-                        if let Some(mode_img) = crop_roi(frame, mode_roi) {
-                            if let Some(text) = ocr.recognize_text_all_passes(&mode_img) {
-                                println!("    [detect] Freestyle mode OCR raw: '{}'", text);
-                                let norm = text.to_lowercase();
-                                if norm.contains('4') { mode = Some("4B".to_string()); }
-                                else if norm.contains('5') { mode = Some("5B".to_string()); }
-                                else if norm.contains('6') { mode = Some("6B".to_string()); }
-                                else if norm.contains('8') { mode = Some("8B".to_string()); }
-                            } else {
-                                println!("    [detect] Freestyle mode OCR failed (None)");
+            if self.last_detected_mode.is_some() && self.last_detected_diff.is_some() {
+                mode = self.last_detected_mode.clone();
+                diff = self.last_detected_diff.clone();
+            } else {
+                match scene {
+                    SceneType::ResultFreestyle => {
+                        if let Some(mode_roi) = rois.get_roi("mode") {
+                            if let Some(mode_img) = crop_roi(frame, mode_roi) {
+                                if let Some(text) = ocr.recognize_text_all_passes(&mode_img) {
+                                    println!("    [detect] Freestyle mode OCR raw: '{}'", text);
+                                    let norm = text.to_lowercase();
+                                    if norm.contains('4') { mode = Some("4B".to_string()); }
+                                    else if norm.contains('5') { mode = Some("5B".to_string()); }
+                                    else if norm.contains('6') { mode = Some("6B".to_string()); }
+                                    else if norm.contains('8') { mode = Some("8B".to_string()); }
+                                } else {
+                                    println!("    [detect] Freestyle mode OCR failed (None)");
+                                }
                             }
                         }
-                    }
-                    if let Some(diff_roi) = rois.get_roi("diff_panel") {
-                        if let Some(diff_img) = crop_roi(frame, diff_roi) {
-                            if let Some(text) = ocr.recognize_text_all_passes(&diff_img) {
-                                println!("    [detect] Freestyle diff OCR raw: '{}'", text);
-                                let norm = text.to_lowercase();
-                                if norm.contains("hard") || norm.contains("hd") { diff = Some("HD".to_string()); }
-                                else if norm.contains("maximum") || norm.contains("mx") { diff = Some("MX".to_string()); }
-                                else if norm.contains("sc") { diff = Some("SC".to_string()); }
-                                else if norm.contains("normal") || norm.contains("nm") { diff = Some("NM".to_string()); }
-                            } else {
-                                println!("    [detect] Freestyle diff OCR failed (None)");
-                            }
-                        }
-                    }
-                }
-                SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
-                    let mut badge_text = None;
-                    if let Some(badge_roi) = rois.get_roi("mode_diff_badge") {
-                        if let Some(badge_img) = crop_roi(frame, badge_roi) {
-                            if let Some(txt) = ocr.recognize_text_all_passes(&badge_img) {
-                                println!("    [detect] ResultOpen mode_diff_badge OCR raw: '{}'", txt);
-                                badge_text = Some(txt);
-                            }
-                        }
-                    }
-                    if badge_text.is_none() && scene == SceneType::ResultOpen2 {
-                        if let Some(logo_roi) = rois.get_roi("logo") {
-                            if let Some(logo_img) = crop_roi(frame, logo_roi) {
-                                if let Some(txt) = ocr.recognize_text_all_passes(&logo_img) {
-                                    println!("    [detect] ResultOpen2 logo OCR raw: '{}'", txt);
-                                    badge_text = Some(txt);
+                        if let Some(diff_roi) = rois.get_roi("diff_panel") {
+                            if let Some(diff_img) = crop_roi(frame, diff_roi) {
+                                if let Some(text) = ocr.recognize_text_all_passes(&diff_img) {
+                                    println!("    [detect] Freestyle diff OCR raw: '{}'", text);
+                                    let norm = text.to_lowercase();
+                                    if norm.contains("hard") || norm.contains("hd") { diff = Some("HD".to_string()); }
+                                    else if norm.contains("maximum") || norm.contains("mx") { diff = Some("MX".to_string()); }
+                                    else if norm.contains("sc") { diff = Some("SC".to_string()); }
+                                    else if norm.contains("normal") || norm.contains("nm") { diff = Some("NM".to_string()); }
+                                } else {
+                                    println!("    [detect] Freestyle diff OCR failed (None)");
                                 }
                             }
                         }
                     }
+                    SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
+                        let mut badge_text = None;
+                        if let Some(badge_roi) = rois.get_roi("mode_diff_badge") {
+                            if let Some(badge_img) = crop_roi(frame, badge_roi) {
+                                if let Some(txt) = ocr.recognize_text_all_passes(&badge_img) {
+                                    println!("    [detect] ResultOpen mode_diff_badge OCR raw: '{}'", txt);
+                                    badge_text = Some(txt);
+                                }
+                            }
+                        }
+                        if badge_text.is_none() && scene == SceneType::ResultOpen2 {
+                            if let Some(logo_roi) = rois.get_roi("logo") {
+                                if let Some(logo_img) = crop_roi(frame, logo_roi) {
+                                    if let Some(txt) = ocr.recognize_text_all_passes(&logo_img) {
+                                        println!("    [detect] ResultOpen2 logo OCR raw: '{}'", txt);
+                                        badge_text = Some(txt);
+                                    }
+                                }
+                            }
+                        }
 
-                    if let Some(text) = badge_text {
-                        mode = ocr.parse_mode_from_text(&text);
-                        let norm = text.to_lowercase();
-                        if norm.contains("sc") { diff = Some("SC".to_string()); }
-                        else if norm.contains("mx") || norm.contains("maximum") || norm.contains("max") || norm.contains('w') || norm.contains('j') { diff = Some("MX".to_string()); }
-                        else if norm.contains("hd") || norm.contains("hard") { diff = Some("HD".to_string()); }
-                        else if norm.contains("nm") || norm.contains("normal") { diff = Some("NM".to_string()); }
+                        if let Some(text) = badge_text {
+                            mode = ocr.parse_mode_from_text(&text);
+                            let norm = text.to_lowercase();
+                            if norm.contains("sc") { diff = Some("SC".to_string()); }
+                            else if norm.contains("mx") || norm.contains("maximum") || norm.contains("max") || norm.contains('w') || norm.contains('j') { diff = Some("MX".to_string()); }
+                            else if norm.contains("hd") || norm.contains("hard") { diff = Some("HD".to_string()); }
+                            else if norm.contains("nm") || norm.contains("normal") { diff = Some("NM".to_string()); }
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
+
+                if mode.is_some() && diff.is_some() {
+                    self.last_detected_mode = mode.clone();
+                    self.last_detected_diff = diff.clone();
+                }
             }
         } else {
+            self.last_detected_mode = None;
+            self.last_detected_diff = None;
+
             mode = detect_button_mode(frame, rois);
             let (d, conf) = detect_difficulty(frame, rois);
             diff = d;

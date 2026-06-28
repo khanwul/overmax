@@ -167,26 +167,8 @@ impl OcrDetector {
     }
 
     pub fn recognize_text_all_passes(&self, region: &ImageRegion) -> Option<String> {
-        // 1. Try Color OCR
+        // Reverted to single-pass Color OCR to minimize CPU overhead as requested by user
         if let Ok(t) = self.engine.recognize_logo_color(region) {
-            if !t.trim().is_empty() {
-                return Some(t);
-            }
-        }
-        // 2. Try Grayscale (no binarization)
-        if let Ok(t) = self.engine.recognize_logo(region, false, false) {
-            if !t.trim().is_empty() {
-                return Some(t);
-            }
-        }
-        // 3. Try Binarized normal
-        if let Ok(t) = self.engine.recognize_logo(region, false, true) {
-            if !t.trim().is_empty() {
-                return Some(t);
-            }
-        }
-        // 4. Try Binarized inverted
-        if let Ok(t) = self.engine.recognize_logo(region, true, true) {
             if !t.trim().is_empty() {
                 return Some(t);
             }

@@ -55,7 +55,6 @@ pub struct DetectionPipeline {
     last_jacket_thumb: Option<Vec<u8>>,
     result_scene_streak: u32,
     last_detected_result_scene: SceneType,
-    last_logo_checksum: Option<u64>,
 }
 
 impl DetectionPipeline {
@@ -76,7 +75,6 @@ impl DetectionPipeline {
             last_jacket_thumb: None,
             result_scene_streak: 0,
             last_detected_result_scene: SceneType::Unknown,
-            last_logo_checksum: None,
         }
     }
 
@@ -168,7 +166,11 @@ impl DetectionPipeline {
     }
 
     fn detect_logo_if_due(&mut self, frame: &CapturedFrame, now: f64) -> Option<SceneType> {
-        let cooldown = 0.3;
+        // Dynamic logo OCR polling: relax to 1.0s during gameplay/unknown scene to minimize CPU overhead,
+        // keep 0.3s during active result/select screens for responsiveness.
+        let is_active = self.last_logo_scene != SceneType::Unknown;
+        let cooldown = if is_active { 0.3 } else { 1.0 };
+        
         if now - self.last_logo_ocr_ts < cooldown {
             return None;
         }
@@ -178,24 +180,10 @@ impl DetectionPipeline {
             None => return None,
         };
 
-        let current_checksum = match crate::frame_utils::compute_pixel_checksum(frame, logo_roi) {
-            Some(cs) => cs,
-            None => return None,
-        };
-
-        if let Some(last_checksum) = self.last_logo_checksum {
-            let diff = (current_checksum as i64 - last_checksum as i64).abs();
-            if diff <= 30 && self.last_logo_scene != SceneType::Unknown {
-                self.last_logo_ocr_ts = now;
-                return Some(self.last_logo_scene);
-            }
-        }
-
         let Some(logo) = crop_roi(frame, logo_roi) else {
             println!("    [detect_logo_if_due] logo crop failed! now={}", now);
             self.last_logo_scene = SceneType::Unknown;
             self.last_logo_ocr_ts = now;
-            self.last_logo_checksum = None;
             return Some(SceneType::Unknown);
         };
         
@@ -356,7 +344,6 @@ impl DetectionPipeline {
         }
 
         self.last_logo_ocr_ts = now;
-        self.last_logo_checksum = Some(current_checksum);
         Some(self.last_logo_scene)
     }
 
