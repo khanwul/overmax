@@ -432,6 +432,9 @@ fn parse_rate_text(text: &str) -> Option<f32> {
         value /= 100.0;
     }
 
+    // 소수점 셋째 자리 이하 무조건 버림(Truncate) 보정 적용하여 반올림 차단
+    value = (value * 100.0).floor() / 100.0;
+
     (0.0..=100.0).contains(&value).then_some(value)
 }
 
@@ -497,6 +500,10 @@ mod tests {
         // 소수점 누락 보정 테스트
         assert_eq!(parse_rate_text("9412%"), Some(94.12));
         assert_eq!(parse_rate_text("10000"), Some(100.0));
+        // 소수점 셋째 자리 버림(Truncate) 보정 테스트
+        assert_eq!(parse_rate_text("99.289%"), Some(99.28));
+        assert_eq!(parse_rate_text("99.281"), Some(99.28));
+        assert_eq!(parse_rate_text("99.280"), Some(99.28));
     }
 
     #[test]
