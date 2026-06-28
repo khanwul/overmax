@@ -88,7 +88,14 @@ impl PlayStateDetector {
                         }
                     }
                     if let Some(diff_roi) = rois.get_roi("diff_panel") {
-                        if let Some(diff_img) = crop_roi(frame, diff_roi) {
+                        // 세로 해상도가 17px로 너무 낮아 OCR 엔진이 텍스트 영역 인지에 실패하므로 위아래 마진(패딩)을 추가하여 크롭합니다.
+                        let expanded_roi = crate::roi::RoiRect {
+                            x1: diff_roi.x1 - 5,
+                            y1: diff_roi.y1 - 8,
+                            x2: diff_roi.x2 + 5,
+                            y2: diff_roi.y2 + 8,
+                        };
+                        if let Some(diff_img) = crop_roi(frame, expanded_roi) {
                             if let Some(text) = ocr.recognize_text_all_passes(&diff_img) {
                                 println!("    [detect] Freestyle diff OCR raw: '{}'", text);
                                 let norm = text.to_lowercase();
@@ -103,53 +110,35 @@ impl PlayStateDetector {
                     }
                 }
                 SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
-                    let mut mode_text = None;
-                    let mut diff_text = None;
+                    let mut badge_text = None;
                     if let Some(badge_roi) = rois.get_roi("mode_diff_badge") {
-                        let w = badge_roi.x2 - badge_roi.x1;
-                        let mode_w = (w as f32 * 0.60) as i32;
-                        let mode_rect = crate::roi::RoiRect {
-                            x1: badge_roi.x1,
-                            y1: badge_roi.y1,
-                            x2: badge_roi.x1 + mode_w,
-                            y2: badge_roi.y2,
+                        // 뱃지 영역이 텍스트 중간에 잘리는 것을 막고 OCR 정확도를 위해 좌우 10px, 상하 5px 마진을 더해 통째로 읽습니다.
+                        let expanded_roi = crate::roi::RoiRect {
+                            x1: badge_roi.x1 - 10,
+                            y1: badge_roi.y1 - 5,
+                            x2: badge_roi.x2 + 10,
+                            y2: badge_roi.y2 + 5,
                         };
-                        let diff_rect = crate::roi::RoiRect {
-                            x1: badge_roi.x1 + mode_w,
-                            y1: badge_roi.y1,
-                            x2: badge_roi.x2,
-                            y2: badge_roi.y2,
-                        };
-                        
-                        if let Some(mode_img) = crop_roi(frame, mode_rect) {
-                            if let Some(txt) = ocr.recognize_text_all_passes(&mode_img) {
-                                println!("    [detect] ResultOpen mode_badge OCR raw: '{}'", txt);
-                                mode_text = Some(txt);
-                            }
-                        }
-                        if let Some(diff_img) = crop_roi(frame, diff_rect) {
-                            if let Some(txt) = ocr.recognize_text_all_passes(&diff_img) {
-                                println!("    [detect] ResultOpen diff_badge OCR raw: '{}'", txt);
-                                diff_text = Some(txt);
+                        if let Some(badge_img) = crop_roi(frame, expanded_roi) {
+                            if let Some(txt) = ocr.recognize_text_all_passes(&badge_img) {
+                                println!("    [detect] ResultOpen mode_diff_badge OCR raw: '{}'", txt);
+                                badge_text = Some(txt);
                             }
                         }
                     }
-                    if mode_text.is_none() && scene == SceneType::ResultOpen2 {
+                    if badge_text.is_none() && scene == SceneType::ResultOpen2 {
                         if let Some(logo_roi) = rois.get_roi("logo") {
                             if let Some(logo_img) = crop_roi(frame, logo_roi) {
                                 if let Some(txt) = ocr.recognize_text_all_passes(&logo_img) {
                                     println!("    [detect] ResultOpen2 logo OCR raw: '{}'", txt);
-                                    mode_text = Some(txt);
+                                    badge_text = Some(txt);
                                 }
                             }
                         }
                     }
 
-                    if let Some(text) = mode_text {
+                    if let Some(text) = badge_text {
                         mode = ocr.parse_mode_from_text(&text);
-                    }
-                    
-                    if let Some(text) = diff_text {
                         let norm = text.to_lowercase();
                         if norm.contains("sc") { diff = Some("SC".to_string()); }
                         else if norm.contains("mx") || norm.contains("maximum") || norm.contains("max") || norm.contains('w') || norm.contains('j') { diff = Some("MX".to_string()); }
