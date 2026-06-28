@@ -527,10 +527,7 @@ mod tests {
 
         let db_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../cache/image_index.db");
         let db_path_str = db_path.to_str().unwrap();
-        let mut db = ImageIndexDb::new(db_path_str, 0.6);
-        let _ = db.load();
         
-        let mut pipeline = DetectionPipeline::new(db);
         let roi_dir = scratch_dir.join("roi");
         std::fs::create_dir_all(&roi_dir).unwrap();
 
@@ -540,6 +537,10 @@ mod tests {
                 println!("{}: Not found", img_name);
                 continue;
             }
+
+            // Create a fresh pipeline for each image to isolate OCR checksum bypass caches
+            let mut pipeline = DetectionPipeline::new(ImageIndexDb::new(db_path_str, 0.6));
+            let _ = pipeline.image_db.load();
 
             let img = image::io::Reader::open(&path).expect("Failed to open file")
                 .with_guessed_format().expect("Failed to guess format")
