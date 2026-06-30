@@ -565,7 +565,7 @@ mod tests {
             println!("IMAGE: {} -> Detected Scene: {:?}", img_name, final_scene);
 
             // 2. Build ROI name list for current scene
-            let mut roi_names = vec!["logo".to_string(), "bottom_guide".to_string()];
+            let mut roi_names = vec!["logo".to_string()];
             if let Some(cfg) = pipeline.rois.config.scenes.get(&final_scene) {
                 for name in cfg.rois.keys() {
                     roi_names.push(name.clone());

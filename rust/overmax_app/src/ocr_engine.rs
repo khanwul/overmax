@@ -138,65 +138,6 @@ impl OcrDetector {
     }
 
 
-    pub fn detect_bottom_guide_space(&self, bottom_guide: &ImageRegion) -> bool {
-        let check = |t: &str| {
-            let t_lower = t.to_lowercase();
-            // 1. English normalized check
-            let norm = normalize_alnum(t).to_lowercase();
-            let has_english = norm.contains("space")
-                || norm.contains("pace")
-                || norm.contains("spac")
-                || norm.contains("spce")
-                || norm.contains("5pace")
-                || sequence_ratio("space", &norm) >= 0.70;
-
-            if has_english {
-                return true;
-            }
-
-            t_lower.contains("상세정보")
-                || (t_lower.contains("상세") && t_lower.contains("정보"))
-        };
-
-        if let Ok(t) = self.engine.recognize_logo_color(bottom_guide) {
-            if check(&t) { return true; }
-        }
-        if let Ok(t) = self.engine.recognize_logo(bottom_guide, false, false) {
-            if check(&t) { return true; }
-        }
-        false
-    }
-
-    pub fn detect_bottom_guide_f5(&self, bottom_guide: &ImageRegion) -> bool {
-        let check = |t: &str| {
-            let t_lower = t.to_lowercase();
-            // 1. English normalized check
-            let norm = normalize_alnum(t).to_lowercase();
-            let has_english = norm.contains("f5")
-                || norm.contains("fs")
-                || norm.contains("es")
-                || sequence_ratio("f5", &norm) >= 0.60;
-
-            if has_english {
-                return true;
-            }
-
-            t_lower.contains("레더보드")
-                || t_lower.contains("래더보드")
-                || (t_lower.contains("레더") && t_lower.contains("보드"))
-                || (t_lower.contains("래더") && t_lower.contains("보드"))
-                || t_lower.contains("즐겨찾기")
-                || (t_lower.contains("즐겨") && t_lower.contains("찾기"))
-        };
-
-        if let Ok(t) = self.engine.recognize_logo_color(bottom_guide) {
-            if check(&t) { return true; }
-        }
-        if let Ok(t) = self.engine.recognize_logo(bottom_guide, false, false) {
-            if check(&t) { return true; }
-        }
-        false
-    }
 }
 
 fn match_logo_scene(text: &str) -> Option<(SceneType, String)> {
@@ -253,6 +194,7 @@ impl WindowsOcrEngine {
         self.engine.is_some()
     }
 
+    #[allow(dead_code)]
     fn recognize_logo(&self, image: &ImageRegion, force_invert: bool, binarize: bool) -> Result<String, String> {
         let Some(engine) = &self.engine else {
             return Ok(String::new());

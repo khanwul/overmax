@@ -71,9 +71,6 @@ impl RoiManager {
         if name == "logo" {
             return Some(self.transform_roi(RoiRect { x1: 5, y1: 18, x2: 340, y2: 93 }));
         }
-        if name == "bottom_guide" {
-            return Some(self.transform_roi(RoiRect { x1: 1300, y1: 1010, x2: 1900, y2: 1070 }));
-        }
         let roi = self.config.scenes.get(&scene)?.rois.get(name)?;
         Some(self.transform_roi(RoiRect::from(roi.clone())))
     }
