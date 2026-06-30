@@ -395,13 +395,11 @@ impl eframe::App for NativeApp {
             );
 
             if overlay_on {
-                ctx.send_viewport_cmd(ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(
                     (overlay_ui::BASE_WIDTH * scale).ceil() + 2.0,
                     (height * scale).ceil() + 2.0,
                 )));
             } else {
-                ctx.send_viewport_cmd(ViewportCommand::Visible(false));
                 ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(1.0, 1.0)));
             }
         }
