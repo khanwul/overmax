@@ -224,37 +224,10 @@ impl DetectionPipeline {
         );
 
         if scene_res == SceneType::Unknown {
-            let mut is_result_candidate = false;
-            let mut detected_badge_scene = None;
-
-            // 1. Proactively probe the small bottom_guide ROI (lightweight)
-            if let Some(bottom_roi) = self.rois.get_roi("bottom_guide") {
-                if let Some(bottom_img) = crop_roi(frame, bottom_roi) {
-                    if self.ocr.detect_bottom_guide_space(&bottom_img) {
-                        is_result_candidate = true;
-                    }
-                }
-            }
-
-            // Fallback: If bottom guide didn't match, check mode_diff_badge as a fallback candidate detector.
-            if !is_result_candidate {
-                detected_badge_scene = self.check_open_match_badge(frame);
-                if detected_badge_scene.is_some() {
-                    is_result_candidate = true;
-                }
-            }
-
-            // 2. Only if the candidate flag is set, classify the fallback scene.
-            if is_result_candidate {
-                let fallback_scene = if let Some(s) = detected_badge_scene {
-                    s
-                } else {
-                    self.check_open_match_badge(frame).unwrap_or(SceneType::Unknown)
-                };
+            // 하단 가이드바 단축키에 의존하지 않고, 모드 배지(mode_diff_badge) 영역의 4B/5B/6B/8B 버튼 모드 키워드를 단독 앵커로 사용하여 오픈매치 결과창 씬 변별
+            if let Some(fallback_scene) = self.check_open_match_badge(frame) {
                 scene_res = fallback_scene;
-                if scene_res != SceneType::Unknown {
-                    self.rois.set_scene(scene_res); // Sync configurations
-                }
+                self.rois.set_scene(scene_res); // Sync configurations
             }
         }
 
