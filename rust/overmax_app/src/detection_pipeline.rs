@@ -64,7 +64,7 @@ impl DetectionPipeline {
             image_db,
             jacket_matcher,
             rois: RoiManager::new(1920, 1080),
-            hysteresis: HysteresisBuffer::new(5, 0.6, 3, 0.4, 3),
+            hysteresis: HysteresisBuffer::new(4, 0.5, 2, 0.25, 2),
             play_state: PlayStateDetector::new(5),
             ocr: OcrDetector::new(),
             current_song_id: None,
@@ -168,7 +168,7 @@ impl DetectionPipeline {
     fn detect_logo_if_due(&mut self, frame: &CapturedFrame, now: f64) -> Option<SceneType> {
         // Dynamic logo OCR polling: relax to 1.0s during gameplay/unknown scene to minimize CPU overhead,
         // keep 0.3s during active result/select screens for responsiveness.
-        let is_active = self.last_logo_scene != SceneType::Unknown;
+        let is_active = self.hysteresis.is_active || self.last_logo_scene != SceneType::Unknown;
         let cooldown = if is_active { 0.3 } else { 1.0 };
         
         if now - self.last_logo_ocr_ts < cooldown {
@@ -484,13 +484,11 @@ mod tests {
 
         let first = pipeline.process_frame_with_logo(&frame, SceneType::Freestyle, 1.0);
         let second = pipeline.process_frame_with_logo(&frame, SceneType::Freestyle, 2.0);
-        let third = pipeline.process_frame_with_logo(&frame, SceneType::Freestyle, 3.0);
 
         assert!(!first.is_song_select);
         assert_eq!(first.jacket_status, JacketMatchStatus::NotSongSelect);
-        assert!(!second.is_song_select);
-        assert!(third.is_song_select);
-        assert_eq!(third.jacket_status, JacketMatchStatus::DbNotReady);
+        assert!(second.is_song_select);
+        assert_eq!(second.jacket_status, JacketMatchStatus::DbNotReady);
     }
 
     #[test]
@@ -499,7 +497,7 @@ mod tests {
         let frame = blank_frame();
         use overmax_core::SceneType;
 
-        for idx in 0..3 {
+        for idx in 0..2 {
             pipeline.process_frame_with_logo(&frame, SceneType::Freestyle, idx as f64);
         }
         let output = pipeline.process_frame_with_logo(&frame, SceneType::Unknown, 10.0);

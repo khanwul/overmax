@@ -7,7 +7,7 @@ use overmax_data::RecommendResult;
 const DIFFICULTIES: [&str; 4] = ["NM", "HD", "MX", "SC"];
 
 impl NativeApp {
-    pub(crate) fn drain_detection_results(&mut self) {
+    pub(crate) fn drain_detection_results(&mut self, ctx: &egui::Context) {
         let mut changed = false;
         while let Ok(output) = self.detection_rx.try_recv() {
             if let Ok(mut rate_ocr) = self.debug_state.rate_ocr.lock() {
@@ -27,12 +27,12 @@ impl NativeApp {
             }
 
             if output.state.is_valid() {
-                if let Some(ctx) = &output.state.context {
-                    if ctx.rate > 0.0 {
+                if let Some(ctx_val) = &output.state.context {
+                    if ctx_val.rate > 0.0 {
                         let key = (
-                            ctx.song_id,
-                            ctx.mode.clone(),
-                            ctx.diff.clone(),
+                            ctx_val.song_id,
+                            ctx_val.mode.clone(),
+                            ctx_val.diff.clone(),
                         );
                         if !self.recorded_states.contains(&key) {
                             debug_ui::push_log(
@@ -40,15 +40,15 @@ impl NativeApp {
                                 self.max_log_lines(),
                                 format!(
                                     "[Main] 기록 저장: {}, {}, {}, {}%, MaxCombo: {}",
-                                    key.0, key.1, key.2, ctx.rate, ctx.is_max_combo
+                                    key.0, key.1, key.2, ctx_val.rate, ctx_val.is_max_combo
                                 ),
                             );
                             if self.record_manager.upsert(
                                 key.0 as i32,
                                 &key.1,
                                 &key.2,
-                                ctx.rate as f64,
-                                ctx.is_max_combo,
+                                ctx_val.rate as f64,
+                                ctx_val.is_max_combo,
                             ) {
                                 self.recorded_states.insert(key);
                                 changed = true;
@@ -58,9 +58,11 @@ impl NativeApp {
                 }
             }
         }
+
         if changed {
             self.refresh_overlay_data();
             self.log_overlay_state();
+            ctx.request_repaint();
         }
     }
 
