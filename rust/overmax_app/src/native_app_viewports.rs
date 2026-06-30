@@ -744,7 +744,8 @@ impl NativeApp {
             // [성능 개선] 매 프레임 FindWindowW를 부르지 않도록 게임 HWND 캐싱 & 유효성 검사
             let game_hwnd = {
                 let mut g_hwnd = self.cached_game_hwnd.map(|h| h as HWND);
-                if g_hwnd.is_none() || unsafe { IsWindow(g_hwnd.unwrap()) } == 0 {
+                let is_valid = g_hwnd.map(|h| unsafe { IsWindow(h) } != 0).unwrap_or(false);
+                if !is_valid {
                     let game_title = if let Ok(m) = self.settings.merged.lock() {
                         game_window_title(&m).to_string()
                     } else {
@@ -810,7 +811,8 @@ impl NativeApp {
             // [성능 개선] 매 프레임 FindWindowW를 부르지 않도록 게임 HWND 캐싱 & 유효성 검사
             let game_hwnd = {
                 let mut g_hwnd = self.cached_game_hwnd.map(|h| h as HWND);
-                if g_hwnd.is_none() || unsafe { IsWindow(g_hwnd.unwrap()) } == 0 {
+                let is_valid = g_hwnd.map(|h| unsafe { IsWindow(h) } != 0).unwrap_or(false);
+                if !is_valid {
                     let game_title = if let Ok(m) = self.settings.merged.lock() {
                         game_window_title(&m).to_string()
                     } else {
