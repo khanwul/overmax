@@ -166,10 +166,13 @@ impl DetectionPipeline {
     }
 
     fn detect_logo_if_due(&mut self, frame: &CapturedFrame, now: f64) -> Option<SceneType> {
-        // Dynamic logo OCR polling: relax to 1.0s during gameplay/unknown scene to minimize CPU overhead,
-        // keep 0.3s during active result/select screens for responsiveness.
-        let is_active = self.hysteresis.is_active || self.last_logo_scene != SceneType::Unknown;
-        let cooldown = if is_active { 0.3 } else { 1.0 };
+        // 씬이 Unknown인 경우(진입 대기): 빠른 인식을 위해 0.3초 주기로 감시
+        // 씬이 이미 확정된 경우(유지 중): CPU 소모 최소화를 위해 2.0초 주기로 완화 (이탈은 픽셀 매칭으로 즉시 처리되므로 반응성 무관)
+        let cooldown = if self.last_logo_scene == SceneType::Unknown {
+            0.3
+        } else {
+            2.0
+        };
         
         if now - self.last_logo_ocr_ts < cooldown {
             return None;
@@ -192,10 +195,16 @@ impl DetectionPipeline {
                  now, logo.width, logo.height, raw_text, scene);
 
         let mut scene_res = scene;
-        
+
+        let is_prev_result = matches!(
+            self.last_logo_scene,
+            SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
+        );
+
         if scene_res == SceneType::Unknown {
             let mut is_result_candidate = false;
             let mut is_freestyle_candidate = false;
+            let mut detected_badge_scene = None;
 
             // 1. Proactively probe the small bottom_guide ROI (lightweight)
             if let Some(bottom_roi) = self.rois.get_roi("bottom_guide") {
@@ -209,122 +218,28 @@ impl DetectionPipeline {
             }
 
             // Fallback: If bottom guide didn't match, check mode_diff_badge as a fallback candidate detector.
-            let mut open3_matched = false;
-            let mut open2_matched = false;
-            let open3_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen3);
-            let open2_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen2);
-
             if !is_result_candidate && !is_freestyle_candidate {
-                if let Some(roi) = open3_badge_roi {
-                    if let Some(img) = crop_roi(frame, roi) {
-                        if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                            if self.ocr.contains_mode_keyword(&txt) {
-                                open3_matched = true;
-                                is_result_candidate = true;
-                            }
-                        }
-                    }
-                }
-                if !is_result_candidate {
-                    if let Some(roi) = open2_badge_roi {
-                        if let Some(img) = crop_roi(frame, roi) {
-                            if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                                if self.ocr.contains_mode_keyword(&txt) {
-                                    open2_matched = true;
-                                    is_result_candidate = true;
-                                }
-                            }
-                        }
-                    }
+                detected_badge_scene = self.check_open_match_badge(frame);
+                if detected_badge_scene.is_some() {
+                    is_result_candidate = true;
                 }
             }
 
             // 2. Only if the candidate flag is set, classify the fallback scene.
             if is_result_candidate {
-                let fallback_scene = if open3_matched && !open2_matched {
-                    println!("    [detect_logo_if_due] fallback match ResultOpen3 via mode_diff_badge OCR");
-                    SceneType::ResultOpen3
-                } else if open2_matched && !open3_matched {
-                    println!("    [detect_logo_if_due] fallback match ResultOpen2 via mode_diff_badge OCR");
-                    SceneType::ResultOpen2
+                let fallback_scene = if let Some(s) = detected_badge_scene {
+                    s
                 } else {
-                    let mut o3_m = open3_matched;
-                    let mut o2_m = open2_matched;
-
-                    if !o3_m && !o2_m {
-                        if let Some(roi) = open3_badge_roi {
-                            if let Some(img) = crop_roi(frame, roi) {
-                                if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                                    if self.ocr.contains_mode_keyword(&txt) {
-                                        o3_m = true;
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(roi) = open2_badge_roi {
-                            if let Some(img) = crop_roi(frame, roi) {
-                                if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                                    if self.ocr.contains_mode_keyword(&txt) {
-                                        o2_m = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if o3_m && !o2_m {
-                        println!("    [detect_logo_if_due] fallback match ResultOpen3 via mode_diff_badge OCR");
-                        SceneType::ResultOpen3
-                    } else if o2_m && !o3_m {
-                        println!("    [detect_logo_if_due] fallback match ResultOpen2 via mode_diff_badge OCR");
-                        SceneType::ResultOpen2
-                    } else {
-                        // Try second-pass multi-pass OCR if fast color OCR failed or was ambiguous
-                        let mut open3_all_matched = false;
-                        if let Some(roi) = open3_badge_roi {
-                            if let Some(img) = crop_roi(frame, roi) {
-                                if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
-                                    if self.ocr.contains_mode_keyword(&txt) {
-                                        open3_all_matched = true;
-                                    }
-                                }
-                            }
-                        }
-
-                        let mut open2_all_matched = false;
-                        if let Some(roi) = open2_badge_roi {
-                            if let Some(img) = crop_roi(frame, roi) {
-                                if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
-                                    if self.ocr.contains_mode_keyword(&txt) {
-                                        open2_all_matched = true;
-                                    }
-                                }
-                            }
-                        }
-
-                        let s = if open3_all_matched && !open2_all_matched {
-                            SceneType::ResultOpen3
-                        } else if open2_all_matched && !open3_all_matched {
-                            SceneType::ResultOpen2
-                        } else {
-                            SceneType::ResultOpen3
-                        };
-                        println!("    [detect_logo_if_due] fallback match {:?} via 2nd pass badge OCR", s);
-                        s
-                    }
+                    self.check_open_match_badge(frame).unwrap_or(SceneType::Unknown)
                 };
-
                 scene_res = fallback_scene;
-                self.rois.set_scene(scene_res); // Sync configurations
+                if scene_res != SceneType::Unknown {
+                    self.rois.set_scene(scene_res); // Sync configurations
+                }
             } else if is_freestyle_candidate {
                 scene_res = SceneType::ResultFreestyle;
             }
         }
-        
-        let is_prev_result = matches!(
-            self.last_logo_scene,
-            SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
-        );
 
         if scene_res == SceneType::Unknown && is_prev_result {
             let norm_logo = raw_text.to_uppercase();
@@ -362,6 +277,77 @@ impl DetectionPipeline {
 
         self.last_logo_ocr_ts = now;
         Some(self.last_logo_scene)
+    }
+
+    fn check_open_match_badge(&self, frame: &CapturedFrame) -> Option<SceneType> {
+        let open3_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen3);
+        let open2_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen2);
+
+        // 1. Fast Color-based OCR Pass
+        let mut o3_m = false;
+        let mut o2_m = false;
+
+        if let Some(roi) = open3_badge_roi {
+            if let Some(img) = crop_roi(frame, roi) {
+                if let Some(txt) = self.ocr.recognize_text_color(&img) {
+                    if self.ocr.contains_mode_keyword(&txt) {
+                        o3_m = true;
+                    }
+                }
+            }
+        }
+
+        if !o3_m {
+            if let Some(roi) = open2_badge_roi {
+                if let Some(img) = crop_roi(frame, roi) {
+                    if let Some(txt) = self.ocr.recognize_text_color(&img) {
+                        if self.ocr.contains_mode_keyword(&txt) {
+                            o2_m = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if o3_m && !o2_m {
+            return Some(SceneType::ResultOpen3);
+        }
+        if o2_m && !o3_m {
+            return Some(SceneType::ResultOpen2);
+        }
+
+        // 2. Slow Multi-pass OCR Fallback (Only executed if fast color pass failed or was ambiguous)
+        let mut o3_all = false;
+        if let Some(roi) = open3_badge_roi {
+            if let Some(img) = crop_roi(frame, roi) {
+                if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
+                    if self.ocr.contains_mode_keyword(&txt) {
+                        o3_all = true;
+                    }
+                }
+            }
+        }
+
+        let mut o2_all = false;
+        if !o3_all {
+            if let Some(roi) = open2_badge_roi {
+                if let Some(img) = crop_roi(frame, roi) {
+                    if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
+                        if self.ocr.contains_mode_keyword(&txt) {
+                            o2_all = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if o3_all && !o2_all {
+            Some(SceneType::ResultOpen3)
+        } else if o2_all && !o3_all {
+            Some(SceneType::ResultOpen2)
+        } else {
+            None
+        }
     }
 
     fn update_song_id_from_jacket(&mut self, frame: &CapturedFrame, now: f64) -> JacketMatchStatus {
