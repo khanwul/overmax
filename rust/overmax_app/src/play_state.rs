@@ -6,6 +6,8 @@ use crate::screen_capture::CapturedFrame;
 use overmax_core::{GameSessionState, PlayContext};
 use std::collections::VecDeque;
 
+pub const MIN_VALID_RATE: f32 = 80.0;
+
 const BTN_MODE_MAX_DIST: f32 = 60.0;
 const DIFF_MIN_BRIGHTNESS: f32 = 45.0;
 const DIFF_CONFIDENT_MARGIN: f32 = 15.0;
@@ -224,7 +226,11 @@ impl PlayStateDetector {
 
                 let mut rate_valid = true;
                 if is_result {
-                    if self.last_rate_result.0.is_none() || self.last_rate_result.0 == Some(0.0) {
+                    if let Some(r) = self.last_rate_result.0 {
+                        if r < MIN_VALID_RATE {
+                            rate_valid = false;
+                        }
+                    } else {
                         rate_valid = false;
                     }
                 }

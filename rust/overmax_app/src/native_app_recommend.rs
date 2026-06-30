@@ -28,7 +28,7 @@ impl NativeApp {
 
             if output.state.is_valid() {
                 if let Some(ctx_val) = &output.state.context {
-                    if ctx_val.rate > 0.0 {
+                    if ctx_val.rate >= crate::play_state::MIN_VALID_RATE {
                         let key = (
                             ctx_val.song_id,
                             ctx_val.mode.clone(),
