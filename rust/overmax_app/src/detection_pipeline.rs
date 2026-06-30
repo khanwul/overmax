@@ -204,7 +204,6 @@ impl DetectionPipeline {
 
         if scene_res == SceneType::Unknown {
             let mut is_result_candidate = false;
-            let mut is_freestyle_candidate = false;
             let mut detected_badge_scene = None;
 
             // 1. Proactively probe the small bottom_guide ROI (lightweight)
@@ -212,14 +211,12 @@ impl DetectionPipeline {
                 if let Some(bottom_img) = crop_roi(frame, bottom_roi) {
                     if self.ocr.detect_bottom_guide_space(&bottom_img) {
                         is_result_candidate = true;
-                    } else if self.ocr.detect_bottom_guide_f5(&bottom_img) {
-                        is_freestyle_candidate = true;
                     }
                 }
             }
 
             // Fallback: If bottom guide didn't match, check mode_diff_badge as a fallback candidate detector.
-            if !is_result_candidate && !is_freestyle_candidate {
+            if !is_result_candidate {
                 detected_badge_scene = self.check_open_match_badge(frame);
                 if detected_badge_scene.is_some() {
                     is_result_candidate = true;
@@ -237,8 +234,6 @@ impl DetectionPipeline {
                 if scene_res != SceneType::Unknown {
                     self.rois.set_scene(scene_res); // Sync configurations
                 }
-            } else if is_freestyle_candidate {
-                scene_res = SceneType::ResultFreestyle;
             }
         }
 
