@@ -425,6 +425,21 @@ impl eframe::App for NativeApp {
             ctx.request_repaint();
         }
 
+        // 오버레이 메인 창이 우발적으로 포커스를 획득했을 때, 포커스를 자동으로 게임 창으로 되돌려 키 입력 씹힘 방지
+        #[cfg(target_os = "windows")]
+        {
+            if overlay_on {
+                if let (Some(overlay_hwnd), Some(game_hwnd)) = (self.cached_hwnd, self.cached_game_hwnd) {
+                    unsafe {
+                        let fg = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+                        if fg == overlay_hwnd as windows_sys::Win32::Foundation::HWND {
+                            windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(game_hwnd as windows_sys::Win32::Foundation::HWND);
+                        }
+                    }
+                }
+            }
+        }
+
         let mut force_topmost = false;
         if overlay_on && !self.prev_overlay_on {
             force_topmost = true;
