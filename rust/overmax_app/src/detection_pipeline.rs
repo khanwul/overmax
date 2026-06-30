@@ -115,6 +115,7 @@ impl DetectionPipeline {
         self.rois.update_window_size(frame.width, frame.height);
         
         let logo_detected = self.last_logo_scene != SceneType::Unknown && self.last_logo_scene != SceneType::Online;
+        self.hysteresis.update(logo_detected);
         self.process_frame_shared(frame, logo_detected, now)
     }
 
