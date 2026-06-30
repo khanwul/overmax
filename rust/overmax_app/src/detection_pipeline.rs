@@ -56,6 +56,7 @@ pub struct DetectionPipeline {
     result_scene_streak: u32,
     last_detected_result_scene: SceneType,
     last_played_song_id: Option<u32>,
+    unknown_since: Option<f64>,
 }
 
 impl DetectionPipeline {
@@ -77,6 +78,7 @@ impl DetectionPipeline {
             result_scene_streak: 0,
             last_detected_result_scene: SceneType::Unknown,
             last_played_song_id: None,
+            unknown_since: None,
         }
     }
 
@@ -190,8 +192,21 @@ impl DetectionPipeline {
     fn detect_logo_if_due(&mut self, frame: &CapturedFrame, now: f64) -> Option<SceneType> {
         // 씬이 Unknown인 경우(진입 대기): 빠른 인식을 위해 0.3초 주기로 감시
         // 씬이 이미 확정된 경우(유지 중): CPU 소모 최소화를 위해 2.0초 주기로 완화 (이탈은 픽셀 매칭으로 즉시 처리되므로 반응성 무관)
+        if self.last_logo_scene == SceneType::Unknown {
+            if self.unknown_since.is_none() {
+                self.unknown_since = Some(now);
+            }
+        } else {
+            self.unknown_since = None;
+        }
+
         let cooldown = if self.last_logo_scene == SceneType::Unknown {
-            0.3
+            let unknown_duration = now - self.unknown_since.unwrap_or(now);
+            if unknown_duration < 3.0 {
+                0.3
+            } else {
+                1.5
+            }
         } else {
             2.0
         };

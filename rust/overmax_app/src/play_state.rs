@@ -29,6 +29,9 @@ pub struct PlayStateDetector {
     last_rate_ocr_ts: f64,
     last_detected_mode: Option<String>,
     last_detected_diff: Option<String>,
+    last_song_id: Option<u32>,
+    last_mode: Option<String>,
+    last_diff: Option<String>,
 }
 
 impl PlayStateDetector {
@@ -42,6 +45,9 @@ impl PlayStateDetector {
             last_rate_ocr_ts: 0.0,
             last_detected_mode: None,
             last_detected_diff: None,
+            last_song_id: None,
+            last_mode: None,
+            last_diff: None,
         }
     }
 
@@ -53,6 +59,9 @@ impl PlayStateDetector {
         self.last_rate_ocr_ts = 0.0;
         self.last_detected_mode = None;
         self.last_detected_diff = None;
+        self.last_song_id = None;
+        self.last_mode = None;
+        self.last_diff = None;
     }
 
     pub fn detect(
@@ -163,21 +172,26 @@ impl PlayStateDetector {
             is_max_combo = detect_max_combo(frame, rois);
         }
 
+        let metadata_changed = self.last_song_id != song_id
+            || self.last_mode != mode
+            || self.last_diff != diff;
+
+        self.last_song_id = song_id;
+        self.last_mode = mode.clone();
+        self.last_diff = diff.clone();
+
         let mut telemetry = None;
         println!("    [detect] song_id={:?}, mode={:?}, diff={:?}, confident={}", song_id, mode, diff, confident);
         let context = if let (Some(sid), Some(m), Some(d)) = (song_id, mode, diff) {
             if confident {
                 let mut rate = 0.0;
                 if let Some(rate_roi) = rois.get_roi("rate") {
-                    let current_checksum = crate::frame_utils::compute_pixel_checksum(frame, rate_roi);
-                    let changed = if let (Some(prev), Some(curr)) = (self.last_rate_checksum, current_checksum) {
-                        (prev as i64 - curr as i64).abs() > 50
+                    let is_rate_cached = self.last_rate_result.0.is_some();
+                    let should_ocr = if is_result {
+                        !is_rate_cached
                     } else {
-                        true
+                        metadata_changed || !is_rate_cached
                     };
-
-                    let should_ocr = changed
-                        || (self.last_rate_result.0.is_none() && now - self.last_rate_ocr_ts >= 5.0);
 
                     if should_ocr && now - self.last_rate_ocr_ts >= 0.20 {
                         if let Some(rate_img) = crop_roi(frame, rate_roi) {
@@ -216,7 +230,6 @@ impl PlayStateDetector {
 
                             println!("    [detect] rate OCR run. rate={:?}, text='{}'", rate_res.0, rate_res.1);
                             self.last_rate_result = rate_res;
-                            self.last_rate_checksum = current_checksum;
                         }
                     }
 
