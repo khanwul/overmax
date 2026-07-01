@@ -425,10 +425,11 @@ impl eframe::App for NativeApp {
             ctx.request_repaint();
         }
 
-        // 오버레이 메인 창이 우발적으로 포커스를 획득했을 때, 포커스를 자동으로 게임 창으로 되돌려 키 입력 씹힘 방지
+        // 오버레이 메인 창이 우발적으로 포커스를 획득했을 때, 포커스를 자동으로 게임 창으로 되돌려 키 입력 씹힘 방지.
+        // 단, snap이 manual(수동 위치 조정 모드)인 경우 사용자가 고의로 오버레이 창을 조작(드래그) 중이므로 예외로 둡니다.
         #[cfg(target_os = "windows")]
         {
-            if overlay_on {
+            if overlay_on && snap_position != "manual" {
                 if let (Some(overlay_hwnd), Some(game_hwnd)) = (self.cached_hwnd, self.cached_game_hwnd) {
                     unsafe {
                         let fg = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
