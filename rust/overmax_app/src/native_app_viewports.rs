@@ -413,7 +413,7 @@ impl eframe::App for NativeApp {
 
         // 마우스가 오버레이 영역 위에 있을 때만 상호작용 가능하게 함 (보조창 조작을 위해)
         let local_mouse = get_local_mouse_pos(ctx, self.cached_hwnd);
-        let is_over = local_mouse.is_some();
+        let is_over = local_mouse.is_some() || self.is_dragging;
         let passthrough = !overlay_on || !is_over;
         if self.prev_passthrough != Some(passthrough) {
             ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(passthrough));
@@ -481,6 +481,13 @@ impl eframe::App for NativeApp {
 
                 if actions.command == Some(crate::ui_command::UiCommand::UploadCurrentPattern) {
                     self.upload_current_pattern(ctx.clone());
+                }
+
+                if actions.start_drag {
+                    self.is_dragging = true;
+                }
+                if actions.restore_game_focus || ctx.input(|i| !i.pointer.any_down()) {
+                    self.is_dragging = false;
                 }
 
                 // 오버레이 창 드래그 처리
