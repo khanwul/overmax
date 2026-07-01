@@ -77,7 +77,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 ## 3. 곡 인식 (Song Recognition)
 - **재킷 이미지 매칭**: `ImageIndexDb`를 통해 캡처된 재킷 영역과 미리 색인된 곡 재킷의 유사도를 계산.
-- **Rust Native CV**: `overmax_cv`를 통해 Perceptual Hash + HOG 방식을 사용한 재킷 매칭 및 검색 지원.
+- **Rust Native CV**: `overmax_cv`를 통해 3종 Perceptual Hash(pHash, dHash, aHash)를 사용한 재킷 매칭 및 검색 지원. CPU 성능 최적화를 위해 무거운 HOG 특징 연산은 기본 비활성화(`disable_hog: true`)로 고정 적용되어 있습니다.
 
 ## 3. 원자적 상태 감지 및 안정화 (Atomic Play Context Sync)
 - **PlayState 감지**:

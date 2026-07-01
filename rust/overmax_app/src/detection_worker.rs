@@ -366,7 +366,7 @@ fn disable_hog(settings: &Value) -> bool {
         .get("jacket_matcher")
         .and_then(|v| v.get("disable_hog"))
         .and_then(Value::as_bool)
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 fn margin_threshold(settings: &Value) -> f32 {

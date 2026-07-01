@@ -34,7 +34,7 @@ impl ImageIndexDb {
         Self {
             db_path: db_path.as_ref().to_path_buf(),
             similarity_threshold,
-            disable_hog: false,
+            disable_hog: true,
             margin_threshold: 3.0,
             entries: Vec::new(),
         }
