@@ -254,17 +254,13 @@ impl PlayStateDetector {
                     }
                 }
 
-                if rate_valid {
-                    Some(PlayContext {
-                        song_id: sid,
-                        mode: m,
-                        diff: d,
-                        rate,
-                        is_max_combo: if rate > 0.0 { is_max_combo } else { false },
-                    })
-                } else {
-                    None
-                }
+                Some(PlayContext {
+                    song_id: sid,
+                    mode: m,
+                    diff: d,
+                    rate: if rate_valid { rate } else { 0.0 },
+                    is_max_combo: if rate_valid && rate > 0.0 { is_max_combo } else { false },
+                })
             } else {
                 None
             }
