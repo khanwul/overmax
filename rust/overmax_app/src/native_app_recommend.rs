@@ -43,12 +43,14 @@ impl NativeApp {
                                     key.0, key.1, key.2, ctx_val.rate, ctx_val.is_max_combo
                                 ),
                             );
+                            let is_result = output.is_result;
                             if self.record_manager.upsert(
                                 key.0 as i32,
                                 &key.1,
                                 &key.2,
                                 ctx_val.rate as f64,
                                 ctx_val.is_max_combo,
+                                is_result,
                             ) {
                                 self.recorded_states.insert(key);
                                 changed = true;

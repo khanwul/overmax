@@ -227,6 +227,7 @@ impl DetectionWorker {
             let _ = self.detection_tx.send(DetectionOutput {
                 logo_detected: false,
                 is_song_select: false,
+                is_result: false,
                 is_leaving: false,
                 confidence: 0.0,
                 state: GameSessionState::detecting(),

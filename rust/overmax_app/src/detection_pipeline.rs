@@ -16,6 +16,7 @@ const JACKET_FORCE_RECHECK_LONG_SEC: f64 = 30.0;
 pub struct DetectionOutput {
     pub logo_detected: bool,
     pub is_song_select: bool,
+    pub is_result: bool,
     pub is_leaving: bool,
     pub confidence: f32,
     pub state: GameSessionState,
@@ -151,6 +152,7 @@ impl DetectionPipeline {
             return self.output(
                 logo_detected,
                 false,
+                false, // is_result
                 is_leaving,
                 confidence,
                 GameSessionState::detecting(),
@@ -168,6 +170,7 @@ impl DetectionPipeline {
             return self.output(
                 logo_detected,
                 true,
+                false, // is_result
                 true,
                 confidence,
                 GameSessionState::detecting(),
@@ -187,7 +190,7 @@ impl DetectionPipeline {
             .play_state
             .detect(frame, &self.rois, self.current_song_id, &self.ocr, now);
         
-        self.output(logo_detected, true, false, confidence, state, jacket_status, telemetry)
+        self.output(logo_detected, true, is_result, false, confidence, state, jacket_status, telemetry)
     }
 
     fn detect_logo_if_due(&mut self, frame: &CapturedFrame, now: f64) -> Option<SceneType> {
@@ -502,6 +505,7 @@ impl DetectionPipeline {
         &self,
         logo_detected: bool,
         is_song_select: bool,
+        is_result: bool,
         is_leaving: bool,
         confidence: f32,
         state: GameSessionState,
@@ -511,6 +515,7 @@ impl DetectionPipeline {
         DetectionOutput {
             logo_detected,
             is_song_select,
+            is_result,
             is_leaving,
             confidence,
             state,

@@ -62,8 +62,9 @@ impl RecordManager {
         difficulty: &str,
         rate: f64,
         is_max_combo: bool,
+        only_if_improved: bool,
     ) -> bool {
-        if self.record_db.upsert(song_id, button_mode, difficulty, rate, is_max_combo) {
+        if self.record_db.upsert(song_id, button_mode, difficulty, rate, is_max_combo, only_if_improved) {
             if let Ok(mut guard) = self.dirty_record_keys.lock() {
                 guard.insert((song_id, button_mode.to_string(), difficulty.to_string()));
             }
@@ -177,7 +178,7 @@ mod tests {
 
         let mut db = RecordDB::new(&db_path, Some(steam_id));
         assert!(db.initialize());
-        assert!(db.upsert(42, "4B", "MX", 98.0, false));
+        assert!(db.upsert(42, "4B", "MX", 98.0, false, false));
         write_cache(&cache_root, steam_id);
 
         let db = Arc::new(db);
@@ -267,8 +268,8 @@ mod tests {
         let mut db = RecordDB::new(&db_path, None);
         assert!(db.initialize());
         
-        assert!(db.upsert(1, "4B", "MX", 99.0, false));
-        assert!(db.upsert(2, "4B", "MX", 97.0, false));
+        assert!(db.upsert(1, "4B", "MX", 99.0, false, false));
+        assert!(db.upsert(2, "4B", "MX", 97.0, false, false));
         
         let record_db = Arc::new(db);
         let record_manager = Arc::new(RecordManager::new(record_db, dir.join("varchive")));
@@ -298,7 +299,7 @@ mod tests {
 
         let mut db = RecordDB::new(&db_path, Some(steam_id));
         assert!(db.initialize());
-        assert!(db.upsert(123, "5B", "SC", 99.80, true));
+        assert!(db.upsert(123, "5B", "SC", 99.80, true, false));
         write_cache(&cache_root, steam_id); // Writes MX/SC cache: MX=99.5, SC=97.0 for song 42/99
 
         let db = Arc::new(db);

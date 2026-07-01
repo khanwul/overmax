@@ -120,6 +120,7 @@ impl RecordDB {
         difficulty: &str,
         rate: f64,
         is_max_combo: bool,
+        only_if_improved: bool,
     ) -> bool {
         if !self.is_ready {
             return false;
@@ -130,6 +131,40 @@ impl RecordDB {
         let is_max_combo_int = if is_max_combo { 1 } else { 0 };
 
         if let Ok(conn) = Connection::open(&self.db_path) {
+            let mut final_rate = rate;
+            let mut final_max_combo = is_max_combo_int;
+
+            if only_if_improved {
+                let mut existing_rate: Option<f64> = None;
+                let mut existing_max_combo: Option<i32> = None;
+                
+                let query_res = conn.query_row(
+                    "SELECT rate, is_max_combo FROM records 
+                     WHERE steam_id = ?1 AND song_id = ?2 AND button_mode = ?3 AND difficulty = ?4",
+                    params![steam_id, sid, button_mode, difficulty],
+                    |row| {
+                        let r: Option<f64> = row.get(0).ok();
+                        let mc: Option<i32> = row.get(1).ok();
+                        Ok((r, mc))
+                    },
+                );
+
+                if let Ok((r, mc)) = query_res {
+                    existing_rate = r;
+                    existing_max_combo = mc;
+                }
+
+                let should_update_rate = existing_rate.map_or(true, |ext_r| rate > ext_r);
+                let should_update_combo = existing_max_combo.map_or(true, |ext_mc| is_max_combo_int > ext_mc);
+
+                if !should_update_rate && !should_update_combo {
+                    return false;
+                }
+
+                final_rate = existing_rate.map_or(rate, |ext_r| rate.max(ext_r));
+                final_max_combo = existing_max_combo.map_or(is_max_combo_int, |ext_mc| is_max_combo_int.max(ext_mc));
+            }
+
             let result = conn.execute(
                 "INSERT INTO records (
                     steam_id, song_id, button_mode, difficulty, rate, is_max_combo
@@ -144,8 +179,8 @@ impl RecordDB {
                     sid,
                     button_mode,
                     difficulty,
-                    rate,
-                    is_max_combo_int
+                    final_rate,
+                    final_max_combo
                 ],
             );
             return result.is_ok();
