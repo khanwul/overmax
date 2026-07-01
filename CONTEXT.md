@@ -85,6 +85,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
   - **난이도 (Difficulty)**: 각 난이도 패널 ROI(NM/HD/MX/SC)의 평균 밝기를 계산. 상위 1위 밝기가 최소 밝기(45) 이상이고 2위와의 차이(margin)가 15.0 이상일 때 유효(confident)한 난이도로 판정.
   - **Max Combo**: `max_combo_badge` ROI의 평균 밝기가 160 이상일 때 True.
   - **Rate**: `rate` ROI 영역의 Windows OCR 멀티패스(Color → Grayscale → Grayscale Inverted) 결과를 실수값(`f32`)으로 실시간 수집. 유효 파싱값이 나온 첫 번째 패스 결과를 채택.
+  - **Score & Rate Cross-Validation**: 결과창 및 선곡창에서 `score` ROI 영역을 단일 패스 OCR로 추출하여 판정율을 역산(`Rate = Score / 10,000`)합니다. 두 OCR 결과(Rate vs. Score 역산값) 간에 불일치가 발생할 경우, 오차가 0.1% 이내이면 정밀한 스코어 역산값으로 보정하고, 오차가 클 경우 각 값의 정확도 범위(`90%~100%`, `70%~90%` 등)를 기준으로 타당성(Plausibility) 신뢰도를 평가해 더 상식적이고 가능성이 높은 값을 최종 채택합니다. 추가로 선곡창 자릿수 오인식에 대비해 신뢰 범위 가드(MIN_VALID_RATE인 80% ~ 100%)를 둡니다.
 - **원자적 안정화**:
   - 곡 ID, 버튼 모드, 난이도, Rate, Max Combo 전체를 하나의 `PlayContext`로 묶어 관리.
   - `PlayStateDetector`에서 이 전체 필드가 연속으로 N 프레임(기본 3프레임) 동안 완벽히 동일하게 감지될 때만 `GameSessionState.is_stable = true` 상태로 commit.

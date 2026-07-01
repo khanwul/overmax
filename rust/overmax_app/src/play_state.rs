@@ -198,24 +198,26 @@ impl PlayStateDetector {
                             let mut rate_res = ocr.detect_rate(&rate_img);
                             self.last_rate_ocr_ts = now;
 
-                            // 결과창인 경우 Score OCR을 통한 크로스 검증 수행
-                            if is_result {
+                            // 결과창 또는 특정 선곡창인 경우 Score OCR을 통한 크로스 검증 수행
+                            let is_song_select = matches!(scene, SceneType::Freestyle | SceneType::OpenMatch);
+                            if is_result || is_song_select {
                                 if let Some(score_roi) = rois.get_roi("score") {
                                     if let Some(score_img) = crop_roi(frame, score_roi) {
                                         if let Some(score_val) = ocr.detect_score(&score_img) {
                                             println!("    [detect] score OCR run. score={}", score_val);
                                             let calc_rate = score_val as f32 / 10000.0;
-                                            if (0.0..=100.0).contains(&calc_rate) {
+                                            
+                                            // 선곡창인 경우 스코어 OCR 오인식에 대비하여 엄격한 가드 적용
+                                            let is_valid_range = if is_song_select {
+                                                (MIN_VALID_RATE..=100.0).contains(&calc_rate)
+                                            } else {
+                                                (0.0..=100.0).contains(&calc_rate)
+                                            };
+
+                                            if is_valid_range {
                                                 match rate_res.0 {
                                                     Some(r) => {
-                                                        // 두 값의 오차가 0.05% 이내이거나 일정한 경우 보정
-                                                        if (r - calc_rate).abs() < 0.05 {
-                                                            rate_res.0 = Some((calc_rate * 100.0).floor() / 100.0);
-                                                        } else {
-                                                            // 오차가 큰 경우 인식 강건성이 우수한 score 역산값을 우선 신뢰
-                                                            println!("    [detect] Rate/Score mismatch (Rate: {}, Score: {}). Trusting score.", r, score_val);
-                                                            rate_res.0 = Some((calc_rate * 100.0).floor() / 100.0);
-                                                        }
+                                                        rate_res.0 = resolve_most_plausible_rate(r, calc_rate, is_song_select);
                                                     }
                                                     None => {
                                                         // Rate OCR 실패 시 Score 역산값으로 메꿈
@@ -412,6 +414,46 @@ fn color_dist(left: (u8, u8, u8), right: (u8, u8, u8)) -> f32 {
     let dg = f32::from(left.1) - f32::from(right.1);
     let dr = f32::from(left.2) - f32::from(right.2);
     (db * db + dg * dg + dr * dr).sqrt()
+}
+
+fn resolve_most_plausible_rate(rate_ocr: f32, score_rate: f32, is_song_select: bool) -> Option<f32> {
+    if (rate_ocr - score_rate).abs() < 0.1 {
+        return Some((score_rate * 100.0).floor() / 100.0);
+    }
+
+    let score_plaus = get_rate_plausibility(score_rate);
+    let ocr_plaus = get_rate_plausibility(rate_ocr);
+
+    if score_plaus != ocr_plaus {
+        if score_plaus > ocr_plaus {
+            println!("    [detect] Plausibility: Trusting Score Rate ({:.2}%) over Rate OCR ({:.2}%)", score_rate, rate_ocr);
+            return Some((score_rate * 100.0).floor() / 100.0);
+        } else {
+            println!("    [detect] Plausibility: Trusting Rate OCR ({:.2}%) over Score Rate ({:.2}%)", rate_ocr, score_rate);
+            return Some(rate_ocr);
+        }
+    }
+
+    if is_song_select {
+        // 신뢰 레벨이 같고 오차가 큰 선곡창은 보수적으로 원래 Rate OCR 유지
+        println!("    [detect] Plausibility tie in song select. Keeping Rate OCR: {:.2}%", rate_ocr);
+        Some(rate_ocr)
+    } else {
+        // 결과창은 스코어 역산 값을 우선 신뢰
+        Some((score_rate * 100.0).floor() / 100.0)
+    }
+}
+
+fn get_rate_plausibility(rate: f32) -> i32 {
+    if (90.0..=100.0).contains(&rate) {
+        3
+    } else if (70.0..=90.0).contains(&rate) {
+        2
+    } else if (50.0..=70.0).contains(&rate) {
+        1
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]
