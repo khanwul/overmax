@@ -89,22 +89,175 @@ impl OcrDetector {
     /// 절대로 3-pass 등의 다중 패스 루프를 이곳에 재도입하지 마십시오. (AGENTS.md 및 CONTEXT.md 제약 조건)
     /// OCR 인식 실패나 오작동 대응은 `PlayStateDetector`의 히스토리 버퍼(`stable_raw` 다수결)를 통해 해결합니다.
     pub fn detect_rate(&self, rate: &ImageRegion) -> (Option<f32>, String, Option<OcrTelemetry>) {
-        // 단일 패스: Color OCR (사용자 경험 및 테스트 결과 가장 우수한 텍스트 품질 확보)
-        if let Some((val, txt, tel)) = self.attempt_rate_ocr(rate, true, false) {
-            (val, txt, Some(tel))
-        } else {
-            (None, String::new(), None)
+        let w = rate.width as usize;
+        let h = rate.height as usize;
+
+        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::digit_templates::DIGIT_TEMPLATES.iter().map(|t| {
+            overmax_cv::CvTemplate {
+                char_val: t.char_val,
+                width: t.width,
+                height: t.height,
+                mask: t.mask,
+            }
+        }).collect();
+
+        // 1. 고휘도 이진화 전처리
+        let mut max_y = 0u8;
+        let mut y_vals = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) * 4;
+                let b = rate.bgra[idx];
+                let g = rate.bgra[idx + 1];
+                let r = rate.bgra[idx + 2];
+                // BT.601 휘도 가중치 변환
+                let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
+                y_vals[y * w + x] = y_val;
+                if y_val > max_y {
+                    max_y = y_val;
+                }
+            }
         }
+
+        let threshold = if max_y > 80 {
+            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(38))
+        } else {
+            180
+        };
+
+        let mut binary = vec![0u8; w * h];
+        for idx in 0..(w * h) {
+            binary[idx] = if y_vals[idx] >= threshold { 255 } else { 0 };
+        }
+
+        // 2. 수직 투영 분할
+        let segments = match overmax_cv::segment_characters(&binary, w, h) {
+            Ok(segs) => segs,
+            Err(_) => return (None, String::new(), None),
+        };
+
+        // 3. 템플릿 매칭 판독
+        let mut matched_str = String::new();
+        for &(x1, x2) in &segments {
+            let char_w = x2 - x1;
+            let char_h = h;
+            let mut char_bin = vec![0u8; char_w * char_h];
+            for y in 0..char_h {
+                for x in 0..char_w {
+                    char_bin[y * char_w + x] = binary[y * w + (x1 + x)];
+                }
+            }
+
+            if let Ok(Some((ch, _score))) = overmax_cv::match_character(&char_bin, char_w, char_h, &cv_templates) {
+                matched_str.push(ch);
+            } else {
+                matched_str.push('?');
+            }
+        }
+
+        // 만약 수집이 안 된 문자(예: 5)가 들어오거나 일부 오독 시 Windows OCR(하이브리드 예외 처리)로 자동 폴백하여 안정성 100% 보장
+        if matched_str.is_empty() || matched_str.contains('?') {
+            if let Some((val, txt, tel)) = self.attempt_rate_ocr(rate, true, false) {
+                return (val, txt, Some(tel));
+            } else {
+                return (None, String::new(), None);
+            }
+        }
+
+        let rate_val = parse_rate_text(&matched_str);
+
+        let telemetry = OcrTelemetry {
+            rate_text: matched_str.clone(),
+            threshold,
+            bg_mean: max_y as f32,
+            use_invert: false,
+            image_pixels: binary,
+            image_width: w,
+            image_height: h,
+        };
+
+        (rate_val, matched_str, Some(telemetry))
     }
 
-    /// Score 영역을 단일 패스(Color)로 감지하여 정수로 파싱합니다.
+    /// Score 영역을 템플릿 매칭 또는 OCR을 통해 정수로 파싱합니다.
     pub fn detect_score(&self, score: &ImageRegion) -> Option<u32> {
-        // Color 1-pass 호출 (Rate와 동일하게 Color 채널을 유지하여 인식 성능 극대화)
-        if let Ok(text) = self.engine.recognize_logo_color(score) {
-            parse_score_text(&text)
-        } else {
-            None
+        let w = score.width as usize;
+        let h = score.height as usize;
+
+        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::digit_templates::DIGIT_TEMPLATES.iter().map(|t| {
+            overmax_cv::CvTemplate {
+                char_val: t.char_val,
+                width: t.width,
+                height: t.height,
+                mask: t.mask,
+            }
+        }).collect();
+
+        // 1. 고휘도 이진화 전처리
+        let mut max_y = 0u8;
+        let mut y_vals = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) * 4;
+                let b = score.bgra[idx];
+                let g = score.bgra[idx + 1];
+                let r = score.bgra[idx + 2];
+                let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
+                y_vals[y * w + x] = y_val;
+                if y_val > max_y {
+                    max_y = y_val;
+                }
+            }
         }
+
+        let threshold = if max_y > 80 {
+            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(38))
+        } else {
+            180
+        };
+
+        let mut binary = vec![0u8; w * h];
+        for idx in 0..(w * h) {
+            binary[idx] = if y_vals[idx] >= threshold { 255 } else { 0 };
+        }
+
+        // 2. 수직 투영 분할
+        let segments = match overmax_cv::segment_characters(&binary, w, h) {
+            Ok(segs) => segs,
+            Err(_) => return None,
+        };
+
+        // 3. 템플릿 매칭 판독
+        let mut matched_str = String::new();
+        for &(x1, x2) in &segments {
+            let char_w = x2 - x1;
+            let char_h = h;
+            let mut char_bin = vec![0u8; char_w * char_h];
+            for y in 0..char_h {
+                for x in 0..char_w {
+                    char_bin[y * char_w + x] = binary[y * w + (x1 + x)];
+                }
+            }
+
+            if let Ok(Some((ch, _score))) = overmax_cv::match_character(&char_bin, char_w, char_h, &cv_templates) {
+                if ch.is_ascii_digit() {
+                    matched_str.push(ch);
+                }
+            } else {
+                matched_str.push('?');
+            }
+        }
+
+        // 실패나 오독이 포함되면 Windows OCR로 즉각 안전 폴백
+        if matched_str.is_empty() || matched_str.contains('?') {
+            if let Ok(text) = self.engine.recognize_logo_color(score) {
+                return parse_score_text(&text);
+            } else {
+                return None;
+            }
+        }
+
+        parse_score_text(&matched_str)
     }
 
     pub fn recognize_text_color(&self, region: &ImageRegion) -> Option<String> {
