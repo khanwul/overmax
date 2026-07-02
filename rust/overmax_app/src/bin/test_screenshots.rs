@@ -386,14 +386,8 @@ fn run_roi_test(
                             dynamic_img.save(format!("scratch/screenshots/debug_mode_{}", filename)).ok();
                         }
 
-                        if let Some(text) = ocr.recognize_text_all_passes(&mode_img) {
-                            let norm = text.to_lowercase();
-                            if norm.contains('4') { detected_mode = Some("4B".to_string()); }
-                            else if norm.contains('5') { detected_mode = Some("5B".to_string()); }
-                            else if norm.contains('6') { detected_mode = Some("6B".to_string()); }
-                            else if norm.contains('8') { detected_mode = Some("8B".to_string()); }
-                            println!("    Mode OCR text: '{}' -> Resolved: {:?}", text.trim(), detected_mode);
-                        }
+                        detected_mode = ocr.detect_freestyle_mode(&mode_img);
+                        println!("    Mode Match: Resolved: {:?}", detected_mode);
                     }
                 }
                 if let Some(diff_roi) = rois.get_roi("diff_panel") {
@@ -406,19 +400,29 @@ fn run_roi_test(
                             dynamic_img.save(format!("scratch/screenshots/debug_diff_panel_{}", filename)).ok();
                         }
 
-                        if let Some(text) = ocr.recognize_text_all_passes(&diff_img) {
-                            let norm = text.to_lowercase();
-                            if norm.contains("hard") || norm.contains("hd") { detected_diff = Some("HD".to_string()); }
-                            else if norm.contains("maximum") || norm.contains("mx") { detected_diff = Some("MX".to_string()); }
-                            else if norm.contains("sc") { detected_diff = Some("SC".to_string()); }
-                            else if norm.contains("normal") || norm.contains("nm") { detected_diff = Some("NM".to_string()); }
-                            println!("    Difficulty OCR text: '{}' -> Resolved: {:?}", text.trim(), detected_diff);
+                        let mut sum_b = 0u64;
+                        let mut sum_g = 0u64;
+                        let mut sum_r = 0u64;
+                        let count = diff_img.width as usize * diff_img.height as usize;
+                        for y in 0..diff_img.height as usize {
+                            for x in 0..diff_img.width as usize {
+                                let idx = (y * diff_img.width as usize + x) * 4;
+                                sum_b += diff_img.bgra[idx] as u64;
+                                sum_g += diff_img.bgra[idx + 1] as u64;
+                                sum_r += diff_img.bgra[idx + 2] as u64;
+                            }
                         }
+                        if count > 0 {
+                            let mean_b = sum_b as f32 / count as f32;
+                            let mean_g = sum_g as f32 / count as f32;
+                            let mean_r = sum_r as f32 / count as f32;
+                            detected_diff = overmax_app::ocr_engine::detect_difficulty_from_bgr((mean_b, mean_g, mean_r), false);
+                        }
+                        println!("    Difficulty BGR Match: Resolved: {:?}", detected_diff);
                     }
                 }
             }
             SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
-                let mut badge_text = None;
                 if let Some(badge_roi) = rois.get_roi("mode_diff_badge") {
                     if let Some(badge_img) = crop_roi(frame, badge_roi) {
                         // 디버그 이미지 저장
@@ -429,62 +433,30 @@ fn run_roi_test(
                             dynamic_img.save(format!("scratch/screenshots/debug_mode_diff_badge_{}", filename)).ok();
                         }
 
-                        let txt_color = ocr.recognize_text_color(&badge_img);
-                        let txt_bin_normal = ocr.recognize_text_binarized(&badge_img, false);
-                        let txt_bin_invert = ocr.recognize_text_binarized(&badge_img, true);
-                        println!("      [Badge OCR Debug] color: {:?}, bin_normal: {:?}, bin_invert: {:?}", txt_color, txt_bin_normal, txt_bin_invert);
-
-                        // 우측 난이도 박스 영역의 평균 BGR 분석
-                        let w = badge_img.width as usize;
-                        let h = badge_img.height as usize;
-                        let x_start = (w as f32 * 0.78) as usize;
-                        let x_end = (w as f32 * 0.96) as usize;
-                        let y_start = (h as f32 * 0.15) as usize;
-                        let y_end = (h as f32 * 0.85) as usize;
-                        let mut sum_b = 0u64;
-                        let mut sum_g = 0u64;
-                        let mut sum_r = 0u64;
-                        let mut count = 0u64;
-                        for y in y_start..y_end {
-                            for x in x_start..x_end {
-                                let idx = (y * w + x) * 4;
-                                sum_b += badge_img.bgra[idx] as u64;
-                                sum_g += badge_img.bgra[idx + 1] as u64;
-                                sum_r += badge_img.bgra[idx + 2] as u64;
-                                count += 1;
-                            }
-                        }
-                        if count > 0 {
-                            let mean_b = sum_b as f32 / count as f32;
-                            let mean_g = sum_g as f32 / count as f32;
-                            let mean_r = sum_r as f32 / count as f32;
-                            println!("      [Badge RGB Analysis] x_range={}-{}, mean_BGR=({:.1}, {:.1}, {:.1})", x_start, x_end, mean_b, mean_g, mean_r);
-                        }
-
-                        if let Some(txt) = ocr.recognize_text_all_passes(&badge_img) {
-                            badge_text = Some(txt);
-                        }
+                        let (m, d) = ocr.detect_badge_mode_diff(&badge_img, true);
+                        detected_mode = m;
+                        detected_diff = d;
                     }
                 }
-                if badge_text.is_none() && scene == SceneType::ResultOpen2 {
+                if (detected_mode.is_none() || detected_diff.is_none()) && scene == SceneType::ResultOpen2 {
                     if let Some(logo_roi) = rois.get_roi("logo") {
                         if let Some(logo_img) = crop_roi(frame, logo_roi) {
                             if let Some(txt) = ocr.recognize_text_all_passes(&logo_img) {
-                                badge_text = Some(txt);
+                                if detected_mode.is_none() {
+                                    detected_mode = ocr.parse_mode_from_text(&txt);
+                                }
+                                if detected_diff.is_none() {
+                                    let norm = txt.to_lowercase();
+                                    if norm.contains("sc") { detected_diff = Some("SC".to_string()); }
+                                    else if norm.contains("mx") || norm.contains("maximum") || norm.contains("max") { detected_diff = Some("MX".to_string()); }
+                                    else if norm.contains("hd") || norm.contains("hard") { detected_diff = Some("HD".to_string()); }
+                                    else if norm.contains("nm") || norm.contains("normal") { detected_diff = Some("NM".to_string()); }
+                                }
                             }
                         }
                     }
                 }
-
-                if let Some(text) = badge_text {
-                    detected_mode = ocr.parse_mode_from_text(&text);
-                    let norm = text.to_lowercase();
-                    if norm.contains("sc") { detected_diff = Some("SC".to_string()); }
-                    else if norm.contains("mx") || norm.contains("maximum") || norm.contains("max") || norm.contains('w') || norm.contains('j') { detected_diff = Some("MX".to_string()); }
-                    else if norm.contains("hd") || norm.contains("hard") { detected_diff = Some("HD".to_string()); }
-                    else if norm.contains("nm") || norm.contains("normal") { detected_diff = Some("NM".to_string()); }
-                    println!("    Badge/Logo OCR text: '{}' -> Resolved Mode: {:?}, Resolved Diff: {:?}", text.trim(), detected_mode, detected_diff);
-                }
+                println!("    Badge Match: Resolved Mode: {:?}, Resolved Diff: {:?}", detected_mode, detected_diff);
             }
             _ => {}
         }

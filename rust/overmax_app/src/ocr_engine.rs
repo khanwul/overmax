@@ -260,6 +260,194 @@ impl OcrDetector {
         parse_score_text(&matched_str)
     }
 
+    /// 결과창 뱃지 이미지로부터 모드(4B~8B)와 난이도(NM~SC)를 감지합니다.
+    pub fn detect_badge_mode_diff(
+        &self,
+        badge: &ImageRegion,
+        is_openmatch: bool,
+    ) -> (Option<String>, Option<String>) {
+        let w = badge.width as usize;
+        let h = badge.height as usize;
+
+        // 1. 난이도 감지 (색상 비율 기반 - 초고속 & 강인)
+        let mut sum_b = 0u64;
+        let mut sum_g = 0u64;
+        let mut sum_r = 0u64;
+        let count = w * h;
+        for idx in 0..count {
+            let offset = idx * 4;
+            sum_b += badge.bgra[offset] as u64;
+            sum_g += badge.bgra[offset + 1] as u64;
+            sum_r += badge.bgra[offset + 2] as u64;
+        }
+        
+        let mean_b = sum_b as f32 / count as f32;
+        let mean_g = sum_g as f32 / count as f32;
+        let mean_r = sum_r as f32 / count as f32;
+        
+        let detected_diff = detect_difficulty_from_bgr((mean_b, mean_g, mean_r), is_openmatch);
+        
+        // 2. 모드 감지 (기존 픽셀 템플릿 매칭 재사용)
+        let w = badge.width as usize;
+        let h = badge.height as usize;
+        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::digit_templates::DIGIT_TEMPLATES.iter().map(|t| {
+            overmax_cv::CvTemplate {
+                char_val: t.char_val,
+                width: t.width,
+                height: t.height,
+                mask: t.mask,
+            }
+        }).collect();
+
+        // 고휘도 이진화 전처리
+        let mut max_y = 0u8;
+        let mut y_vals = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) * 4;
+                let b = badge.bgra[idx];
+                let g = badge.bgra[idx + 1];
+                let r = badge.bgra[idx + 2];
+                let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
+                y_vals[y * w + x] = y_val;
+                if y_val > max_y {
+                    max_y = y_val;
+                }
+            }
+        }
+
+        let threshold = if max_y > 80 {
+            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(38))
+        } else {
+            180
+        };
+
+        let mut binary = vec![0u8; w * h];
+        for idx in 0..(w * h) {
+            binary[idx] = if y_vals[idx] >= threshold { 255 } else { 0 };
+        }
+
+        let segments = match overmax_cv::segment_characters(&binary, w, h) {
+            Ok(segs) => segs,
+            Err(_) => return (None, detected_diff),
+        };
+
+        let mut matched_mode = None;
+        for &(x1, x2) in &segments {
+            let char_w = x2 - x1;
+            let char_h = h;
+            let mut char_bin = vec![0u8; char_w * char_h];
+            for y in 0..char_h {
+                for x in 0..char_w {
+                    char_bin[y * char_w + x] = binary[y * w + (x1 + x)];
+                }
+            }
+
+            if let Ok(Some((ch, _score))) = overmax_cv::match_character(&char_bin, char_w, char_h, &cv_templates) {
+                if ch == '4' { matched_mode = Some("4B".to_string()); break; }
+                if ch == '5' { matched_mode = Some("5B".to_string()); break; }
+                if ch == '6' { matched_mode = Some("6B".to_string()); break; }
+                if ch == '8' { matched_mode = Some("8B".to_string()); break; }
+            }
+        }
+
+        // 템플릿 매칭으로 모드를 구했다면 바로 리턴
+        if let Some(m) = matched_mode {
+            return (Some(m), detected_diff);
+        }
+
+        // 만약 매칭에 실패했으면 Windows OCR로 최종 안전 폴백
+        if let Ok(text) = self.engine.recognize_logo_color(badge) {
+            let mode = self.parse_mode_from_text(&text);
+            let diff = if detected_diff.is_some() {
+                detected_diff
+            } else {
+                let norm = text.to_lowercase();
+                if norm.contains("sc") { Some("SC".to_string()) }
+                else if norm.contains("mx") || norm.contains("maximum") || norm.contains("max") { Some("MX".to_string()) }
+                else if norm.contains("hd") || norm.contains("hard") { Some("HD".to_string()) }
+                else if norm.contains("nm") || norm.contains("normal") { Some("NM".to_string()) }
+                else { None }
+            };
+            (mode, diff)
+        } else {
+            (None, detected_diff)
+        }
+    }
+
+    /// Freestyle 결과창 모드 영역을 템플릿 매칭으로 판독합니다.
+    pub fn detect_freestyle_mode(&self, mode_img: &ImageRegion) -> Option<String> {
+        let w = mode_img.width as usize;
+        let h = mode_img.height as usize;
+
+        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::digit_templates::DIGIT_TEMPLATES.iter().map(|t| {
+            overmax_cv::CvTemplate {
+                char_val: t.char_val,
+                width: t.width,
+                height: t.height,
+                mask: t.mask,
+            }
+        }).collect();
+
+        // 고휘도 이진화 전처리
+        let mut max_y = 0u8;
+        let mut y_vals = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) * 4;
+                let b = mode_img.bgra[idx];
+                let g = mode_img.bgra[idx + 1];
+                let r = mode_img.bgra[idx + 2];
+                let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
+                y_vals[y * w + x] = y_val;
+                if y_val > max_y {
+                    max_y = y_val;
+                }
+            }
+        }
+
+        let threshold = if max_y > 80 {
+            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(38))
+        } else {
+            180
+        };
+
+        let mut binary = vec![0u8; w * h];
+        for idx in 0..(w * h) {
+            binary[idx] = if y_vals[idx] >= threshold { 255 } else { 0 };
+        }
+
+        let segments = match overmax_cv::segment_characters(&binary, w, h) {
+            Ok(segs) => segs,
+            Err(_) => return None,
+        };
+
+        for &(x1, x2) in &segments {
+            let char_w = x2 - x1;
+            let char_h = h;
+            let mut char_bin = vec![0u8; char_w * char_h];
+            for y in 0..char_h {
+                for x in 0..char_w {
+                    char_bin[y * char_w + x] = binary[y * w + (x1 + x)];
+                }
+            }
+
+            if let Ok(Some((ch, _score))) = overmax_cv::match_character(&char_bin, char_w, char_h, &cv_templates) {
+                if ch == '4' { return Some("4B".to_string()); }
+                if ch == '5' { return Some("5B".to_string()); }
+                if ch == '6' { return Some("6B".to_string()); }
+                if ch == '8' { return Some("8B".to_string()); }
+            }
+        }
+
+        // 매칭 실패 시 Windows OCR로 폴백
+        if let Ok(text) = self.engine.recognize_logo_color(mode_img) {
+            return self.parse_mode_from_text(&text);
+        }
+
+        None
+    }
+
     pub fn recognize_text_color(&self, region: &ImageRegion) -> Option<String> {
         self.engine.recognize_logo_color(region).ok()
     }
@@ -556,6 +744,45 @@ fn lcs_len(left: &[u8], right: &[u8]) -> usize {
 
 fn to_err(err: windows::core::Error) -> String {
     err.message().to_string()
+}
+
+pub fn detect_difficulty_from_bgr(mean_bgr: (f32, f32, f32), is_openmatch: bool) -> Option<String> {
+    let (b, g, r) = mean_bgr;
+    
+    if is_openmatch {
+        // 오픈매치 결과창 뱃지 (상대적으로 밝음)
+        if b >= 120.0 && r <= 100.0 {
+            Some("SC".to_string())
+        } else if r >= 120.0 && b <= 60.0 {
+            if g >= 80.0 {
+                Some("HD".to_string())
+            } else {
+                Some("MX".to_string())
+            }
+        } else if b >= 100.0 && r <= 40.0 {
+            Some("NM".to_string())
+        } else {
+            None
+        }
+    } else {
+        // Freestyle 결과창 뱃지 (텍스트 혼입으로 어두움)
+        let sum = b + g + r;
+        if sum < 30.0 {
+            return None; // 패널이 너무 어두우면 식별 보류
+        }
+        
+        if b > g * 1.3 && r > g * 1.3 {
+            Some("SC".to_string())
+        } else if r > g * 1.5 && b < g * 1.2 {
+            Some("MX".to_string())
+        } else if r > b * 1.5 && g > b * 1.3 {
+            Some("HD".to_string())
+        } else if b > g * 1.5 && r < g * 1.2 {
+            Some("NM".to_string())
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
