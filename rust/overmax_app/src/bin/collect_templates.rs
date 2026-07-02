@@ -69,9 +69,9 @@ fn threshold_luminance(bgra: &[u8], width: usize, height: usize) -> Vec<u8> {
         }
     }
     
-    // 동적 임계값: 최대 휘도의 80% 또는 최대 휘도 - 38 중 큰 값 (글자 획 두께 보존 및 배경 배제 밸런스)
+    // 동적 임계값: 최대 휘도의 80% 또는 최대 휘도 - 45 중 큰 값 (글자 획 두께 보존 및 배경 배제 밸런스)
     let threshold = if max_y > 80 {
-        ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(38))
+        ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(45))
     } else {
         180
     };

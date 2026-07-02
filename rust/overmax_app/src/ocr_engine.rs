@@ -120,7 +120,7 @@ impl OcrDetector {
         }
 
         let threshold = if max_y > 80 {
-            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(38))
+            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(45))
         } else {
             180
         };
@@ -211,7 +211,7 @@ impl OcrDetector {
         }
 
         let threshold = if max_y > 80 {
-            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(38))
+            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(45))
         } else {
             180
         };
