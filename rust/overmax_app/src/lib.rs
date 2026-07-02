@@ -31,3 +31,5 @@ pub mod updater;
 pub mod varchive_upload;
 pub mod window_tracker;
 pub mod digit_templates;
+pub mod diff_templates;
+

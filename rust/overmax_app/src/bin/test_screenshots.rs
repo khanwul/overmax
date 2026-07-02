@@ -210,6 +210,9 @@ fn save_badge_crop(frame: &CapturedFrame, rois: &RoiManager, scene: SceneType, o
 }
 
 fn main() {
+    let diff_dir = Path::new("scratch/screenshots/diff_rois");
+    fs::create_dir_all(diff_dir).ok();
+
     let mut paths: Vec<PathBuf> = Vec::new();
     
     // 1. screenshots 폴더 수집
@@ -397,28 +400,31 @@ fn run_roi_test(
                         for chunk in bgra.chunks_exact_mut(4) { chunk.swap(0, 2); }
                         if let Some(buf) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(diff_img.width as u32, diff_img.height as u32, bgra) {
                             let dynamic_img = image::DynamicImage::ImageRgba8(buf);
-                            dynamic_img.save(format!("scratch/screenshots/debug_diff_panel_{}", filename)).ok();
+                            dynamic_img.save(format!("scratch/screenshots/diff_rois/result_freestyle_diff_{}", filename)).ok();
                         }
 
-                        let mut sum_b = 0u64;
-                        let mut sum_g = 0u64;
-                        let mut sum_r = 0u64;
-                        let count = diff_img.width as usize * diff_img.height as usize;
-                        for y in 0..diff_img.height as usize {
-                            for x in 0..diff_img.width as usize {
-                                let idx = (y * diff_img.width as usize + x) * 4;
-                                sum_b += diff_img.bgra[idx] as u64;
-                                sum_g += diff_img.bgra[idx + 1] as u64;
-                                sum_r += diff_img.bgra[idx + 2] as u64;
+                        detected_diff = ocr.detect_difficulty_from_pattern(&diff_img);
+                        if detected_diff.is_none() {
+                            let mut sum_b = 0u64;
+                            let mut sum_g = 0u64;
+                            let mut sum_r = 0u64;
+                            let count = diff_img.width as usize * diff_img.height as usize;
+                            for y in 0..diff_img.height as usize {
+                                for x in 0..diff_img.width as usize {
+                                    let idx = (y * diff_img.width as usize + x) * 4;
+                                    sum_b += diff_img.bgra[idx] as u64;
+                                    sum_g += diff_img.bgra[idx + 1] as u64;
+                                    sum_r += diff_img.bgra[idx + 2] as u64;
+                                }
+                            }
+                            if count > 0 {
+                                let mean_b = sum_b as f32 / count as f32;
+                                let mean_g = sum_g as f32 / count as f32;
+                                let mean_r = sum_r as f32 / count as f32;
+                                detected_diff = overmax_app::ocr_engine::detect_difficulty_from_bgr((mean_b, mean_g, mean_r), false);
                             }
                         }
-                        if count > 0 {
-                            let mean_b = sum_b as f32 / count as f32;
-                            let mean_g = sum_g as f32 / count as f32;
-                            let mean_r = sum_r as f32 / count as f32;
-                            detected_diff = overmax_app::ocr_engine::detect_difficulty_from_bgr((mean_b, mean_g, mean_r), false);
-                        }
-                        println!("    Difficulty BGR Match: Resolved: {:?}", detected_diff);
+                        println!("    Difficulty BGR/Pattern Match: Resolved: {:?}", detected_diff);
                     }
                 }
             }
@@ -466,6 +472,17 @@ fn run_roi_test(
         let (d, conf) = overmax_app::play_state::detect_difficulty(frame, rois);
         detected_diff = d;
         println!("    Detected Mode from color: {:?}, Diff from brightness: {:?} (confident: {})", detected_mode, detected_diff, conf);
+
+        if let Some(diff_roi) = rois.get_roi("diff_panel") {
+            if let Some(diff_img) = crop_roi(frame, diff_roi) {
+                let mut bgra = diff_img.bgra.clone();
+                for chunk in bgra.chunks_exact_mut(4) { chunk.swap(0, 2); }
+                if let Some(buf) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(diff_img.width as u32, diff_img.height as u32, bgra) {
+                    let dynamic_img = image::DynamicImage::ImageRgba8(buf);
+                    dynamic_img.save(format!("scratch/screenshots/diff_rois/select_diff_{}", filename)).ok();
+                }
+            }
+        }
     }
 
     // Rate ROI 테스트

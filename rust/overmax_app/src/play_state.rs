@@ -117,7 +117,8 @@ impl PlayStateDetector {
                                         sum_r += diff_img.bgra[idx + 2] as u64;
                                     }
                                 }
-                                if count > 0 {
+                                diff = ocr.detect_difficulty_from_pattern(&diff_img);
+                                if diff.is_none() && count > 0 {
                                     let mean_b = sum_b as f32 / count as f32;
                                     let mean_g = sum_g as f32 / count as f32;
                                     let mean_r = sum_r as f32 / count as f32;

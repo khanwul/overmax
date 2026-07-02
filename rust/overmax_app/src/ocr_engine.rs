@@ -269,23 +269,50 @@ impl OcrDetector {
         let w = badge.width as usize;
         let h = badge.height as usize;
 
-        // 1. 난이도 감지 (색상 비율 기반 - 초고속 & 강인)
-        let mut sum_b = 0u64;
-        let mut sum_g = 0u64;
-        let mut sum_r = 0u64;
-        let count = w * h;
-        for idx in 0..count {
-            let offset = idx * 4;
-            sum_b += badge.bgra[offset] as u64;
-            sum_g += badge.bgra[offset + 1] as u64;
-            sum_r += badge.bgra[offset + 2] as u64;
+        // 1. 난이도 감지 (패턴 매칭 우선, 색상 비율 기반 폴백)
+        let diff_region = if is_openmatch {
+            let crop_w = (badge.width as f32 * 0.14) as usize;
+            let crop_h = badge.height as usize;
+            let x_offset = (badge.width as f32 * 0.81) as usize;
+            let mut cropped_bgra = vec![0u8; crop_w * crop_h * 4];
+            
+            // 상하 테두리선 배제 (패널 테두리 마스킹)
+            let y_start = 4usize;
+            let y_end = crop_h.saturating_sub(4);
+            
+            for y in y_start..y_end {
+                for x in 0..crop_w {
+                    let src_idx = (y * badge.width as usize + (x_offset + x)) * 4;
+                    let dst_idx = (y * crop_w + x) * 4;
+                    cropped_bgra[dst_idx..dst_idx+4].copy_from_slice(&badge.bgra[src_idx..src_idx+4]);
+                }
+            }
+            ImageRegion {
+                width: crop_w as i32,
+                height: crop_h as i32,
+                bgra: cropped_bgra,
+            }
+        } else {
+            badge.clone()
+        };
+
+        let mut detected_diff = self.detect_difficulty_from_pattern(&diff_region);
+        if detected_diff.is_none() {
+            let mut sum_b = 0u64;
+            let mut sum_g = 0u64;
+            let mut sum_r = 0u64;
+            let count = (diff_region.width * diff_region.height) as usize;
+            for idx in 0..count {
+                let offset = idx * 4;
+                sum_b += diff_region.bgra[offset] as u64;
+                sum_g += diff_region.bgra[offset + 1] as u64;
+                sum_r += diff_region.bgra[offset + 2] as u64;
+            }
+            let mean_b = sum_b as f32 / count as f32;
+            let mean_g = sum_g as f32 / count as f32;
+            let mean_r = sum_r as f32 / count as f32;
+            detected_diff = detect_difficulty_from_bgr((mean_b, mean_g, mean_r), is_openmatch);
         }
-        
-        let mean_b = sum_b as f32 / count as f32;
-        let mean_g = sum_g as f32 / count as f32;
-        let mean_r = sum_r as f32 / count as f32;
-        
-        let detected_diff = detect_difficulty_from_bgr((mean_b, mean_g, mean_r), is_openmatch);
         
         // 2. 모드 감지 (기존 픽셀 템플릿 매칭 재사용)
         let w = badge.width as usize;
@@ -446,6 +473,151 @@ impl OcrDetector {
         }
 
         None
+    }
+
+    /// 난이도 패널 영역을 픽셀 템플릿 패턴 매칭으로 감지합니다.
+    pub fn detect_difficulty_from_pattern(&self, diff_img: &ImageRegion) -> Option<String> {
+        let w = diff_img.width as usize;
+        let h = diff_img.height as usize;
+
+        // 1. 고휘도 이진화 전처리 (sub(45) 적용)
+        let mut max_y = 0u8;
+        let mut y_vals = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) * 4;
+                let b = diff_img.bgra[idx];
+                let g = diff_img.bgra[idx + 1];
+                let r = diff_img.bgra[idx + 2];
+                let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
+                y_vals[y * w + x] = y_val;
+                if y_val > max_y {
+                    max_y = y_val;
+                }
+            }
+        }
+
+        let threshold = if max_y > 80 {
+            let margin = if max_y < 150 { 20 } else { 45 };
+            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(margin))
+        } else {
+            180
+        };
+
+        let mut binary = vec![0u8; w * h];
+        let mut active_count = 0usize;
+        for idx in 0..(w * h) {
+            let is_active = y_vals[idx] >= threshold;
+            binary[idx] = if is_active { 255 } else { 0 };
+            if is_active {
+                active_count += 1;
+            }
+        }
+
+        // 전체 픽셀의 40% 이상이 활성화되어 있다면 (즉, 배경이 더 밝은 선곡창/오픈매치 등) 비트 반전
+        if active_count > (w * h * 4) / 10 {
+            for val in &mut binary {
+                *val = if *val == 255 { 0 } else { 255 };
+            }
+        }
+
+        // 좌우 여백 제거를 통한 글자 경계 크롭
+        let mut x_start = 0usize;
+        let mut x_end = w;
+        let mut found_start = false;
+        for x in 0..w {
+            let mut col_has_pixels = false;
+            for y in 0..h {
+                if binary[y * w + x] == 255 {
+                    col_has_pixels = true;
+                    break;
+                }
+            }
+            if col_has_pixels {
+                x_start = x;
+                found_start = true;
+                break;
+            }
+        }
+        if !found_start {
+            return None;
+        }
+        for x in (0..w).rev() {
+            let mut col_has_pixels = false;
+            for y in 0..h {
+                if binary[y * w + x] == 255 {
+                    col_has_pixels = true;
+                    break;
+                }
+            }
+            if col_has_pixels {
+                x_end = x + 1;
+                break;
+            }
+        }
+
+        let cropped_w = x_end - x_start;
+        if cropped_w < 5 {
+            return None;
+        }
+        
+        let mut cropped_bin = vec![0u8; cropped_w * h];
+        for y in 0..h {
+            for x in 0..cropped_w {
+                cropped_bin[y * cropped_w + x] = binary[y * w + (x_start + x)];
+            }
+        }
+
+        // 20px 세로 높이로 리사이징
+        let target_height = 20usize;
+        let target_width = ((cropped_w as f32 * target_height as f32 / h as f32).round()) as usize;
+        if target_width == 0 {
+            return None;
+        }
+
+        let luma_img = image::GrayImage::from_raw(cropped_w as u32, h as u32, cropped_bin).unwrap();
+        let resized = image::DynamicImage::ImageLuma8(luma_img).resize_exact(target_width as u32, target_height as u32, image::imageops::FilterType::Lanczos3);
+        let luma_resized = resized.to_luma8();
+
+        let mut current_mask = Vec::new();
+        for y in 0..target_height {
+            for x in 0..target_width {
+                let pixel = luma_resized.get_pixel(x as u32, y as u32)[0];
+                current_mask.push(if pixel >= 128 { 1 } else { 0 });
+            }
+        }
+
+        // 4가지 난이도 템플릿과 대조하여 최적 해밍 매칭 검출
+        let mut best_label = None;
+        let mut best_score = 0.0f32;
+
+        for t in crate::diff_templates::DIFF_TEMPLATES {
+
+            let t_img = image::GrayImage::from_raw(t.width as u32, t.height as u32, t.mask.iter().map(|&v| if v == 1 { 255 } else { 0 }).collect()).unwrap();
+            let t_resized = image::DynamicImage::ImageLuma8(t_img).resize_exact(target_width as u32, target_height as u32, image::imageops::FilterType::Lanczos3);
+            let t_luma = t_resized.to_luma8();
+
+            let mut matches = 0usize;
+            let total = target_width * target_height;
+            for y in 0..target_height {
+                for x in 0..target_width {
+                    let v1 = current_mask[y * target_width + x];
+                    let v2 = if t_luma.get_pixel(x as u32, y as u32)[0] >= 128 { 1 } else { 0 };
+                    if v1 == v2 {
+                        matches += 1;
+                    }
+                }
+            }
+            let score = matches as f32 / total as f32;
+            if score > 0.82 && score > best_score {
+                best_score = score;
+                best_label = Some(t.name.to_string());
+            }
+        }
+
+
+
+        best_label
     }
 
     pub fn recognize_text_color(&self, region: &ImageRegion) -> Option<String> {
