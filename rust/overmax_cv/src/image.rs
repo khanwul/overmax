@@ -388,13 +388,10 @@ pub fn match_character(
     let mut best_char = None;
     let mut best_score = 0.0f32;
 
-    println!("      [Match Character Debug] Segment size: {}x{} -> target_w={}", char_w, char_h, target_w);
-
     for t in templates {
         // 폭이 너무 크게 차이나는 템플릿 배제 (오인식 억제 필터 - 자간 뭉개짐 편차를 고려하여 6px로 완화)
         let diff_w = (t.width as isize - target_w as isize).abs();
         if diff_w > 6 {
-            println!("        Template '{}' skipped due to width diff (t.w={}, seg.w={}, diff={})", t.char_val, t.width, target_w, diff_w);
             continue;
         }
 
@@ -413,15 +410,12 @@ pub fn match_character(
         }
 
         let match_rate = (total_pixels - diff_pixels) as f32 / total_pixels as f32;
-        println!("        Template '{}': match_rate={:.2}% (diff_w={})", t.char_val, match_rate * 100.0, diff_w);
         
         if match_rate > best_score {
             best_score = match_rate;
             best_char = Some(t.char_val);
         }
     }
-
-    println!("      Best match: {:?} with score {:.2}%", best_char, best_score * 100.0);
 
     // 최소 매칭 한계선인 65% 이상일 때만 정상 분류 값으로 통과
     if best_score >= 0.65 {
