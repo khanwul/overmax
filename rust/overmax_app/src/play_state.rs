@@ -135,24 +135,7 @@ impl PlayStateDetector {
                                 diff = d;
                             }
                         }
-                        if (mode.is_none() || diff.is_none()) && scene == SceneType::ResultOpen2 {
-                            if let Some(logo_roi) = rois.get_roi("logo") {
-                                if let Some(logo_img) = crop_roi(frame, logo_roi) {
-                                    if let Some(txt) = ocr.recognize_text_all_passes(&logo_img) {
-                                        if mode.is_none() {
-                                            mode = ocr.parse_mode_from_text(&txt);
-                                        }
-                                        if diff.is_none() {
-                                            let norm = txt.to_lowercase();
-                                            if norm.contains("sc") { diff = Some("SC".to_string()); }
-                                            else if norm.contains("mx") || norm.contains("maximum") || norm.contains("max") { diff = Some("MX".to_string()); }
-                                            else if norm.contains("hd") || norm.contains("hard") { diff = Some("HD".to_string()); }
-                                            else if norm.contains("nm") || norm.contains("normal") { diff = Some("NM".to_string()); }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+
                     }
                     _ => {}
                 }

@@ -378,28 +378,7 @@ impl OcrDetector {
             }
         }
 
-        // 템플릿 매칭으로 모드를 구했다면 바로 리턴
-        if let Some(m) = matched_mode {
-            return (Some(m), detected_diff);
-        }
-
-        // 만약 매칭에 실패했으면 Windows OCR로 최종 안전 폴백
-        if let Ok(text) = self.engine.recognize_logo_color(badge) {
-            let mode = self.parse_mode_from_text(&text);
-            let diff = if detected_diff.is_some() {
-                detected_diff
-            } else {
-                let norm = text.to_lowercase();
-                if norm.contains("sc") { Some("SC".to_string()) }
-                else if norm.contains("mx") || norm.contains("maximum") || norm.contains("max") { Some("MX".to_string()) }
-                else if norm.contains("hd") || norm.contains("hard") { Some("HD".to_string()) }
-                else if norm.contains("nm") || norm.contains("normal") { Some("NM".to_string()) }
-                else { None }
-            };
-            (mode, diff)
-        } else {
-            (None, detected_diff)
-        }
+        (matched_mode, detected_diff)
     }
 
     /// Freestyle 결과창 모드 영역을 템플릿 매칭으로 판독합니다.
@@ -467,10 +446,7 @@ impl OcrDetector {
             }
         }
 
-        // 매칭 실패 시 Windows OCR로 폴백
-        if let Ok(text) = self.engine.recognize_logo_color(mode_img) {
-            return self.parse_mode_from_text(&text);
-        }
+
 
         None
     }
