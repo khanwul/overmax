@@ -7,6 +7,7 @@ use overmax_app::roi::RoiManager;
 use overmax_app::ocr_engine::OcrDetector;
 use overmax_app::frame_utils::crop_roi;
 use overmax_core::SceneType;
+use overmax_data::ImageIndexDb;
 
 fn load_frame(path: &Path) -> Option<CapturedFrame> {
     let img = match image::open(path) {
@@ -17,6 +18,7 @@ fn load_frame(path: &Path) -> Option<CapturedFrame> {
         }
     };
     let (w, h) = img.dimensions();
+    println!("      [Image Resolution] Original size: {}x{}", w, h);
     // 1920x1080 리사이즈 (hd_* 파일들의 해상도가 FHD가 아닐 경우 대비)
     let img_resized = if w != 1920 || h != 1080 {
         img.resize_exact(1920, 1080, image::imageops::FilterType::Lanczos3)
@@ -35,6 +37,77 @@ fn load_frame(path: &Path) -> Option<CapturedFrame> {
     })
 }
 
+fn check_open_match_badge(frame: &CapturedFrame, ocr: &OcrDetector, rois: &RoiManager) -> Option<SceneType> {
+    let open3_badge_roi = rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen3);
+    let open2_badge_roi = rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen2);
+
+    // 1. Fast Color-based OCR Pass
+    let mut o3_m = false;
+    let mut o2_m = false;
+
+    if let Some(roi) = open3_badge_roi {
+        if let Some(img) = crop_roi(frame, roi) {
+            if let Some(txt) = ocr.recognize_text_color(&img) {
+                if ocr.contains_mode_keyword(&txt) {
+                    o3_m = true;
+                }
+            }
+        }
+    }
+
+    if !o3_m {
+        if let Some(roi) = open2_badge_roi {
+            if let Some(img) = crop_roi(frame, roi) {
+                if let Some(txt) = ocr.recognize_text_color(&img) {
+                    if ocr.contains_mode_keyword(&txt) {
+                        o2_m = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if o3_m && !o2_m {
+        return Some(SceneType::ResultOpen3);
+    }
+    if o2_m && !o3_m {
+        return Some(SceneType::ResultOpen2);
+    }
+
+    // 2. Slow Multi-pass OCR Fallback
+    let mut o3_all = false;
+    if let Some(roi) = open3_badge_roi {
+        if let Some(img) = crop_roi(frame, roi) {
+            if let Some(txt) = ocr.recognize_text_all_passes(&img) {
+                if ocr.contains_mode_keyword(&txt) {
+                    o3_all = true;
+                }
+            }
+        }
+    }
+
+    let mut o2_all = false;
+    if !o3_all {
+        if let Some(roi) = open2_badge_roi {
+            if let Some(img) = crop_roi(frame, roi) {
+                if let Some(txt) = ocr.recognize_text_all_passes(&img) {
+                    if ocr.contains_mode_keyword(&txt) {
+                        o2_all = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if o3_all && !o2_all {
+        Some(SceneType::ResultOpen3)
+    } else if o2_all && !o3_all {
+        Some(SceneType::ResultOpen2)
+    } else {
+        None
+    }
+}
+
 fn detect_scene_from_logo(frame: &CapturedFrame, ocr: &OcrDetector, rois: &RoiManager) -> SceneType {
     let logo_roi = match rois.get_roi("logo") {
         Some(roi) => roi,
@@ -44,8 +117,44 @@ fn detect_scene_from_logo(frame: &CapturedFrame, ocr: &OcrDetector, rois: &RoiMa
         Some(img) => img,
         None => return SceneType::Unknown,
     };
-    let (scene, raw_text, _) = ocr.detect_logo(&logo_img);
+    let (mut scene, raw_text, _) = ocr.detect_logo(&logo_img);
     println!("      [Logo OCR] raw: '{}', scene: {:?}", raw_text.trim(), scene);
+    
+    // 1단계 오픈매치 배지 OCR 폴백
+    if scene == SceneType::Unknown {
+        if let Some(fallback_scene) = check_open_match_badge(frame, ocr, rois) {
+            scene = fallback_scene;
+            println!("      Bypassed logo OCR: Result screen detected via open match badge OCR!");
+        }
+    }
+    
+    // 2단계 엣지 디텍션 폴백 (실제 DetectionPipeline과 동일한 엣지 구원 로직)
+    if scene == SceneType::Unknown {
+        if let Some(jacket_roi) = rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle) {
+            let margin = 8;
+            let ext_roi = overmax_app::roi::RoiRect {
+                x1: jacket_roi.x1 - margin,
+                y1: jacket_roi.y1 - margin,
+                x2: jacket_roi.x2 + margin,
+                y2: jacket_roi.y2 + margin,
+            };
+            if let Some(ext_img) = crop_roi(frame, ext_roi) {
+                if let Ok(edge_strength) = overmax_cv::detect_rect_edges(
+                    &ext_img.bgra,
+                    ext_img.width as usize,
+                    ext_img.height as usize,
+                    margin as usize,
+                ) {
+                    println!("      [Jacket Edge Detection] edge strength: {:.2}", edge_strength);
+                    if edge_strength >= 15.0 {
+                        scene = SceneType::ResultFreestyle;
+                        println!("      Bypassed logo OCR: Result screen detected via jacket edge strength!");
+                    }
+                }
+            }
+        }
+    }
+    
     scene
 }
 
@@ -103,15 +212,16 @@ fn save_badge_crop(frame: &CapturedFrame, rois: &RoiManager, scene: SceneType, o
 fn main() {
     let mut paths: Vec<PathBuf> = Vec::new();
     
-    // 1. converted 스크린샷 폴더 수집
-    let screenshots_dir = Path::new("scratch/screenshots/converted");
+    // 1. screenshots 폴더 수집
+    let screenshots_dir = Path::new("scratch/screenshots");
     if screenshots_dir.exists() {
         if let Ok(entries) = fs::read_dir(screenshots_dir) {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("png") {
+                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                if ext == "png" || ext == "jpg" || ext == "jpeg" {
                     let fname = path.file_name().unwrap().to_string_lossy().to_string();
-                    if !fname.contains("_mcbadge_") {
+                    if !fname.contains("_mcbadge_") && !fname.starts_with("cropped_") {
                         paths.push(path);
                     }
                 }
@@ -119,15 +229,18 @@ fn main() {
         }
     }
     
-    // 2. scratch/hd_* 파일 수집
+    // 2. scratch 파일 수집
     let scratch_dir = Path::new("scratch");
     if scratch_dir.exists() {
         if let Ok(entries) = fs::read_dir(scratch_dir) {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
-                let fname = path.file_name().unwrap().to_string_lossy().to_lowercase();
-                if fname.starts_with("hd_") && (fname.ends_with(".png") || fname.ends_with(".jpg")) {
-                    paths.push(path);
+                if path.is_file() {
+                    let fname = path.file_name().unwrap().to_string_lossy().to_lowercase();
+                    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                    if (ext == "png" || ext == "jpg" || ext == "jpeg") && !fname.contains("_mcbadge_") {
+                        paths.push(path);
+                    }
                 }
             }
         }
@@ -138,6 +251,12 @@ fn main() {
     
     println!("--- Initializing OCR Detector ---");
     let ocr = OcrDetector::new();
+    
+    let db_path = "cache/image_index.db";
+    let mut image_db = ImageIndexDb::new(db_path, 0.6);
+    let db_loaded = image_db.load().is_ok();
+    println!("--- Image DB Loaded: {} ---", db_loaded);
+    let matcher = image_db.matcher();
     
     for path in paths {
         let filename = path.file_name().unwrap().to_string_lossy().to_string();
@@ -193,11 +312,190 @@ fn main() {
         save_badge_crop(&frame, &rois, scene, &filename);
         
         // Rate/Score 출력 테스트도 함께 수행
-        run_roi_test(&frame, &ocr, &rois, scene);
+        run_roi_test(&frame, &ocr, &rois, scene, &matcher, &filename);
     }
 }
 
-fn run_roi_test(frame: &CapturedFrame, ocr: &OcrDetector, rois: &RoiManager, scene: SceneType) {
+fn run_roi_test(
+    frame: &CapturedFrame,
+    ocr: &OcrDetector,
+    rois: &RoiManager,
+    scene: SceneType,
+    matcher: &overmax_data::JacketMatcher,
+    filename: &str,
+) {
+    // 1. Jacket Matching (song_id) 테스트
+    if let Some(jacket_roi) = rois.get_roi("jacket") {
+        if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
+            // 디버그 이미지 저장
+            let mut bgra = jacket_img.bgra.clone();
+            for chunk in bgra.chunks_exact_mut(4) { chunk.swap(0, 2); }
+            if let Some(buf) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(jacket_img.width as u32, jacket_img.height as u32, bgra) {
+                let dynamic_img = image::DynamicImage::ImageRgba8(buf);
+                dynamic_img.save(format!("scratch/screenshots/debug_jacket_{}", filename)).ok();
+            }
+
+            if let Some(match_res) = matcher.match_jacket(
+                &jacket_img.bgra,
+                jacket_img.width as usize,
+                jacket_img.height as usize,
+                4,
+            ) {
+                println!(
+                    "    Jacket Matching Result: song_id={:?}, similarity={:.4}",
+                    match_res.image_id.parse::<u32>().ok(),
+                    match_res.similarity
+                );
+            } else {
+                println!("    Jacket Matching Result: No Match");
+            }
+        } else {
+            println!("    Jacket Matching Result: Crop Failed");
+        }
+    } else {
+        println!("    Jacket Matching Result: ROI 'jacket' Missing");
+    }
+
+    // 2. Max Combo 테스트
+    let is_result = matches!(
+        scene,
+        SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
+    );
+    let is_mc = if is_result {
+        overmax_app::play_state::detect_max_combo_result(frame, rois)
+    } else {
+        overmax_app::play_state::detect_max_combo(frame, rois)
+    };
+    println!("    Max Combo Badge Detected: {}", is_mc);
+
+    // 3. Mode & Difficulty 테스트
+
+    let mut detected_mode = None;
+    let mut detected_diff = None;
+
+    if is_result {
+        match scene {
+            SceneType::ResultFreestyle => {
+                if let Some(mode_roi) = rois.get_roi("mode") {
+                    if let Some(mode_img) = crop_roi(frame, mode_roi) {
+                        // 디버그 이미지 저장
+                        let mut bgra = mode_img.bgra.clone();
+                        for chunk in bgra.chunks_exact_mut(4) { chunk.swap(0, 2); }
+                        if let Some(buf) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(mode_img.width as u32, mode_img.height as u32, bgra) {
+                            let dynamic_img = image::DynamicImage::ImageRgba8(buf);
+                            dynamic_img.save(format!("scratch/screenshots/debug_mode_{}", filename)).ok();
+                        }
+
+                        if let Some(text) = ocr.recognize_text_all_passes(&mode_img) {
+                            let norm = text.to_lowercase();
+                            if norm.contains('4') { detected_mode = Some("4B".to_string()); }
+                            else if norm.contains('5') { detected_mode = Some("5B".to_string()); }
+                            else if norm.contains('6') { detected_mode = Some("6B".to_string()); }
+                            else if norm.contains('8') { detected_mode = Some("8B".to_string()); }
+                            println!("    Mode OCR text: '{}' -> Resolved: {:?}", text.trim(), detected_mode);
+                        }
+                    }
+                }
+                if let Some(diff_roi) = rois.get_roi("diff_panel") {
+                    if let Some(diff_img) = crop_roi(frame, diff_roi) {
+                        // 디버그 이미지 저장
+                        let mut bgra = diff_img.bgra.clone();
+                        for chunk in bgra.chunks_exact_mut(4) { chunk.swap(0, 2); }
+                        if let Some(buf) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(diff_img.width as u32, diff_img.height as u32, bgra) {
+                            let dynamic_img = image::DynamicImage::ImageRgba8(buf);
+                            dynamic_img.save(format!("scratch/screenshots/debug_diff_panel_{}", filename)).ok();
+                        }
+
+                        if let Some(text) = ocr.recognize_text_all_passes(&diff_img) {
+                            let norm = text.to_lowercase();
+                            if norm.contains("hard") || norm.contains("hd") { detected_diff = Some("HD".to_string()); }
+                            else if norm.contains("maximum") || norm.contains("mx") { detected_diff = Some("MX".to_string()); }
+                            else if norm.contains("sc") { detected_diff = Some("SC".to_string()); }
+                            else if norm.contains("normal") || norm.contains("nm") { detected_diff = Some("NM".to_string()); }
+                            println!("    Difficulty OCR text: '{}' -> Resolved: {:?}", text.trim(), detected_diff);
+                        }
+                    }
+                }
+            }
+            SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
+                let mut badge_text = None;
+                if let Some(badge_roi) = rois.get_roi("mode_diff_badge") {
+                    if let Some(badge_img) = crop_roi(frame, badge_roi) {
+                        // 디버그 이미지 저장
+                        let mut bgra = badge_img.bgra.clone();
+                        for chunk in bgra.chunks_exact_mut(4) { chunk.swap(0, 2); }
+                        if let Some(buf) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(badge_img.width as u32, badge_img.height as u32, bgra) {
+                            let dynamic_img = image::DynamicImage::ImageRgba8(buf);
+                            dynamic_img.save(format!("scratch/screenshots/debug_mode_diff_badge_{}", filename)).ok();
+                        }
+
+                        let txt_color = ocr.recognize_text_color(&badge_img);
+                        let txt_bin_normal = ocr.recognize_text_binarized(&badge_img, false);
+                        let txt_bin_invert = ocr.recognize_text_binarized(&badge_img, true);
+                        println!("      [Badge OCR Debug] color: {:?}, bin_normal: {:?}, bin_invert: {:?}", txt_color, txt_bin_normal, txt_bin_invert);
+
+                        // 우측 난이도 박스 영역의 평균 BGR 분석
+                        let w = badge_img.width as usize;
+                        let h = badge_img.height as usize;
+                        let x_start = (w as f32 * 0.78) as usize;
+                        let x_end = (w as f32 * 0.96) as usize;
+                        let y_start = (h as f32 * 0.15) as usize;
+                        let y_end = (h as f32 * 0.85) as usize;
+                        let mut sum_b = 0u64;
+                        let mut sum_g = 0u64;
+                        let mut sum_r = 0u64;
+                        let mut count = 0u64;
+                        for y in y_start..y_end {
+                            for x in x_start..x_end {
+                                let idx = (y * w + x) * 4;
+                                sum_b += badge_img.bgra[idx] as u64;
+                                sum_g += badge_img.bgra[idx + 1] as u64;
+                                sum_r += badge_img.bgra[idx + 2] as u64;
+                                count += 1;
+                            }
+                        }
+                        if count > 0 {
+                            let mean_b = sum_b as f32 / count as f32;
+                            let mean_g = sum_g as f32 / count as f32;
+                            let mean_r = sum_r as f32 / count as f32;
+                            println!("      [Badge RGB Analysis] x_range={}-{}, mean_BGR=({:.1}, {:.1}, {:.1})", x_start, x_end, mean_b, mean_g, mean_r);
+                        }
+
+                        if let Some(txt) = ocr.recognize_text_all_passes(&badge_img) {
+                            badge_text = Some(txt);
+                        }
+                    }
+                }
+                if badge_text.is_none() && scene == SceneType::ResultOpen2 {
+                    if let Some(logo_roi) = rois.get_roi("logo") {
+                        if let Some(logo_img) = crop_roi(frame, logo_roi) {
+                            if let Some(txt) = ocr.recognize_text_all_passes(&logo_img) {
+                                badge_text = Some(txt);
+                            }
+                        }
+                    }
+                }
+
+                if let Some(text) = badge_text {
+                    detected_mode = ocr.parse_mode_from_text(&text);
+                    let norm = text.to_lowercase();
+                    if norm.contains("sc") { detected_diff = Some("SC".to_string()); }
+                    else if norm.contains("mx") || norm.contains("maximum") || norm.contains("max") || norm.contains('w') || norm.contains('j') { detected_diff = Some("MX".to_string()); }
+                    else if norm.contains("hd") || norm.contains("hard") { detected_diff = Some("HD".to_string()); }
+                    else if norm.contains("nm") || norm.contains("normal") { detected_diff = Some("NM".to_string()); }
+                    println!("    Badge/Logo OCR text: '{}' -> Resolved Mode: {:?}, Resolved Diff: {:?}", text.trim(), detected_mode, detected_diff);
+                }
+            }
+            _ => {}
+        }
+    } else {
+        // Song select (Freestyle / OpenMatch)
+        detected_mode = overmax_app::play_state::detect_button_mode(frame, rois);
+        let (d, conf) = overmax_app::play_state::detect_difficulty(frame, rois);
+        detected_diff = d;
+        println!("    Detected Mode from color: {:?}, Diff from brightness: {:?} (confident: {})", detected_mode, detected_diff, conf);
+    }
+
     // Rate ROI 테스트
     let mut rate_val: Option<f32> = None;
     if let Some(rate_roi) = rois.get_roi("rate") {
@@ -220,10 +518,6 @@ fn run_roi_test(frame: &CapturedFrame, ocr: &OcrDetector, rois: &RoiManager, sce
     
     // 크로스 검증 로직 모사 및 보강 테스트
     if score_val.is_some() || rate_val.is_some() {
-        let is_result = matches!(
-            scene,
-            SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
-        );
         let is_song_select = matches!(scene, SceneType::Freestyle | SceneType::OpenMatch);
         
         if is_result || is_song_select {

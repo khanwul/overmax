@@ -111,6 +111,10 @@ impl OcrDetector {
         self.engine.recognize_logo_color(region).ok()
     }
 
+    pub fn recognize_text_binarized(&self, region: &ImageRegion, force_invert: bool) -> Option<String> {
+        self.engine.recognize_logo(region, force_invert, true).ok()
+    }
+
     /// 텍스트 내에 유효한 버튼 모드 키워드가 포함되어 있는지 판단합니다.
     pub fn contains_mode_keyword(&self, text: &str) -> bool {
         let norm = text.to_lowercase();
