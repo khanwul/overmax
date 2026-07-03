@@ -175,7 +175,7 @@ impl PlayStateDetector {
                 if let Some(rate_roi) = rois.get_roi("rate") {
                     let is_rate_cached = self.last_rate_result.0.is_some();
                     let should_ocr = if is_result {
-                        !is_rate_cached
+                        true
                     } else {
                         metadata_changed || !is_rate_cached
                     };
@@ -218,7 +218,20 @@ impl PlayStateDetector {
                             }
 
                             println!("    [detect] rate OCR run. rate={:?}, text='{}'", rate_res.0, rate_res.1);
-                            self.last_rate_result = rate_res;
+                            
+                            let update_cache = if is_result {
+                                match (rate_res.0, self.last_rate_result.0) {
+                                    (Some(new_r), Some(old_r)) => new_r >= old_r,
+                                    (Some(_), None) => true,
+                                    _ => false,
+                                }
+                            } else {
+                                true
+                            };
+
+                            if update_cache {
+                                self.last_rate_result = rate_res;
+                            }
                         }
                     }
 
