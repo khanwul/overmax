@@ -33,4 +33,5 @@ pub mod window_tracker;
 pub mod digit_templates;
 pub mod result_mode_templates;
 pub mod diff_templates;
+pub mod result_diff_templates;
 

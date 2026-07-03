@@ -427,6 +427,66 @@ impl OcrDetector {
         best_label
     }
 
+    /// 결과 화면 전용 난이도 패널 영역을 템플릿 매칭으로 감지합니다.
+    pub fn detect_result_difficulty(&self, diff_img: &ImageRegion) -> Option<String> {
+        let w = diff_img.width as usize;
+        let h = diff_img.height as usize;
+        let total = w * h;
+        if total == 0 {
+            return None;
+        }
+
+        // 동적 임계값 구하기
+        let mut max_y = 0u8;
+        let mut min_y = 255u8;
+        let mut luma_vals = vec![0u8; total];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) * 4;
+                let b = diff_img.bgra[idx];
+                let g = diff_img.bgra[idx + 1];
+                let r = diff_img.bgra[idx + 2];
+                let luma = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
+                luma_vals[y * w + x] = luma;
+                if luma > max_y { max_y = luma; }
+                if luma < min_y { min_y = luma; }
+            }
+        }
+
+        let threshold = if max_y - min_y > 30 {
+            (min_y as f32 + (max_y - min_y) as f32 * 0.55) as u8
+        } else {
+            120u8
+        };
+
+        let mut binary = vec![0u8; total];
+        for i in 0..total {
+            binary[i] = if luma_vals[i] >= threshold { 1 } else { 0 };
+        }
+
+        let mut best_score = 0.0f32;
+        let mut best_label: Option<String> = None;
+
+        for t in &crate::result_diff_templates::RESULT_DIFF_TEMPLATES {
+            if t.width != w || t.height != h {
+                continue;
+            }
+            let mut matches = 0usize;
+            for i in 0..total {
+                if binary[i] == t.mask[i] {
+                    matches += 1;
+                }
+            }
+            let score = matches as f32 / total as f32;
+            if score > 0.80 && score > best_score {
+                best_score = score;
+                best_label = Some(t.name.to_string());
+            }
+        }
+
+        best_label
+    }
+
     /// 난이도 패널 영역을 픽셀 템플릿 패턴 매칭으로 감지합니다.
     pub fn detect_difficulty_from_pattern(&self, diff_img: &ImageRegion) -> Option<String> {
         let w = diff_img.width as usize;

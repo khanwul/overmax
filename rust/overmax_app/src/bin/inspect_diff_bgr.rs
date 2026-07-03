@@ -1,25 +1,23 @@
 use std::path::Path;
 use image::GenericImageView;
 
-/// 결과 화면 전용 모드 숫자 템플릿 생성기
-/// ROI: (78, 28, 50, 68) — x_start, y_start, width, height (절대 좌표, 1920x1080 기준)
+/// 결과 화면 전용 난이도 패널 템플릿 생성기 (유저 Ground Truth 기준 + 동적 임계값 이진화)
+/// ROI: (709, 86, 90, 18) - x_start, y_start, width, height (FHD 1920x1080 기준)
 fn main() {
-    let samples: Vec<(&str, &str)> = vec![
-        ("4", "scratch/screenshots/20260701164242_1.jpg"),
-        ("5", "scratch/screenshots/1783012896.jpg"),
-        ("6", "scratch/screenshots/20260701165356_1.jpg"),
-        ("8", "scratch/screenshots/20260703020235_1.jpg"),
+    let samples = vec![
+        ("NM", "scratch/screenshots/20260702233605_1.jpg"),
+        ("HD", "scratch/screenshots/20260702233310_1.jpg"),
+        ("MX", "scratch/screenshots/20260702233900_1.jpg"),
+        ("SC", "scratch/screenshots/20260703020235_1.jpg"),
     ];
 
-    let roi_x = 78;
-    let roi_y = 28;
-    let roi_w = 50;
-    let roi_h = 68;
-    let threshold: u8 = 120;
+    let roi_x = 709;
+    let roi_y = 86;
+    let roi_w = 90;
+    let roi_h = 18;
 
-    println!("=== Result Screen Mode Digit Template Generator ===");
+    println!("=== Result Screen Difficulty Template Generator ===");
     println!("ROI: x={}, y={}, w={}, h={}", roi_x, roi_y, roi_w, roi_h);
-    println!("Threshold: {}", threshold);
     println!();
 
     for (label, path) in &samples {
@@ -39,12 +37,32 @@ fn main() {
 
         // ROI 크롭
         let cropped = img_resized.crop_imm(roi_x, roi_y, roi_w, roi_h);
-        let crop_path = format!("scratch/screenshots/result_mode_digit_{}.png", label);
+        let crop_path = format!("scratch/screenshots/result_diff_panel_{}.png", label);
         cropped.save(&crop_path).ok();
-        println!("[{}] Saved raw crop to: {}", label, crop_path);
 
-        // 이진화
+        // 동적 임계값 구하기
         let gray = cropped.to_luma8();
+        let mut max_y = 0u8;
+        let mut min_y = 255u8;
+        for y in 0..roi_h {
+            for x in 0..roi_w {
+                let v = gray.get_pixel(x, y)[0];
+                if v > max_y { max_y = v; }
+                if v < min_y { min_y = v; }
+            }
+        }
+
+        // 임계값 = (min_y + max_y) / 2 또는 max_y * 0.75 등의 동적 결정
+        // NORMAL, HARD, MAXIMUM, SC 의 글자 색상이 배경색 대비 밝으므로, 적정 지점을 찾음
+        let threshold = if max_y - min_y > 30 {
+            (min_y as f32 + (max_y - min_y) as f32 * 0.55) as u8
+        } else {
+            120u8
+        };
+
+        println!("[{}] Path: {}, Min Luma: {}, Max Luma: {}, Auto Threshold: {}", label, path, min_y, max_y, threshold);
+
+        // 이진화 저장
         let mut binary = image::GrayImage::new(roi_w, roi_h);
         for y in 0..roi_h {
             for x in 0..roi_w {
@@ -52,13 +70,12 @@ fn main() {
                 binary.put_pixel(x, y, image::Luma([if v >= threshold { 255 } else { 0 }]));
             }
         }
-        let bin_path = format!("scratch/screenshots/result_mode_digit_{}_bin.png", label);
+        let bin_path = format!("scratch/screenshots/result_diff_panel_{}_bin.png", label);
         binary.save(&bin_path).ok();
-        println!("[{}] Saved binarized to: {}", label, bin_path);
 
-        // 마스크 배열 출력 (Rust 코드 생성용)
+        // 마스크 배열 출력
         println!("[{}] Mask ({}x{}):", label, roi_w, roi_h);
-        print!("const RESULT_MODE_MASK_{}: [u8; {}] = [\n", label, roi_w as usize * roi_h as usize);
+        print!("const RESULT_DIFF_MASK_{}: [u8; {}] = [\n", label, roi_w as usize * roi_h as usize);
         for y in 0..roi_h {
             print!("    ");
             for x in 0..roi_w {

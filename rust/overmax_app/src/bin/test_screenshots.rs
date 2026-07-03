@@ -223,8 +223,12 @@ fn main() {
                 let path = entry.path();
                 let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
                 if ext == "png" || ext == "jpg" || ext == "jpeg" {
-                    let fname = path.file_name().unwrap().to_string_lossy().to_string();
-                    if !fname.contains("_mcbadge_") && !fname.starts_with("cropped_") {
+                    let fname = path.file_name().unwrap().to_string_lossy().to_lowercase();
+                    if !fname.contains("_mcbadge_") 
+                        && !fname.contains("cropped_") 
+                        && !fname.contains("debug_")
+                        && !fname.contains("result_")
+                    {
                         paths.push(path);
                     }
                 }
@@ -241,7 +245,12 @@ fn main() {
                 if path.is_file() {
                     let fname = path.file_name().unwrap().to_string_lossy().to_lowercase();
                     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-                    if (ext == "png" || ext == "jpg" || ext == "jpeg") && !fname.contains("_mcbadge_") {
+                    if (ext == "png" || ext == "jpg" || ext == "jpeg") 
+                        && !fname.contains("_mcbadge_") 
+                        && !fname.contains("cropped_")
+                        && !fname.contains("debug_") 
+                        && !fname.contains("result_") 
+                    {
                         paths.push(path);
                     }
                 }
@@ -270,6 +279,10 @@ fn main() {
             println!("  - Failed to load image. Skipping.");
             continue;
         };
+        if frame.width < 1920 {
+            println!("  - Resolution width {} < 1920 (likely a crop/debug image). Skipping.", frame.width);
+            continue;
+        }
         let mut rois = RoiManager::new(frame.width, frame.height);
         
         // 1. Logo 분석을 통해 씬 판별
@@ -403,27 +416,7 @@ fn run_roi_test(
                             dynamic_img.save(format!("scratch/screenshots/diff_rois/result_freestyle_diff_{}", filename)).ok();
                         }
 
-                        detected_diff = ocr.detect_difficulty_from_pattern(&diff_img);
-                        if detected_diff.is_none() {
-                            let mut sum_b = 0u64;
-                            let mut sum_g = 0u64;
-                            let mut sum_r = 0u64;
-                            let count = diff_img.width as usize * diff_img.height as usize;
-                            for y in 0..diff_img.height as usize {
-                                for x in 0..diff_img.width as usize {
-                                    let idx = (y * diff_img.width as usize + x) * 4;
-                                    sum_b += diff_img.bgra[idx] as u64;
-                                    sum_g += diff_img.bgra[idx + 1] as u64;
-                                    sum_r += diff_img.bgra[idx + 2] as u64;
-                                }
-                            }
-                            if count > 0 {
-                                let mean_b = sum_b as f32 / count as f32;
-                                let mean_g = sum_g as f32 / count as f32;
-                                let mean_r = sum_r as f32 / count as f32;
-                                detected_diff = overmax_app::ocr_engine::detect_difficulty_from_bgr((mean_b, mean_g, mean_r), false);
-                            }
-                        }
+                        detected_diff = ocr.detect_result_difficulty(&diff_img);
                         println!("    Difficulty BGR/Pattern Match: Resolved: {:?}", detected_diff);
                     }
                 }

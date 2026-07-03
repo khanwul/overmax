@@ -112,25 +112,7 @@ impl PlayStateDetector {
                         }
                         if let Some(diff_roi) = rois.get_roi("diff_panel") {
                             if let Some(diff_img) = crop_roi(frame, diff_roi) {
-                                let mut sum_b = 0u64;
-                                let mut sum_g = 0u64;
-                                let mut sum_r = 0u64;
-                                let count = diff_img.width as usize * diff_img.height as usize;
-                                for y in 0..diff_img.height as usize {
-                                    for x in 0..diff_img.width as usize {
-                                        let idx = (y * diff_img.width as usize + x) * 4;
-                                        sum_b += diff_img.bgra[idx] as u64;
-                                        sum_g += diff_img.bgra[idx + 1] as u64;
-                                        sum_r += diff_img.bgra[idx + 2] as u64;
-                                    }
-                                }
-                                diff = ocr.detect_difficulty_from_pattern(&diff_img);
-                                if diff.is_none() && count > 0 {
-                                    let mean_b = sum_b as f32 / count as f32;
-                                    let mean_g = sum_g as f32 / count as f32;
-                                    let mean_r = sum_r as f32 / count as f32;
-                                    diff = crate::ocr_engine::detect_difficulty_from_bgr((mean_b, mean_g, mean_r), false);
-                                }
+                                diff = ocr.detect_result_difficulty(&diff_img);
                             }
                         }
                     }
