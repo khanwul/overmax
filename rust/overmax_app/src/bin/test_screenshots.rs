@@ -379,7 +379,7 @@ fn run_roi_test(
     if is_result {
         match scene {
             SceneType::ResultFreestyle => {
-                if let Some(mode_roi) = rois.get_roi("mode") {
+                if let Some(mode_roi) = rois.get_roi("mode_digit") {
                     if let Some(mode_img) = crop_roi(frame, mode_roi) {
                         // 디버그 이미지 저장
                         let mut bgra = mode_img.bgra.clone();

@@ -1,109 +1,73 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use image::GenericImageView;
 
+/// 결과 화면 전용 모드 숫자 템플릿 생성기
+/// ROI: (78, 28, 50, 68) — x_start, y_start, width, height (절대 좌표, 1920x1080 기준)
 fn main() {
-    let dir = Path::new("scratch/screenshots");
-    if !dir.exists() {
-        println!("Folder scratch/screenshots missing!");
-        return;
-    }
-    
-    let mut paths = Vec::new();
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            let fname = path.file_name().unwrap().to_string_lossy().to_string();
-            if fname.starts_with("result_open3_mcbadge_") || fname.starts_with("result_open2_mcbadge_") {
-                paths.push(path);
-            }
+    let samples: Vec<(&str, &str)> = vec![
+        ("4", "scratch/screenshots/20260701164242_1.jpg"),
+        ("5", "scratch/screenshots/1783012896.jpg"),
+        ("6", "scratch/screenshots/20260701165356_1.jpg"),
+        ("8", "scratch/screenshots/20260703020235_1.jpg"),
+    ];
+
+    let roi_x = 78;
+    let roi_y = 28;
+    let roi_w = 50;
+    let roi_h = 68;
+    let threshold: u8 = 120;
+
+    println!("=== Result Screen Mode Digit Template Generator ===");
+    println!("ROI: x={}, y={}, w={}, h={}", roi_x, roi_y, roi_w, roi_h);
+    println!("Threshold: {}", threshold);
+    println!();
+
+    for (label, path) in &samples {
+        let img_path = Path::new(path);
+        if !img_path.exists() {
+            println!("[{}] File not found: {}", label, path);
+            continue;
         }
-    }
-    paths.sort();
-    
-    fs::create_dir_all("scratch/screenshots/diff_bin").ok();
-    
-    println!("=== Exporting Binarized Debug Images ===");
-    for path in paths {
-        let filename = path.file_name().unwrap().to_string_lossy().to_string();
-        let img = match image::open(&path) {
-            Ok(i) => i,
-            Err(_) => continue,
-        };
-        let w = img.width();
-        let h = img.height();
-        
-        let mut rgba = img.to_rgba8().into_raw();
-        for chunk in rgba.chunks_exact_mut(4) {
-            chunk.swap(0, 2);
-        }
-        
-        // 오픈매치 난이도 크롭
-        let crop_w = (w as f32 * 0.14) as usize;
-        let crop_h = h as usize;
-        let x_offset = (w as f32 * 0.81) as usize;
-        let mut cropped_bgra = vec![0u8; crop_w * crop_h * 4];
-        
-        let y_start = 4usize;
-        let y_end = crop_h.saturating_sub(4);
-        
-        for y in y_start..y_end {
-            for x in 0..crop_w {
-                let src_idx = (y * w as usize + (x_offset + x)) * 4;
-                let dst_idx = (y * crop_w + x) * 4;
-                cropped_bgra[dst_idx..dst_idx+4].copy_from_slice(&rgba[src_idx..src_idx+4]);
-            }
-        }
-        
-        // 이진화
-        let mut max_y = 0u8;
-        let mut y_vals = vec![0u8; crop_w * crop_h];
-        for y in 0..crop_h {
-            for x in 0..crop_w {
-                let idx = (y * crop_w + x) * 4;
-                let b = cropped_bgra[idx];
-                let g = cropped_bgra[idx + 1];
-                let r = cropped_bgra[idx + 2];
-                let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
-                y_vals[y * crop_w + x] = y_val;
-                if y_val > max_y {
-                    max_y = y_val;
-                }
-            }
-        }
-        
-        let threshold = if max_y > 80 {
-            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(45))
+
+        let img = image::open(img_path).expect("failed to open image");
+        let (w, h) = img.dimensions();
+        let img_resized = if w != 1920 || h != 1080 {
+            img.resize_exact(1920, 1080, image::imageops::FilterType::Lanczos3)
         } else {
-            180
+            img
         };
-        
-        let mut binary = vec![0u8; crop_w * crop_h];
-        let mut active_count = 0usize;
-        for idx in 0..(crop_w * crop_h) {
-            let is_active = y_vals[idx] >= threshold;
-            binary[idx] = if is_active { 255 } else { 0 };
-            if is_active {
-                active_count += 1;
+
+        // ROI 크롭
+        let cropped = img_resized.crop_imm(roi_x, roi_y, roi_w, roi_h);
+        let crop_path = format!("scratch/screenshots/result_mode_digit_{}.png", label);
+        cropped.save(&crop_path).ok();
+        println!("[{}] Saved raw crop to: {}", label, crop_path);
+
+        // 이진화
+        let gray = cropped.to_luma8();
+        let mut binary = image::GrayImage::new(roi_w, roi_h);
+        for y in 0..roi_h {
+            for x in 0..roi_w {
+                let v = gray.get_pixel(x, y)[0];
+                binary.put_pixel(x, y, image::Luma([if v >= threshold { 255 } else { 0 }]));
             }
         }
-        
-        let mut inverted = false;
-        if active_count > (crop_w * crop_h * 55) / 100 { // 60% -> 55% 로 마진 소폭 조정
-            inverted = true;
-            for val in &mut binary {
-                *val = if *val == 255 { 0 } else { 255 };
+        let bin_path = format!("scratch/screenshots/result_mode_digit_{}_bin.png", label);
+        binary.save(&bin_path).ok();
+        println!("[{}] Saved binarized to: {}", label, bin_path);
+
+        // 마스크 배열 출력 (Rust 코드 생성용)
+        println!("[{}] Mask ({}x{}):", label, roi_w, roi_h);
+        print!("const RESULT_MODE_MASK_{}: [u8; {}] = [\n", label, roi_w as usize * roi_h as usize);
+        for y in 0..roi_h {
+            print!("    ");
+            for x in 0..roi_w {
+                let v = if gray.get_pixel(x, y)[0] >= threshold { 1 } else { 0 };
+                print!("{}, ", v);
             }
+            println!();
         }
-        
-        // 이미지 저장
-        let mut luma_buf = vec![0u8; crop_w * crop_h];
-        for i in 0..(crop_w * crop_h) {
-            luma_buf[i] = binary[i];
-        }
-        let luma_img = image::GrayImage::from_raw(crop_w as u32, crop_h as u32, luma_buf).unwrap();
-        let save_path = format!("scratch/screenshots/diff_bin/bin_{}", filename);
-        luma_img.save(&save_path).ok();
-        println!("Saved debug bin to: {} (inverted={})", save_path, inverted);
+        println!("];");
+        println!();
     }
 }

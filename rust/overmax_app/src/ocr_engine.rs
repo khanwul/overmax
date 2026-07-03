@@ -385,70 +385,46 @@ impl OcrDetector {
     pub fn detect_freestyle_mode(&self, mode_img: &ImageRegion) -> Option<String> {
         let w = mode_img.width as usize;
         let h = mode_img.height as usize;
+        let total = w * h;
+        if total == 0 {
+            return None;
+        }
 
-        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::digit_templates::DIGIT_TEMPLATES.iter().map(|t| {
-            overmax_cv::CvTemplate {
-                char_val: t.char_val,
-                width: t.width,
-                height: t.height,
-                mask: t.mask,
-            }
-        }).collect();
-
-        // 고휘도 이진화 전처리
-        let mut max_y = 0u8;
-        let mut y_vals = vec![0u8; w * h];
+        // 고휘도 이진화 전처리 (0 또는 1)
+        let threshold = 120u8;
+        let mut binary = vec![0u8; total];
         for y in 0..h {
             for x in 0..w {
                 let idx = (y * w + x) * 4;
                 let b = mode_img.bgra[idx];
                 let g = mode_img.bgra[idx + 1];
                 let r = mode_img.bgra[idx + 2];
-                let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
-                y_vals[y * w + x] = y_val;
-                if y_val > max_y {
-                    max_y = y_val;
+                let luma = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
+                binary[y * w + x] = if luma >= threshold { 1 } else { 0 };
+            }
+        }
+
+        let mut best_score = 0.0f32;
+        let mut best_label: Option<String> = None;
+
+        for t in &crate::result_mode_templates::RESULT_MODE_TEMPLATES {
+            if t.width != w || t.height != h {
+                continue;
+            }
+            let mut matches = 0usize;
+            for i in 0..total {
+                if binary[i] == t.mask[i] {
+                    matches += 1;
                 }
             }
-        }
-
-        let threshold = if max_y > 80 {
-            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(38))
-        } else {
-            180
-        };
-
-        let mut binary = vec![0u8; w * h];
-        for idx in 0..(w * h) {
-            binary[idx] = if y_vals[idx] >= threshold { 255 } else { 0 };
-        }
-
-        let segments = match overmax_cv::segment_characters(&binary, w, h) {
-            Ok(segs) => segs,
-            Err(_) => return None,
-        };
-
-        for &(x1, x2) in &segments {
-            let char_w = x2 - x1;
-            let char_h = h;
-            let mut char_bin = vec![0u8; char_w * char_h];
-            for y in 0..char_h {
-                for x in 0..char_w {
-                    char_bin[y * char_w + x] = binary[y * w + (x1 + x)];
-                }
-            }
-
-            if let Ok(Some((ch, _score))) = overmax_cv::match_character(&char_bin, char_w, char_h, &cv_templates) {
-                if ch == '4' { return Some("4B".to_string()); }
-                if ch == '5' { return Some("5B".to_string()); }
-                if ch == '6' { return Some("6B".to_string()); }
-                if ch == '8' { return Some("8B".to_string()); }
+            let score = matches as f32 / total as f32;
+            if score > 0.80 && score > best_score {
+                best_score = score;
+                best_label = Some(t.mode_label.to_string());
             }
         }
 
-
-
-        None
+        best_label
     }
 
     /// 난이도 패널 영역을 픽셀 템플릿 패턴 매칭으로 감지합니다.
@@ -593,7 +569,36 @@ impl OcrDetector {
 
 
 
-        best_label
+        let mut corrected_label = best_label;
+        if let Some(ref label) = corrected_label {
+            if label == "SC" || label == "MX" {
+                let mut sum_b = 0u64;
+                let mut sum_g = 0u64;
+                let mut sum_r = 0u64;
+                let count = w * h;
+                for y in 0..h {
+                    for x in 0..w {
+                        let idx = (y * w + x) * 4;
+                        sum_b += diff_img.bgra[idx] as u64;
+                        sum_g += diff_img.bgra[idx + 1] as u64;
+                        sum_r += diff_img.bgra[idx + 2] as u64;
+                    }
+                }
+                if count > 0 {
+                    let mean_b = sum_b as f32 / count as f32;
+                    let mean_g = sum_g as f32 / count as f32;
+                    let mean_r = sum_r as f32 / count as f32;
+                    
+                    if mean_r > mean_g * 1.3 && mean_b > mean_g * 1.3 {
+                        corrected_label = Some("SC".to_string());
+                    } else if mean_r > mean_g * 1.5 && mean_b < mean_g * 1.2 {
+                        corrected_label = Some("MX".to_string());
+                    }
+                }
+            }
+        }
+
+        corrected_label
     }
 
     pub fn recognize_text_color(&self, region: &ImageRegion) -> Option<String> {

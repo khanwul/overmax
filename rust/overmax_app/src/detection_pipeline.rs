@@ -333,6 +333,14 @@ impl DetectionPipeline {
 
                 if allow_entry {
                     self.last_logo_scene = scene_res;
+                    // ResultFreestyle 확정 시, 로고 OCR raw_text에서 모드를 파싱하여 play_state에 주입
+                    // (결과 화면 폰트가 선곡 화면과 달라 템플릿 매칭이 실패하므로)
+                    if scene_res == SceneType::ResultFreestyle {
+                        if let Some(mode) = self.ocr.parse_mode_from_text(&raw_text) {
+                            println!("    [detect_logo_if_due] Parsed mode '{}' from logo text '{}'", mode, raw_text.trim());
+                            self.play_state.set_logo_mode(mode);
+                        }
+                    }
                 } else {
                     println!("    [detect_logo_if_due] Result screen jacket verification failed. Rejecting scene.");
                     self.result_scene_streak = 0;
