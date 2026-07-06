@@ -120,14 +120,16 @@ impl PlayStateDetector {
                         }
                     }
                     SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
-                        if let Some(badge_roi) = rois.get_roi("mode_diff_badge") {
-                            if let Some(badge_img) = crop_roi(frame, badge_roi) {
-                                let (m, d) = ocr.detect_badge_mode_diff(&badge_img, true);
-                                mode = m;
-                                diff = d;
+                        if let Some(mode_roi) = rois.get_roi("openmatch_mode") {
+                            if let Some(mode_img) = crop_roi(frame, mode_roi) {
+                                mode = ocr.detect_freestyle_mode(&mode_img);
                             }
                         }
-
+                        if let Some(diff_roi) = rois.get_roi("openmatch_diff") {
+                            if let Some(diff_img) = crop_roi(frame, diff_roi) {
+                                diff = ocr.detect_result_difficulty(&diff_img);
+                            }
+                        }
                     }
                     _ => {}
                 }

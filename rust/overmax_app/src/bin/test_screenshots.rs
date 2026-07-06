@@ -38,8 +38,8 @@ fn load_frame(path: &Path) -> Option<CapturedFrame> {
 }
 
 fn check_open_match_badge(frame: &CapturedFrame, ocr: &OcrDetector, rois: &RoiManager) -> Option<SceneType> {
-    let open3_badge_roi = rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen3);
-    let open2_badge_roi = rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen2);
+    let open3_badge_roi = rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen3);
+    let open2_badge_roi = rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen2);
 
     // 1. Fast Color-based OCR Pass
     let mut o3_m = false;
@@ -422,19 +422,14 @@ fn run_roi_test(
                 }
             }
             SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
-                if let Some(badge_roi) = rois.get_roi("mode_diff_badge") {
-                    if let Some(badge_img) = crop_roi(frame, badge_roi) {
-                        // 디버그 이미지 저장
-                        let mut bgra = badge_img.bgra.clone();
-                        for chunk in bgra.chunks_exact_mut(4) { chunk.swap(0, 2); }
-                        if let Some(buf) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(badge_img.width as u32, badge_img.height as u32, bgra) {
-                            let dynamic_img = image::DynamicImage::ImageRgba8(buf);
-                            dynamic_img.save(format!("scratch/screenshots/debug_mode_diff_badge_{}", filename)).ok();
-                        }
-
-                        let (m, d) = ocr.detect_badge_mode_diff(&badge_img, true);
-                        detected_mode = m;
-                        detected_diff = d;
+                if let Some(mode_roi) = rois.get_roi("openmatch_mode") {
+                    if let Some(mode_img) = crop_roi(frame, mode_roi) {
+                        detected_mode = ocr.detect_freestyle_mode(&mode_img);
+                    }
+                }
+                if let Some(diff_roi) = rois.get_roi("openmatch_diff") {
+                    if let Some(diff_img) = crop_roi(frame, diff_roi) {
+                        detected_diff = ocr.detect_result_difficulty(&diff_img);
                     }
                 }
                 if (detected_mode.is_none() || detected_diff.is_none()) && scene == SceneType::ResultOpen2 {

@@ -359,8 +359,8 @@ impl DetectionPipeline {
     }
 
     fn check_open_match_badge(&self, frame: &CapturedFrame) -> Option<SceneType> {
-        let open3_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen3);
-        let open2_badge_roi = self.rois.get_roi_for_scene("mode_diff_badge", SceneType::ResultOpen2);
+        let open3_badge_roi = self.rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen3);
+        let open2_badge_roi = self.rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen2);
 
         // 1. Fast Color-based OCR Pass
         let mut o3_m = false;
