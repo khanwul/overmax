@@ -405,6 +405,102 @@ impl OcrDetector {
         best_label
     }
 
+    /// 오픈매치 결과 화면 전용 난이도 영역을 템플릿 매칭으로 감지합니다. (106x18 해상도 적용)
+    pub fn detect_openmatch_result_difficulty(&self, diff_img: &ImageRegion) -> Option<String> {
+        let w = diff_img.width as usize;
+        let h = diff_img.height as usize;
+        let total = w * h;
+        if total == 0 {
+            return None;
+        }
+
+        // 동적 임계값 구하기
+        let mut max_y = 0u8;
+        let mut min_y = 255u8;
+        let mut luma_vals = vec![0u8; total];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) * 4;
+                let b = diff_img.bgra[idx];
+                let g = diff_img.bgra[idx + 1];
+                let r = diff_img.bgra[idx + 2];
+                let luma = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
+                luma_vals[y * w + x] = luma;
+                if luma > max_y { max_y = luma; }
+                if luma < min_y { min_y = luma; }
+            }
+        }
+
+        let threshold = if max_y - min_y > 30 {
+            (min_y as f32 + (max_y - min_y) as f32 * 0.55) as u8
+        } else {
+            120u8
+        };
+
+        let mut binary = vec![0u8; total];
+        for i in 0..total {
+            binary[i] = if luma_vals[i] >= threshold { 1 } else { 0 };
+        }
+
+        // 타겟 템플릿 크기(106x18)로 동적 리사이징 적용하여 해상도 차이 극복
+        let (target_w, target_h) = (106usize, 18usize);
+        let resized_binary = if w != target_w || h != target_h {
+            let mut dst = vec![0u8; target_w * target_h];
+            for dy in 0..target_h {
+                let sy = (dy * h) / target_h;
+                let sy_clamped = sy.min(h - 1);
+                for dx in 0..target_w {
+                    let sx = (dx * w) / target_w;
+                    let sx_clamped = sx.min(w - 1);
+                    dst[dy * target_w + dx] = binary[sy_clamped * w + sx_clamped];
+                }
+            }
+            dst
+        } else {
+            binary
+        };
+
+        let mut best_score = 0.0f32;
+        let mut best_label: Option<String> = None;
+
+        for t in &crate::detector::templates::result_diff::RESULT_DIFF_OPEN_TEMPLATES {
+            if t.width != target_w || t.height != target_h {
+                continue;
+            }
+            
+            let safe_x = match t.name {
+                "NM" => 15,
+                "HD" => 35,
+                "MX" => 0,
+                "SC" => 55,
+                _ => 0,
+            };
+
+            let mut matches = 0usize;
+            let compare_total = target_w * target_h;
+            
+            for dy in 0..target_h {
+                for dx in 0..target_w {
+                    let i = dy * target_w + dx;
+                    if dx < safe_x {
+                        // safe_x 미만 영역은 배경 노이즈 무시를 위해 무조건 일치 처리
+                        matches += 1;
+                    } else if resized_binary[i] == t.mask[i] {
+                        matches += 1;
+                    }
+                }
+            }
+            
+            let score = matches as f32 / compare_total as f32;
+            if score > 0.80 && score > best_score {
+                best_score = score;
+                best_label = Some(t.name.to_string());
+            }
+        }
+
+        best_label
+    }
+
     pub fn recognize_text_color(&self, region: &ImageRegion) -> Option<String> {
         self.engine.recognize_logo_color(region).ok()
     }

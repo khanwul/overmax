@@ -127,7 +127,7 @@ impl PlayStateDetector {
                         }
                         if let Some(diff_roi) = rois.get_roi("openmatch_diff") {
                             if let Some(diff_img) = crop_roi(frame, diff_roi) {
-                                diff = ocr.detect_result_difficulty(&diff_img);
+                                diff = ocr.detect_openmatch_result_difficulty(&diff_img);
                             }
                         }
                     }
