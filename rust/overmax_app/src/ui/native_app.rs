@@ -16,10 +16,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::system::cache_update;
 use crate::ui::debug_ui;
-use crate::detector::ocr_engine::OcrTelemetry;
-use crate::detector::detection_pipeline::DetectionOutput;
+use overmax_engine::detector::ocr_engine::OcrTelemetry;
+use overmax_engine::detector::detection_pipeline::DetectionOutput;
 use eframe::egui;
-use crate::detector::detection_worker;
+use overmax_engine::detector::detection_worker;
 use crate::system::native_helpers::{
     account_path_for_steam, button_num, first_steam_from_settings,
 };
@@ -220,7 +220,7 @@ pub struct NativeApp {
     pub(crate) debug_state: SharedDebugState,
     pub(crate) sync_state: SharedSyncState,
     pub(crate) log_rx: Option<Receiver<String>>,
-    pub(crate) game_rect: Arc<Mutex<Option<crate::capture::window_tracker::WindowRect>>>,
+    pub(crate) game_rect: Arc<Mutex<Option<overmax_engine::capture::window_tracker::WindowRect>>>,
     pub(crate) session: GameSessionState,
     pub(crate) confidence: f32,
     pub(crate) recorded_states: std::collections::HashSet<(u32, String, String)>,

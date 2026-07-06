@@ -1,44 +1,19 @@
 [package]
-name = "overmax-app"
-version = "0.2.4"
+name = "overmax-engine"
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
-[lints]
-workspace = true
-
 [lib]
-name = "overmax_app"
+name = "overmax_engine"
 path = "src/lib.rs"
 
-[[bin]]
-name = "overmax-rs"
-path = "src/main.rs"
-
-[[bin]]
-name = "test_screenshots"
-path = "src/bin/test_screenshots.rs"
-
 [dependencies]
-overmax-engine = { path = "../overmax_engine" }
-eframe = { version = "0.33.2", default-features = false, features = [
-    "default_fonts",
-    "glow",
-] }
-egui = "0.33.2"
 overmax-core = { path = "../overmax_core" }
 overmax-data = { path = "../overmax_data" }
 overmax_cv = { path = "../overmax_cv" }
-reqwest = { version = "0.13.3", default-features = false, features = [
-    "blocking",
-    "json",
-    "native-tls",
-] }
+egui = "0.33.2"
 serde_json = "1"
-sha2 = "0.10.8"
-winreg = "0.55"
-zip = { version = "2.4", default-features = false, features = ["deflate"] }
-rfd = "0.15"
 windows = { version = "0.62.2", features = [
     "Foundation",
     "Globalization",
@@ -65,10 +40,5 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics",
     "Win32_System_Diagnostics_ToolHelp",
-    "Win32_System_Console",
 ] }
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
-self_update = { version = "0.44.0", features = ["archive-zip", "compression-zip-deflate"] }
-
-[build-dependencies]
-winres = "0.1.12"

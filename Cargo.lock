@@ -2458,6 +2458,7 @@ dependencies = [
  "image",
  "overmax-core",
  "overmax-data",
+ "overmax-engine",
  "overmax_cv",
  "reqwest",
  "rfd",
@@ -2493,6 +2494,21 @@ dependencies = [
  "serde",
  "serde_json",
  "strsim",
+]
+
+[[package]]
+name = "overmax-engine"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "image",
+ "overmax-core",
+ "overmax-data",
+ "overmax_cv",
+ "serde_json",
+ "windows",
+ "windows-future",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

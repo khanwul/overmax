@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::Path;
 use image::GenericImageView;
-use overmax_app::capture::screen_capture::CapturedFrame;
-use overmax_app::detector::roi::RoiManager;
-use overmax_app::detector::ocr_engine::OcrDetector;
-use overmax_app::capture::frame_utils::crop_roi;
+use overmax_engine::capture::screen_capture::CapturedFrame;
+use overmax_engine::detector::roi::RoiManager;
+use overmax_engine::detector::ocr_engine::OcrDetector;
+use overmax_engine::capture::frame_utils::crop_roi;
 use overmax_core::SceneType;
 
 fn load_frame(path: &Path) -> Option<CapturedFrame> {
@@ -30,7 +30,7 @@ fn load_frame(path: &Path) -> Option<CapturedFrame> {
     })
 }
 
-fn crop_roi_direct(frame: &CapturedFrame, x: usize, y: usize, width: usize, height: usize) -> overmax_app::capture::frame_utils::ImageRegion {
+fn crop_roi_direct(frame: &CapturedFrame, x: usize, y: usize, width: usize, height: usize) -> overmax_engine::capture::frame_utils::ImageRegion {
     let mut bgra = vec![0u8; width * height * 4];
     for dy in 0..height {
         for dx in 0..width {
@@ -41,7 +41,7 @@ fn crop_roi_direct(frame: &CapturedFrame, x: usize, y: usize, width: usize, heig
             bgra[dst_idx..dst_idx + 4].copy_from_slice(&frame.bgra[src_idx..src_idx + 4]);
         }
     }
-    overmax_app::capture::frame_utils::ImageRegion {
+    overmax_engine::capture::frame_utils::ImageRegion {
         bgra,
         width: width as i32,
         height: height as i32,

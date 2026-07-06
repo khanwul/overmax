@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::ui::overlay_theme::{apply_secondary_window_style, Theme};
-use crate::detector::ocr_engine::OcrTelemetry;
+use overmax_engine::detector::ocr_engine::OcrTelemetry;
 
 pub fn push_log(lines: &Arc<Mutex<VecDeque<String>>>, max_lines: usize, line: String) {
     let Ok(mut g) = lines.lock() else {

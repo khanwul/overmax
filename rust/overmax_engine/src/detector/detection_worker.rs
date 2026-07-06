@@ -21,7 +21,7 @@ pub fn spawn(
     log_tx: Sender<String>,
     game_found_tx: Sender<()>,
     detection_tx: Sender<DetectionOutput>,
-    ctx_holder: std::sync::Arc<std::sync::Mutex<Option<eframe::egui::Context>>>,
+    ctx_holder: std::sync::Arc<std::sync::Mutex<Option<egui::Context>>>,
 ) {
     std::thread::spawn(move || {
         initialize_winrt(&log_tx);
@@ -53,7 +53,7 @@ struct DetectionWorker {
     last_detection_log: Instant,
     was_found: bool,
     is_foreground: bool,
-    ctx_holder: std::sync::Arc<std::sync::Mutex<Option<eframe::egui::Context>>>,
+    ctx_holder: std::sync::Arc<std::sync::Mutex<Option<egui::Context>>>,
     last_song_id: Option<u32>,
     last_is_song_select: bool,
     last_logo_detected: bool,
@@ -70,7 +70,7 @@ impl DetectionWorker {
         log_tx: Sender<String>,
         game_found_tx: Sender<()>,
         detection_tx: Sender<DetectionOutput>,
-        ctx_holder: std::sync::Arc<std::sync::Mutex<Option<eframe::egui::Context>>>,
+        ctx_holder: std::sync::Arc<std::sync::Mutex<Option<egui::Context>>>,
     ) -> Self {
         Self {
             root,

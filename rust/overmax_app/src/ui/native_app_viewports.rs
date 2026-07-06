@@ -10,7 +10,7 @@ use crate::ui::overlay_theme::Theme;
 use crate::ui::overlay_ui;
 use crate::ui::settings_ui;
 use crate::ui::sync_ui;
-use crate::capture::window_tracker;
+use overmax_engine::capture::window_tracker;
 
 fn game_window_title(settings: &serde_json::Value) -> &str {
     settings

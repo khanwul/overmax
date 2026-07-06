@@ -4,10 +4,10 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use overmax_app::capture::window_tracker::WindowTracker;
-use overmax_app::capture::capture_engine::{CaptureEngine, AdaptiveCaptureEngine};
-use overmax_app::detector::roi::RoiManager;
-use overmax_app::capture::frame_utils::crop_roi;
+use overmax_engine::capture::window_tracker::WindowTracker;
+use overmax_engine::capture::capture_engine::{CaptureEngine, AdaptiveCaptureEngine};
+use overmax_engine::detector::roi::RoiManager;
+use overmax_engine::capture::frame_utils::crop_roi;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

@@ -2,10 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use image::GenericImageView;
 
-use overmax_app::capture::screen_capture::CapturedFrame;
-use overmax_app::detector::roi::RoiManager;
-use overmax_app::detector::ocr_engine::OcrDetector;
-use overmax_app::capture::frame_utils::crop_roi;
+use overmax_engine::capture::screen_capture::CapturedFrame;
+use overmax_engine::detector::roi::RoiManager;
+use overmax_engine::detector::ocr_engine::OcrDetector;
+use overmax_engine::capture::frame_utils::crop_roi;
 use overmax_core::SceneType;
 use overmax_data::ImageIndexDb;
 
@@ -132,7 +132,7 @@ fn detect_scene_from_logo(frame: &CapturedFrame, ocr: &OcrDetector, rois: &RoiMa
     if scene == SceneType::Unknown {
         if let Some(jacket_roi) = rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle) {
             let margin = 8;
-            let ext_roi = overmax_app::detector::roi::RoiRect {
+            let ext_roi = overmax_engine::detector::roi::RoiRect {
                 x1: jacket_roi.x1 - margin,
                 y1: jacket_roi.y1 - margin,
                 x2: jacket_roi.x2 + margin,
@@ -378,9 +378,9 @@ fn run_roi_test(
         SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
     );
     let is_mc = if is_result {
-        overmax_app::detector::play_state::detect_max_combo_result(frame, rois)
+        overmax_engine::detector::play_state::detect_max_combo_result(frame, rois)
     } else {
-        overmax_app::detector::play_state::detect_max_combo(frame, rois)
+        overmax_engine::detector::play_state::detect_max_combo(frame, rois)
     };
     println!("    Max Combo Badge Detected: {}", is_mc);
 
@@ -456,8 +456,8 @@ fn run_roi_test(
         }
     } else {
         // Song select (Freestyle / OpenMatch)
-        detected_mode = overmax_app::detector::play_state::detect_button_mode(frame, rois);
-        let (d, conf) = overmax_app::detector::play_state::detect_difficulty(frame, rois);
+        detected_mode = overmax_engine::detector::play_state::detect_button_mode(frame, rois);
+        let (d, conf) = overmax_engine::detector::play_state::detect_difficulty(frame, rois);
         detected_diff = d;
         println!("    Detected Mode from color: {:?}, Diff from brightness: {:?} (confident: {})", detected_mode, detected_diff, conf);
 
@@ -503,7 +503,7 @@ fn run_roi_test(
                 println!("    Calculated Rate from Score: {:.4}%", calc_rate);
                 
                 let is_valid_range = if is_song_select {
-                    (overmax_app::detector::play_state::MIN_VALID_RATE..=100.0).contains(&calc_rate)
+                    (overmax_engine::detector::play_state::MIN_VALID_RATE..=100.0).contains(&calc_rate)
                 } else {
                     (0.0..=100.0).contains(&calc_rate)
                 };
