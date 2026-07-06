@@ -358,75 +358,43 @@ impl DetectionPipeline {
         Some(self.last_logo_scene)
     }
 
+    fn detect_openmatch_color_match(mean: (u8, u8, u8)) -> bool {
+        let openmatch_colors = [
+            (102u8, 118u8, 46u8),  // 4B
+            (147u8, 136u8, 95u8),  // 5B
+            (61u8, 137u8, 192u8),  // 6B
+            (153u8, 90u8, 88u8),   // 8B
+        ];
+        let max_dist = 60.0f32;
+        for color in &openmatch_colors {
+            let db = f32::from(mean.0) - f32::from(color.0);
+            let dg = f32::from(mean.1) - f32::from(color.1);
+            let dr = f32::from(mean.2) - f32::from(color.2);
+            let dist = (db * db + dg * dg + dr * dr).sqrt();
+            if dist <= max_dist {
+                return true;
+            }
+        }
+        false
+    }
+
     fn check_open_match_badge(&self, frame: &CapturedFrame) -> Option<SceneType> {
-        let open3_badge_roi = self.rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen3);
-        let open2_badge_roi = self.rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen2);
-
-        // 1. Fast Color-based OCR Pass
-        let mut o3_m = false;
-        let mut o2_m = false;
-
-        if let Some(roi) = open3_badge_roi {
-            if let Some(img) = crop_roi(frame, roi) {
-                if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                    if self.ocr.contains_mode_keyword(&txt) {
-                        o3_m = true;
-                    }
-                }
+        // 5x5 BGR Color-based Fallback
+        if let Some(color_roi) = self.rois.get_roi_for_scene("openmatch_mode_color", SceneType::ResultOpen3) {
+            let mean = crate::capture::frame_utils::region_mean_bgr(frame, color_roi);
+            if Self::detect_openmatch_color_match(mean) {
+                return Some(SceneType::ResultOpen3);
             }
         }
 
-        if !o3_m {
-            if let Some(roi) = open2_badge_roi {
-                if let Some(img) = crop_roi(frame, roi) {
-                    if let Some(txt) = self.ocr.recognize_text_color(&img) {
-                        if self.ocr.contains_mode_keyword(&txt) {
-                            o2_m = true;
-                        }
-                    }
-                }
+        if let Some(color_roi) = self.rois.get_roi_for_scene("openmatch_mode_color", SceneType::ResultOpen2) {
+            let mean = crate::capture::frame_utils::region_mean_bgr(frame, color_roi);
+            if Self::detect_openmatch_color_match(mean) {
+                return Some(SceneType::ResultOpen2);
             }
         }
 
-        if o3_m && !o2_m {
-            return Some(SceneType::ResultOpen3);
-        }
-        if o2_m && !o3_m {
-            return Some(SceneType::ResultOpen2);
-        }
-
-        // 2. Slow Multi-pass OCR Fallback (Only executed if fast color pass failed or was ambiguous)
-        let mut o3_all = false;
-        if let Some(roi) = open3_badge_roi {
-            if let Some(img) = crop_roi(frame, roi) {
-                if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
-                    if self.ocr.contains_mode_keyword(&txt) {
-                        o3_all = true;
-                    }
-                }
-            }
-        }
-
-        let mut o2_all = false;
-        if !o3_all {
-            if let Some(roi) = open2_badge_roi {
-                if let Some(img) = crop_roi(frame, roi) {
-                    if let Some(txt) = self.ocr.recognize_text_all_passes(&img) {
-                        if self.ocr.contains_mode_keyword(&txt) {
-                            o2_all = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if o3_all && !o2_all {
-            Some(SceneType::ResultOpen3)
-        } else if o2_all && !o3_all {
-            Some(SceneType::ResultOpen2)
-        } else {
-            None
-        }
+        None
     }
 
     fn update_song_id_from_jacket(&mut self, frame: &CapturedFrame, now: f64) -> JacketMatchStatus {

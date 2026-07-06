@@ -37,75 +37,43 @@ fn load_frame(path: &Path) -> Option<CapturedFrame> {
     })
 }
 
-fn check_open_match_badge(frame: &CapturedFrame, ocr: &OcrDetector, rois: &RoiManager) -> Option<SceneType> {
-    let open3_badge_roi = rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen3);
-    let open2_badge_roi = rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen2);
+fn detect_openmatch_color_match(mean: (u8, u8, u8)) -> bool {
+    let openmatch_colors = [
+        (102u8, 118u8, 46u8),  // 4B
+        (147u8, 136u8, 95u8),  // 5B
+        (61u8, 137u8, 192u8),  // 6B
+        (153u8, 90u8, 88u8),   // 8B
+    ];
+    let max_dist = 60.0f32;
+    for color in &openmatch_colors {
+        let db = f32::from(mean.0) - f32::from(color.0);
+        let dg = f32::from(mean.1) - f32::from(color.1);
+        let dr = f32::from(mean.2) - f32::from(color.2);
+        let dist = (db * db + dg * dg + dr * dr).sqrt();
+        if dist <= max_dist {
+            return true;
+        }
+    }
+    false
+}
 
-    // 1. Fast Color-based OCR Pass
-    let mut o3_m = false;
-    let mut o2_m = false;
-
-    if let Some(roi) = open3_badge_roi {
-        if let Some(img) = crop_roi(frame, roi) {
-            if let Some(txt) = ocr.recognize_text_color(&img) {
-                if ocr.contains_mode_keyword(&txt) {
-                    o3_m = true;
-                }
-            }
+fn check_open_match_badge(frame: &CapturedFrame, rois: &RoiManager) -> Option<SceneType> {
+    // 5x5 BGR Color-based Detection
+    if let Some(color_roi) = rois.get_roi_for_scene("openmatch_mode_color", SceneType::ResultOpen3) {
+        let mean = overmax_engine::capture::frame_utils::region_mean_bgr(frame, color_roi);
+        if detect_openmatch_color_match(mean) {
+            return Some(SceneType::ResultOpen3);
         }
     }
 
-    if !o3_m {
-        if let Some(roi) = open2_badge_roi {
-            if let Some(img) = crop_roi(frame, roi) {
-                if let Some(txt) = ocr.recognize_text_color(&img) {
-                    if ocr.contains_mode_keyword(&txt) {
-                        o2_m = true;
-                    }
-                }
-            }
+    if let Some(color_roi) = rois.get_roi_for_scene("openmatch_mode_color", SceneType::ResultOpen2) {
+        let mean = overmax_engine::capture::frame_utils::region_mean_bgr(frame, color_roi);
+        if detect_openmatch_color_match(mean) {
+            return Some(SceneType::ResultOpen2);
         }
     }
 
-    if o3_m && !o2_m {
-        return Some(SceneType::ResultOpen3);
-    }
-    if o2_m && !o3_m {
-        return Some(SceneType::ResultOpen2);
-    }
-
-    // 2. Slow Multi-pass OCR Fallback
-    let mut o3_all = false;
-    if let Some(roi) = open3_badge_roi {
-        if let Some(img) = crop_roi(frame, roi) {
-            if let Some(txt) = ocr.recognize_text_all_passes(&img) {
-                if ocr.contains_mode_keyword(&txt) {
-                    o3_all = true;
-                }
-            }
-        }
-    }
-
-    let mut o2_all = false;
-    if !o3_all {
-        if let Some(roi) = open2_badge_roi {
-            if let Some(img) = crop_roi(frame, roi) {
-                if let Some(txt) = ocr.recognize_text_all_passes(&img) {
-                    if ocr.contains_mode_keyword(&txt) {
-                        o2_all = true;
-                    }
-                }
-            }
-        }
-    }
-
-    if o3_all && !o2_all {
-        Some(SceneType::ResultOpen3)
-    } else if o2_all && !o3_all {
-        Some(SceneType::ResultOpen2)
-    } else {
-        None
-    }
+    None
 }
 
 fn detect_scene_from_logo(frame: &CapturedFrame, ocr: &OcrDetector, rois: &RoiManager) -> SceneType {
@@ -120,11 +88,11 @@ fn detect_scene_from_logo(frame: &CapturedFrame, ocr: &OcrDetector, rois: &RoiMa
     let (mut scene, raw_text, _) = ocr.detect_logo(&logo_img);
     println!("      [Logo OCR] raw: '{}', scene: {:?}", raw_text.trim(), scene);
     
-    // 1단계 오픈매치 배지 OCR 폴백
+    // 1단계 오픈매치 배지 BGR 폴백
     if scene == SceneType::Unknown {
-        if let Some(fallback_scene) = check_open_match_badge(frame, ocr, rois) {
+        if let Some(fallback_scene) = check_open_match_badge(frame, rois) {
             scene = fallback_scene;
-            println!("      Bypassed logo OCR: Result screen detected via open match badge OCR!");
+            println!("      Bypassed logo OCR: Result screen detected via open match badge BGR!");
         }
     }
     
