@@ -120,7 +120,7 @@ impl PlayStateDetector {
                         }
                     }
                     SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
-                        mode = detect_button_mode_from_roi(frame, rois, "openmatch_mode_color");
+                        mode = detect_button_mode_from_roi(frame, rois, "openmatch_mode");
                         if let Some(diff_roi) = rois.get_roi("openmatch_diff") {
                             if let Some(diff_img) = crop_roi(frame, diff_roi) {
                                 diff = ocr.detect_openmatch_result_difficulty(&diff_img);
@@ -319,7 +319,7 @@ pub fn detect_button_mode_from_roi(frame: &CapturedFrame, rois: &RoiManager, roi
     let mean = region_mean_bgr(frame, roi);
     let mut best = (None, f32::INFINITY);
     
-    let colors_table = if roi_name == "openmatch_mode_color" {
+    let colors_table = if roi_name == "openmatch_mode" {
         openmatch_button_colors()
     } else {
         button_colors()

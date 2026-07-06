@@ -59,14 +59,14 @@ fn detect_openmatch_color_match(mean: (u8, u8, u8)) -> bool {
 
 fn check_open_match_badge(frame: &CapturedFrame, rois: &RoiManager) -> Option<SceneType> {
     // 5x5 BGR Color-based Detection
-    if let Some(color_roi) = rois.get_roi_for_scene("openmatch_mode_color", SceneType::ResultOpen3) {
+    if let Some(color_roi) = rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen3) {
         let mean = overmax_engine::capture::frame_utils::region_mean_bgr(frame, color_roi);
         if detect_openmatch_color_match(mean) {
             return Some(SceneType::ResultOpen3);
         }
     }
 
-    if let Some(color_roi) = rois.get_roi_for_scene("openmatch_mode_color", SceneType::ResultOpen2) {
+    if let Some(color_roi) = rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen2) {
         let mean = overmax_engine::capture::frame_utils::region_mean_bgr(frame, color_roi);
         if detect_openmatch_color_match(mean) {
             return Some(SceneType::ResultOpen2);
@@ -404,7 +404,7 @@ fn run_roi_test(
                 }
             }
             SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
-                detected_mode = overmax_engine::detector::play_state::detect_button_mode_from_roi(frame, rois, "openmatch_mode_color");
+                detected_mode = overmax_engine::detector::play_state::detect_button_mode_from_roi(frame, rois, "openmatch_mode");
                 if let Some(diff_roi) = rois.get_roi("openmatch_diff") {
                     if let Some(diff_img) = crop_roi(frame, diff_roi) {
                         detected_diff = ocr.detect_openmatch_result_difficulty(&diff_img);

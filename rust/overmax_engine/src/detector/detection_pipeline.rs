@@ -380,14 +380,14 @@ impl DetectionPipeline {
 
     fn check_open_match_badge(&self, frame: &CapturedFrame) -> Option<SceneType> {
         // 5x5 BGR Color-based Fallback
-        if let Some(color_roi) = self.rois.get_roi_for_scene("openmatch_mode_color", SceneType::ResultOpen3) {
+        if let Some(color_roi) = self.rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen3) {
             let mean = crate::capture::frame_utils::region_mean_bgr(frame, color_roi);
             if Self::detect_openmatch_color_match(mean) {
                 return Some(SceneType::ResultOpen3);
             }
         }
 
-        if let Some(color_roi) = self.rois.get_roi_for_scene("openmatch_mode_color", SceneType::ResultOpen2) {
+        if let Some(color_roi) = self.rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen2) {
             let mean = crate::capture::frame_utils::region_mean_bgr(frame, color_roi);
             if Self::detect_openmatch_color_match(mean) {
                 return Some(SceneType::ResultOpen2);
