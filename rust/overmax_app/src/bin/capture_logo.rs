@@ -81,13 +81,13 @@ fn main() {
     }
     
     // 파일 경로 설정
-    let mut target_path = PathBuf::from("rust/overmax_app/src/logo_templates.rs");
+    let mut target_path = PathBuf::from("rust/overmax_app/src/templates/logo.rs");
     if !target_path.exists() {
-        let alt = PathBuf::from("src/logo_templates.rs");
+        let alt = PathBuf::from("src/templates/logo.rs");
         if alt.parent().map(|p| p.exists()).unwrap_or(false) {
             target_path = alt;
         } else {
-            target_path = PathBuf::from("logo_templates.rs");
+            target_path = PathBuf::from("logo.rs");
         }
     }
     

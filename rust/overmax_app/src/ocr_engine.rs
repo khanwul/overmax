@@ -92,7 +92,7 @@ impl OcrDetector {
         let w = rate.width as usize;
         let h = rate.height as usize;
 
-        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::digit_templates::DIGIT_TEMPLATES.iter().map(|t| {
+        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::templates::digit::DIGIT_TEMPLATES.iter().map(|t| {
             overmax_cv::CvTemplate {
                 char_val: t.char_val,
                 width: t.width,
@@ -184,7 +184,7 @@ impl OcrDetector {
         let w = score.width as usize;
         let h = score.height as usize;
 
-        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::digit_templates::DIGIT_TEMPLATES.iter().map(|t| {
+        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::templates::digit::DIGIT_TEMPLATES.iter().map(|t| {
             overmax_cv::CvTemplate {
                 char_val: t.char_val,
                 width: t.width,
@@ -305,7 +305,7 @@ impl OcrDetector {
         let mut best_score = 0.0f32;
         let mut best_label: Option<String> = None;
 
-        for t in &crate::result_mode_templates::RESULT_MODE_TEMPLATES {
+        for t in &crate::templates::result_mode::RESULT_MODE_TEMPLATES {
             if t.width != target_w || t.height != target_h {
                 continue;
             }
@@ -384,7 +384,7 @@ impl OcrDetector {
         let mut best_score = 0.0f32;
         let mut best_label: Option<String> = None;
 
-        for t in &crate::result_diff_templates::RESULT_DIFF_TEMPLATES {
+        for t in &crate::templates::result_diff::RESULT_DIFF_TEMPLATES {
             if t.width != target_w || t.height != target_h {
                 continue;
             }

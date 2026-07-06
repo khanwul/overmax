@@ -13,7 +13,6 @@ pub mod native_app_recommend;
 pub mod native_app_viewports;
 pub mod native_helpers;
 pub mod ocr_engine;
-pub mod logo_templates;
 pub mod overlay_recommend_ui;
 pub mod overlay_theme;
 pub mod overlay_ui;
@@ -30,7 +29,5 @@ pub mod ui_command;
 pub mod updater;
 pub mod varchive_upload;
 pub mod window_tracker;
-pub mod digit_templates;
-pub mod result_mode_templates;
-pub mod result_diff_templates;
+pub mod templates;
 

@@ -8,7 +8,7 @@ use overmax_app::frame_utils::crop_roi;
 use overmax_core::SceneType;
 
 // 자동 생성된 템플릿 배열 상수 바인딩
-use overmax_app::digit_templates::DIGIT_TEMPLATES;
+use overmax_app::templates::digit::DIGIT_TEMPLATES;
 
 fn load_frame(path: &Path) -> Option<CapturedFrame> {
     let img = match image::open(path) {
