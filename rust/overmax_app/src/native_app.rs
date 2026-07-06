@@ -46,7 +46,18 @@ fn load_icon() -> Option<eframe::egui::IconData> {
     None
 }
 
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn console_ctrl_handler(_ctrl_type: u32) -> i32 {
+    crate::tray_icon::force_cleanup_tray();
+    0 // FALSE
+}
+
 pub fn run_native_app() -> eframe::Result<()> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(console_ctrl_handler), 1);
+    }
+
     let Some(_single) = SingleInstanceGuard::try_acquire() else {
         std::process::exit(0);
     };

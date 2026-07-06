@@ -28,6 +28,18 @@ const TRAY_CALLBACK: u32 = WM_APP + 1;
 const CMD_SETTINGS: usize = 1002;
 const CMD_SYNC: usize = 1003;
 const CMD_DEBUG: usize = 1004;
+
+static TRAY_HWND: AtomicIsize = AtomicIsize::new(0);
+
+pub fn force_cleanup_tray() {
+    let hwnd = TRAY_HWND.load(Ordering::Relaxed);
+    if hwnd != 0 {
+        unsafe {
+            delete_notify_icon(hwnd as HWND);
+            TRAY_HWND.store(0, Ordering::Relaxed);
+        }
+    }
+}
 const CMD_EXIT: usize = 1005;
 
 static ACTIONS: OnceLock<TrayActions> = OnceLock::new();
@@ -118,6 +130,7 @@ unsafe fn run_tray_loop(shared_hwnd: Arc<AtomicIsize>) {
         return;
     }
     shared_hwnd.store(hwnd as isize, Ordering::Relaxed);
+    TRAY_HWND.store(hwnd as isize, Ordering::Relaxed);
     add_notify_icon(hwnd);
 
     let mut msg = MSG::default();
@@ -126,6 +139,7 @@ unsafe fn run_tray_loop(shared_hwnd: Arc<AtomicIsize>) {
         DispatchMessageW(&msg);
     }
     delete_notify_icon(hwnd);
+    TRAY_HWND.store(0, Ordering::Relaxed);
 }
 
 unsafe extern "system" fn window_proc(
