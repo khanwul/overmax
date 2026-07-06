@@ -1,8 +1,8 @@
-use crate::overlay_recommend_ui::{
+use crate::ui::overlay_recommend_ui::{
     avg_rate_text, draw_diff_tabs, draw_recommendations, pattern_count_text, PatternTabInfo,
 };
-use crate::overlay_theme::Theme;
-use crate::ui_command::UiCommand;
+use crate::ui::overlay_theme::Theme;
+use crate::ui::ui_command::UiCommand;
 use eframe::egui::{
     self, Align, Button, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
     Frame, Label, Layout, Margin, Rect, RichText, Sense, Vec2,
@@ -759,7 +759,7 @@ pub(crate) fn diff_color(diff: &str) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::{diff_color, install_cjk_fonts, meta_text};
-    use crate::overlay_recommend_ui::PatternTabInfo;
+    use crate::ui::overlay_recommend_ui::PatternTabInfo;
     use eframe::egui::{self, Color32, Context};
     use overmax_core::{GameSessionState, PlayContext};
 

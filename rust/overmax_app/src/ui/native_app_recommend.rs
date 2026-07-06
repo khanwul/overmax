@@ -1,6 +1,6 @@
-use crate::debug_ui;
-use crate::native_app::NativeApp;
-use crate::overlay_recommend_ui::PatternTabInfo;
+use crate::ui::debug_ui;
+use crate::ui::native_app::NativeApp;
+use crate::ui::overlay_recommend_ui::PatternTabInfo;
 use overmax_core::GameSessionState;
 use overmax_data::RecommendResult;
 
@@ -28,7 +28,7 @@ impl NativeApp {
 
             if output.state.is_valid() {
                 if let Some(ctx_val) = &output.state.context {
-                    if ctx_val.rate >= crate::play_state::MIN_VALID_RATE {
+                    if ctx_val.rate >= crate::detector::play_state::MIN_VALID_RATE {
                         let key = (
                             ctx_val.song_id,
                             ctx_val.mode.clone(),

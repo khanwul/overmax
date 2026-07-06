@@ -1,5 +1,5 @@
-use crate::overlay_theme::Theme;
-use crate::overlay_ui::diff_color;
+use crate::ui::overlay_theme::Theme;
+use crate::ui::overlay_ui::diff_color;
 use eframe::egui::{
     self, Align, Color32, CornerRadius, FontId, Frame, Label, Layout, Margin, Rect, RichText, Vec2,
 };

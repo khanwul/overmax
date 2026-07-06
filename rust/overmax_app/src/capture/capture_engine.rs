@@ -1,6 +1,6 @@
-use crate::window_tracker::{WindowRect, WindowTracker};
-use crate::screen_capture::{CapturedFrame, GdiCaptureEngine};
-use crate::dxgi_capture::DxgiCaptureEngine;
+use crate::capture::window_tracker::{WindowRect, WindowTracker};
+use crate::capture::screen_capture::{CapturedFrame, GdiCaptureEngine};
+use crate::capture::dxgi_capture::DxgiCaptureEngine;
 
 pub trait CaptureEngine: Send + Sync {
     fn capture_bgra(&mut self, rect: WindowRect) -> Result<CapturedFrame, String>;

@@ -14,26 +14,26 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use crate::cache_update;
-use crate::debug_ui;
-use crate::ocr_engine::OcrTelemetry;
-use crate::detection_pipeline::DetectionOutput;
+use crate::system::cache_update;
+use crate::ui::debug_ui;
+use crate::detector::ocr_engine::OcrTelemetry;
+use crate::detector::detection_pipeline::DetectionOutput;
 use eframe::egui;
-use crate::detection_worker;
-use crate::native_helpers::{
+use crate::detector::detection_worker;
+use crate::system::native_helpers::{
     account_path_for_steam, button_num, first_steam_from_settings,
 };
-use crate::overlay_ui;
-use crate::single_instance::SingleInstanceGuard;
-use crate::steam_session;
+use crate::ui::overlay_ui;
+use crate::system::single_instance::SingleInstanceGuard;
+use crate::system::steam_session;
 #[cfg(target_os = "windows")]
-use crate::tray_icon::TrayIcon;
-use crate::ui_command::UiCommand;
-use crate::updater::{self, AppUpdateConfig};
-use crate::varchive_upload;
+use crate::ui::tray_icon::TrayIcon;
+use crate::ui::ui_command::UiCommand;
+use crate::system::updater::{self, AppUpdateConfig};
+use crate::system::varchive_upload;
 
 fn load_icon() -> Option<eframe::egui::IconData> {
-    let icon_bytes = include_bytes!("../../../assets/overmax.ico");
+    let icon_bytes = include_bytes!("../../../../assets/overmax.ico");
     if let Ok(img) = image::load_from_memory(icon_bytes) {
         let rgba = img.to_rgba8();
         let (width, height) = rgba.dimensions();
@@ -48,7 +48,7 @@ fn load_icon() -> Option<eframe::egui::IconData> {
 
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn console_ctrl_handler(_ctrl_type: u32) -> i32 {
-    crate::tray_icon::force_cleanup_tray();
+    crate::ui::tray_icon::force_cleanup_tray();
     0 // FALSE
 }
 
@@ -220,7 +220,7 @@ pub struct NativeApp {
     pub(crate) debug_state: SharedDebugState,
     pub(crate) sync_state: SharedSyncState,
     pub(crate) log_rx: Option<Receiver<String>>,
-    pub(crate) game_rect: Arc<Mutex<Option<crate::window_tracker::WindowRect>>>,
+    pub(crate) game_rect: Arc<Mutex<Option<crate::capture::window_tracker::WindowRect>>>,
     pub(crate) session: GameSessionState,
     pub(crate) confidence: f32,
     pub(crate) recorded_states: std::collections::HashSet<(u32, String, String)>,
@@ -241,7 +241,7 @@ pub struct NativeApp {
     pub(crate) varchive_db: Arc<VArchiveDB>,
     pub(crate) sheet_meta: Arc<PatternSheetMeta>,
     pub(crate) recommendations: RecommendResult,
-    pub(crate) pattern_tabs: Vec<crate::overlay_recommend_ui::PatternTabInfo>,
+    pub(crate) pattern_tabs: Vec<crate::ui::overlay_recommend_ui::PatternTabInfo>,
     pub(crate) prev_settings_open: bool,
     pub(crate) prev_sync_open: bool,
     pub(crate) prev_scale: f32,

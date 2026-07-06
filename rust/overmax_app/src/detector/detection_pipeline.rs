@@ -1,9 +1,9 @@
-use crate::frame_utils::{crop_roi, make_thumbnail, thumbnail_changed};
-use crate::hysteresis::HysteresisBuffer;
-use crate::ocr_engine::{OcrDetector, OcrTelemetry};
-use crate::play_state::PlayStateDetector;
-use crate::roi::RoiManager;
-use crate::screen_capture::CapturedFrame;
+use crate::capture::frame_utils::{crop_roi, make_thumbnail, thumbnail_changed};
+use crate::detector::hysteresis::HysteresisBuffer;
+use crate::detector::ocr_engine::{OcrDetector, OcrTelemetry};
+use crate::detector::play_state::PlayStateDetector;
+use crate::detector::roi::RoiManager;
+use crate::capture::screen_capture::CapturedFrame;
 use overmax_core::{GameSessionState, SceneType};
 use overmax_data::ImageIndexDb;
 
@@ -23,7 +23,7 @@ pub struct DetectionOutput {
     pub current_song_id: Option<u32>,
     pub image_db_ready: bool,
     pub jacket_status: JacketMatchStatus,
-    pub game_rect: Option<crate::window_tracker::WindowRect>,
+    pub game_rect: Option<crate::capture::window_tracker::WindowRect>,
     pub ocr_telemetry: Option<OcrTelemetry>,
 }
 
@@ -254,7 +254,7 @@ impl DetectionPipeline {
         if scene_res == SceneType::Unknown {
             if let Some(jacket_roi) = self.rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle) {
                 let margin = 8;
-                let ext_roi = crate::roi::RoiRect {
+                let ext_roi = crate::detector::roi::RoiRect {
                     x1: jacket_roi.x1 - margin,
                     y1: jacket_roi.y1 - margin,
                     x2: jacket_roi.x2 + margin,
@@ -463,7 +463,7 @@ impl DetectionPipeline {
 
     fn apply_jacket_match(
         &mut self,
-        jacket: &crate::frame_utils::ImageRegion,
+        jacket: &crate::capture::frame_utils::ImageRegion,
     ) -> JacketMatchStatus {
         let Some(result) = self.jacket_matcher.match_jacket(
             &jacket.bgra,
@@ -539,8 +539,8 @@ impl DetectionPipeline {
 #[cfg(test)]
 mod tests {
     use super::{DetectionPipeline, JacketMatchStatus};
-    use crate::screen_capture::CapturedFrame;
-    use crate::hysteresis::HysteresisBuffer;
+    use crate::capture::screen_capture::CapturedFrame;
+    use crate::detector::hysteresis::HysteresisBuffer;
     use overmax_data::ImageIndexDb;
 
     #[test]
@@ -586,7 +586,7 @@ mod tests {
     fn test_scratch_images() {
         use image::GenericImageView;
         use overmax_core::SceneType;
-        use crate::frame_utils::crop_roi;
+        use crate::capture::frame_utils::crop_roi;
 
         let scratch_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
         let images = [

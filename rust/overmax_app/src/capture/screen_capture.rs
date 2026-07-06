@@ -1,5 +1,5 @@
-use crate::window_tracker::WindowRect;
-use crate::capture_engine::CaptureEngine;
+use crate::capture::window_tracker::WindowRect;
+use crate::capture::capture_engine::CaptureEngine;
 use std::ptr::null_mut;
 use windows_sys::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
@@ -181,8 +181,8 @@ fn bitmap_info(width: i32, height: i32) -> BITMAPINFO {
 #[cfg(test)]
 mod tests {
     use super::GdiCaptureEngine;
-    use crate::capture_engine::CaptureEngine;
-    use crate::window_tracker::WindowRect;
+    use crate::capture::capture_engine::CaptureEngine;
+    use crate::capture::window_tracker::WindowRect;
 
     #[test]
     fn rejects_invalid_capture_rect() {

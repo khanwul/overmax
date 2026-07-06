@@ -1,9 +1,9 @@
 //! Runtime detection worker: window tracking -> capture -> pipeline -> UI state.
 
-use crate::detection_pipeline::{DetectionOutput, DetectionPipeline, JacketMatchStatus};
-use crate::capture_engine::{CaptureEngine, AdaptiveCaptureEngine};
-use crate::screen_capture::CapturedFrame;
-use crate::window_tracker::WindowTracker;
+use crate::detector::detection_pipeline::{DetectionOutput, DetectionPipeline, JacketMatchStatus};
+use crate::capture::capture_engine::{CaptureEngine, AdaptiveCaptureEngine};
+use crate::capture::screen_capture::CapturedFrame;
+use crate::capture::window_tracker::WindowTracker;
 use overmax_core::GameSessionState;
 use overmax_data::{DataCompatibility, ImageIndexDb};
 use serde_json::Value;
@@ -198,7 +198,7 @@ impl DetectionWorker {
 
     fn on_window_found(
         &mut self,
-        rect: crate::window_tracker::WindowRect,
+        rect: crate::capture::window_tracker::WindowRect,
         foreground: bool,
     ) -> bool {
         if !self.was_found {
@@ -380,7 +380,7 @@ fn margin_threshold(settings: &Value) -> f32 {
 
 struct WindowQueryScheduler {
     last_query_ts: Instant,
-    cached_rect: Option<crate::window_tracker::WindowRect>,
+    cached_rect: Option<crate::capture::window_tracker::WindowRect>,
     cached_foreground: bool,
     is_window_moving: bool,
     enabled: bool,
@@ -414,7 +414,7 @@ impl WindowQueryScheduler {
         self.last_query_ts.elapsed() >= self.get_query_interval()
     }
 
-    fn update(&mut self, rect: Option<crate::window_tracker::WindowRect>, foreground: bool) {
+    fn update(&mut self, rect: Option<crate::capture::window_tracker::WindowRect>, foreground: bool) {
         if !self.enabled {
             self.cached_rect = rect;
             self.cached_foreground = foreground;

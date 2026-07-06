@@ -1,6 +1,6 @@
 //! Settings editor: overlay scale/opacity and capture/matcher intervals.
 
-use crate::overlay_theme::{apply_secondary_window_style, render_pill_tabs, Theme};
+use crate::ui::overlay_theme::{apply_secondary_window_style, render_pill_tabs, Theme};
 use eframe::egui::{
     self, CornerRadius, Frame, Margin, RichText, Slider, Stroke, TextEdit, ViewportClass,
 };
@@ -17,7 +17,7 @@ pub struct SettingsUiContext {
     pub scan_pending: Arc<AtomicBool>,
     pub sync_steam_id: Arc<Mutex<String>>,
     pub fetch_tx: Sender<(String, String, i32)>,
-    pub steam_users: Arc<Mutex<std::collections::HashMap<String, crate::steam_session::SteamUser>>>,
+    pub steam_users: Arc<Mutex<std::collections::HashMap<String, crate::system::steam_session::SteamUser>>>,
 }
 
 pub fn render_settings_form(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {

@@ -1,6 +1,6 @@
 //! V-Archive sync window: list candidates and trigger scan / upload.
 
-use crate::overlay_theme::{apply_secondary_window_style, Theme};
+use crate::ui::overlay_theme::{apply_secondary_window_style, Theme};
 use eframe::egui::{
     self, Color32, CornerRadius, Frame, Margin, RichText, ScrollArea, Stroke, ViewportClass,
 };
@@ -17,7 +17,7 @@ where
     pub steam_id: &'a mut String,
     pub status: &'a str,
     pub candidates: &'a [SyncCandidate],
-    pub steam_users: &'a std::collections::HashMap<String, crate::steam_session::SteamUser>,
+    pub steam_users: &'a std::collections::HashMap<String, crate::system::steam_session::SteamUser>,
     pub on_scan: F1,
     pub on_upload: F2,
     pub on_delete: F3,
@@ -223,11 +223,11 @@ fn candidate_row<F: Fn(usize), D: Fn(usize)>(ui: &mut egui::Ui, index: usize, c:
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         // Button Mode Badge
-                        let mode_color = crate::overlay_ui::mode_color(&c.button_mode);
+                        let mode_color = crate::ui::overlay_ui::mode_color(&c.button_mode);
                         badge(ui, &c.button_mode, mode_color, Theme::TEXT_PRIMARY);
                         ui.add_space(4.0);
                         // Difficulty Badge
-                        let diff_color = crate::overlay_ui::diff_color(&c.difficulty);
+                        let diff_color = crate::ui::overlay_ui::diff_color(&c.difficulty);
                         badge(ui, &c.difficulty, diff_color, Theme::TEXT_BRIGHT);
                         ui.add_space(8.0);
                         ui.label(

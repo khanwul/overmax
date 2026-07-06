@@ -1,8 +1,8 @@
-use crate::frame_utils::crop_roi;
-use crate::frame_utils::region_mean_bgr;
-use crate::ocr_engine::{OcrDetector, OcrTelemetry};
-use crate::roi::RoiManager;
-use crate::screen_capture::CapturedFrame;
+use crate::capture::frame_utils::crop_roi;
+use crate::capture::frame_utils::region_mean_bgr;
+use crate::detector::ocr_engine::{OcrDetector, OcrTelemetry};
+use crate::detector::roi::RoiManager;
+use crate::capture::screen_capture::CapturedFrame;
 use overmax_core::{GameSessionState, PlayContext};
 use std::collections::VecDeque;
 
@@ -484,8 +484,8 @@ fn get_rate_plausibility(rate: f32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{detect_button_mode, PlayStateDetector};
-    use crate::roi::RoiManager;
-    use crate::screen_capture::CapturedFrame;
+    use crate::detector::roi::RoiManager;
+    use crate::capture::screen_capture::CapturedFrame;
     use overmax_core::SceneType;
 
     #[test]
@@ -506,7 +506,7 @@ mod tests {
         let mut rois = RoiManager::new(1920, 1080);
         rois.set_scene(SceneType::Freestyle);
 
-        let ocr = crate::ocr_engine::OcrDetector::new();
+        let ocr = crate::detector::ocr_engine::OcrDetector::new();
         assert!(!detector.detect(&frame, &rois, Some(7), &ocr, 1.0).0.is_stable);
         assert!(!detector.detect(&frame, &rois, Some(7), &ocr, 2.0).0.is_stable);
         assert!(detector.detect(&frame, &rois, Some(7), &ocr, 3.0).0.is_stable);

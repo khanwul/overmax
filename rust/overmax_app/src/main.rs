@@ -2,7 +2,7 @@
 
 #[cfg(target_os = "windows")]
 fn main() {
-    if let Err(err) = overmax_app::native_app::run_native_app() {
+    if let Err(err) = overmax_app::ui::native_app::run_native_app() {
         eprintln!("overmax-rs failed: {err}");
         std::process::exit(1);
     }

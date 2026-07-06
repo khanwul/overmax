@@ -1,5 +1,5 @@
-use crate::roi::RoiRect;
-use crate::screen_capture::CapturedFrame;
+use crate::detector::roi::RoiRect;
+use crate::capture::screen_capture::CapturedFrame;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImageRegion {
@@ -107,8 +107,8 @@ fn mean_abs_diff(current: &[u8], previous: &[u8]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{crop_roi, region_mean_bgr, thumbnail_changed};
-    use crate::roi::RoiRect;
-    use crate::screen_capture::CapturedFrame;
+    use crate::detector::roi::RoiRect;
+    use crate::capture::screen_capture::CapturedFrame;
 
     #[test]
     fn crops_bgra_region() {

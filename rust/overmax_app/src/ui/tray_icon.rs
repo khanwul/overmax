@@ -1,6 +1,6 @@
 //! Windows system tray icon for the native Rust app.
 
-use crate::ui_command::UiCommand;
+use crate::ui::ui_command::UiCommand;
 use serde_json::Value;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -45,7 +45,7 @@ const CMD_EXIT: usize = 1005;
 static ACTIONS: OnceLock<TrayActions> = OnceLock::new();
 
 fn current_icon_bytes() -> &'static [u8] {
-    include_bytes!("../../../assets/overmax.ico")
+    include_bytes!("../../../../assets/overmax.ico")
 }
 
 pub struct TrayIcon {

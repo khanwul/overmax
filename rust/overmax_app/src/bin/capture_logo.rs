@@ -4,10 +4,10 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use overmax_app::window_tracker::WindowTracker;
-use overmax_app::capture_engine::{CaptureEngine, AdaptiveCaptureEngine};
-use overmax_app::roi::RoiManager;
-use overmax_app::frame_utils::crop_roi;
+use overmax_app::capture::window_tracker::WindowTracker;
+use overmax_app::capture::capture_engine::{CaptureEngine, AdaptiveCaptureEngine};
+use overmax_app::detector::roi::RoiManager;
+use overmax_app::capture::frame_utils::crop_roi;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -81,9 +81,9 @@ fn main() {
     }
     
     // 파일 경로 설정
-    let mut target_path = PathBuf::from("rust/overmax_app/src/templates/logo.rs");
+    let mut target_path = PathBuf::from("rust/overmax_app/src/detector/templates/logo.rs");
     if !target_path.exists() {
-        let alt = PathBuf::from("src/templates/logo.rs");
+        let alt = PathBuf::from("src/detector/templates/logo.rs");
         if alt.parent().map(|p| p.exists()).unwrap_or(false) {
             target_path = alt;
         } else {

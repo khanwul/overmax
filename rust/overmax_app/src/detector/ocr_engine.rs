@@ -1,4 +1,4 @@
-use crate::frame_utils::ImageRegion;
+use crate::capture::frame_utils::ImageRegion;
 use overmax_core::SceneType;
 use windows::Graphics::Imaging::BitmapDecoder;
 use windows::Media::Ocr::OcrEngine;
@@ -92,7 +92,7 @@ impl OcrDetector {
         let w = rate.width as usize;
         let h = rate.height as usize;
 
-        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::templates::digit::DIGIT_TEMPLATES.iter().map(|t| {
+        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::detector::templates::digit::DIGIT_TEMPLATES.iter().map(|t| {
             overmax_cv::CvTemplate {
                 char_val: t.char_val,
                 width: t.width,
@@ -184,7 +184,7 @@ impl OcrDetector {
         let w = score.width as usize;
         let h = score.height as usize;
 
-        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::templates::digit::DIGIT_TEMPLATES.iter().map(|t| {
+        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::detector::templates::digit::DIGIT_TEMPLATES.iter().map(|t| {
             overmax_cv::CvTemplate {
                 char_val: t.char_val,
                 width: t.width,
@@ -305,7 +305,7 @@ impl OcrDetector {
         let mut best_score = 0.0f32;
         let mut best_label: Option<String> = None;
 
-        for t in &crate::templates::result_mode::RESULT_MODE_TEMPLATES {
+        for t in &crate::detector::templates::result_mode::RESULT_MODE_TEMPLATES {
             if t.width != target_w || t.height != target_h {
                 continue;
             }
@@ -384,7 +384,7 @@ impl OcrDetector {
         let mut best_score = 0.0f32;
         let mut best_label: Option<String> = None;
 
-        for t in &crate::templates::result_diff::RESULT_DIFF_TEMPLATES {
+        for t in &crate::detector::templates::result_diff::RESULT_DIFF_TEMPLATES {
             if t.width != target_w || t.height != target_h {
                 continue;
             }
@@ -641,7 +641,7 @@ fn parse_rate_text(text: &str) -> Option<f32> {
     // 문자열에 소수점이 감지되지 않았고 파싱 결과가 MIN_VALID_RATE(80.0%) 이상인 경우
     // 소수점 이하 2자리가 정수로 취급되었다고 가정하고 100.0으로 나누어 보정합니다.
     // 이를 통해 0.00%가 900% 노이즈로 튈 때 9.00% 등으로 오보정되어 통과하는 부작용을 예방합니다.
-    if !dot_seen && value >= (crate::play_state::MIN_VALID_RATE * 100.0) {
+    if !dot_seen && value >= (crate::detector::play_state::MIN_VALID_RATE * 100.0) {
         value /= 100.0;
     }
 
@@ -650,7 +650,7 @@ fn parse_rate_text(text: &str) -> Option<f32> {
 
     // 유효한 실시간 기록으로 처리할 수 있는 최소 범위(MIN_VALID_RATE = 80.0%) 이상인 경우만 유효값으로 반환하고,
     // 0.00%가 4.00% 또는 9.00% 노이즈로 완벽하게 잘못 오인식되는 수치 등은 스캔 시점에 원천 배제합니다.
-    (crate::play_state::MIN_VALID_RATE..=100.0).contains(&value).then_some(value)
+    (crate::detector::play_state::MIN_VALID_RATE..=100.0).contains(&value).then_some(value)
 }
 
 fn normalize_alnum(text: &str) -> String {
@@ -720,8 +720,8 @@ mod tests {
     #[ignore]
     fn test_color_vs_grayscale_ocr() {
         use image::GenericImageView;
-        use crate::frame_utils::crop_roi;
-        use crate::roi::RoiManager;
+        use crate::capture::frame_utils::crop_roi;
+        use crate::detector::roi::RoiManager;
         use overmax_core::SceneType;
 
         let scratch_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
@@ -755,7 +755,7 @@ mod tests {
                 bgra[idx + 2] = pixel[0]; // R
                 bgra[idx + 3] = pixel[3]; // A
             }
-            let frame = crate::screen_capture::CapturedFrame {
+            let frame = crate::capture::screen_capture::CapturedFrame {
                 width: w as i32,
                 height: h as i32,
                 bgra,

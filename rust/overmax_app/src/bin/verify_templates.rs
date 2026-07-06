@@ -1,14 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use image::GenericImageView;
-use overmax_app::screen_capture::CapturedFrame;
-use overmax_app::roi::RoiManager;
-use overmax_app::ocr_engine::OcrDetector;
-use overmax_app::frame_utils::crop_roi;
+use overmax_app::capture::screen_capture::CapturedFrame;
+use overmax_app::detector::roi::RoiManager;
+use overmax_app::detector::ocr_engine::OcrDetector;
+use overmax_app::capture::frame_utils::crop_roi;
 use overmax_core::SceneType;
 
 // 자동 생성된 템플릿 배열 상수 바인딩
-use overmax_app::templates::digit::DIGIT_TEMPLATES;
+use overmax_app::detector::templates::digit::DIGIT_TEMPLATES;
 
 fn load_frame(path: &Path) -> Option<CapturedFrame> {
     let img = match image::open(path) {

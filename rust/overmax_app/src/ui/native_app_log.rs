@@ -1,5 +1,5 @@
-use crate::debug_ui;
-use crate::native_app::NativeApp;
+use crate::ui::debug_ui;
+use crate::ui::native_app::NativeApp;
 use eframe::egui;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};

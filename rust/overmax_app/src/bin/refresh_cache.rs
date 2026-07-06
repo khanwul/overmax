@@ -1,7 +1,7 @@
 use std::path::Path;
 use serde_json::Value;
 
-use overmax_app::cache_update;
+use overmax_app::system::cache_update;
 
 fn main() {
     // Current directory is the workspace rust directory when run from cargo

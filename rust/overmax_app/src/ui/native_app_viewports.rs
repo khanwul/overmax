@@ -3,14 +3,14 @@
 use eframe::egui::{self, Color32, RichText, Vec2, ViewportBuilder, ViewportCommand};
 use std::sync::atomic::Ordering;
 
-use crate::debug_ui;
-use crate::native_app::NativeApp;
-use crate::native_helpers;
-use crate::overlay_theme::Theme;
-use crate::overlay_ui;
-use crate::settings_ui;
-use crate::sync_ui;
-use crate::window_tracker;
+use crate::ui::debug_ui;
+use crate::ui::native_app::NativeApp;
+use crate::system::native_helpers;
+use crate::ui::overlay_theme::Theme;
+use crate::ui::overlay_ui;
+use crate::ui::settings_ui;
+use crate::ui::sync_ui;
+use crate::capture::window_tracker;
 
 fn game_window_title(settings: &serde_json::Value) -> &str {
     settings
@@ -480,7 +480,7 @@ impl eframe::App for NativeApp {
                     },
                 );
 
-                if actions.command == Some(crate::ui_command::UiCommand::UploadCurrentPattern) {
+                if actions.command == Some(crate::ui::ui_command::UiCommand::UploadCurrentPattern) {
                     self.upload_current_pattern(ctx.clone());
                 }
 

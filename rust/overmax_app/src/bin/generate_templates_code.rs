@@ -106,7 +106,7 @@ fn main() {
     }
     code.push_str("];\n");
     
-    let out_file_path = Path::new("rust/overmax_app/src/templates/digit.rs");
-    fs::write(out_file_path, code).expect("Failed to write templates/digit.rs");
+    let out_file_path = Path::new("rust/overmax_app/src/detector/templates/digit.rs");
+    fs::write(out_file_path, code).expect("Failed to write detector/templates/digit.rs");
     println!("Successfully generated Rust templates source in {:?}", out_file_path);
 }

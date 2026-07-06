@@ -1,8 +1,8 @@
 use std::sync::atomic::Ordering;
 
-use crate::debug_ui;
-use crate::native_app::NativeApp;
-use crate::ui_command::UiCommand;
+use crate::ui::debug_ui;
+use crate::ui::native_app::NativeApp;
+use crate::ui::ui_command::UiCommand;
 
 impl NativeApp {
     pub(crate) fn drain_ui_commands(&mut self) -> bool {
@@ -28,7 +28,7 @@ impl NativeApp {
         if self.ui_state.settings_open.load(Ordering::Relaxed) {
             if let Ok(guard) = self.ctx_holder.lock() {
                 if let Some(ctx) = guard.as_ref() {
-                    ctx.send_viewport_cmd_to(crate::native_helpers::vp_settings(), eframe::egui::ViewportCommand::Focus);
+                    ctx.send_viewport_cmd_to(crate::system::native_helpers::vp_settings(), eframe::egui::ViewportCommand::Focus);
                 }
             }
             return;
@@ -45,7 +45,7 @@ impl NativeApp {
         if self.ui_state.debug_open.load(Ordering::Relaxed) {
             if let Ok(guard) = self.ctx_holder.lock() {
                 if let Some(ctx) = guard.as_ref() {
-                    ctx.send_viewport_cmd_to(crate::native_helpers::vp_debug(), eframe::egui::ViewportCommand::Focus);
+                    ctx.send_viewport_cmd_to(crate::system::native_helpers::vp_debug(), eframe::egui::ViewportCommand::Focus);
                 }
             }
             return;
@@ -62,7 +62,7 @@ impl NativeApp {
         if self.ui_state.sync_open.load(Ordering::Relaxed) {
             if let Ok(guard) = self.ctx_holder.lock() {
                 if let Some(ctx) = guard.as_ref() {
-                    ctx.send_viewport_cmd_to(crate::native_helpers::vp_sync(), eframe::egui::ViewportCommand::Focus);
+                    ctx.send_viewport_cmd_to(crate::system::native_helpers::vp_sync(), eframe::egui::ViewportCommand::Focus);
                 }
             }
             return;
