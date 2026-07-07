@@ -92,43 +92,20 @@ impl OcrDetector {
         let w = rate.width as usize;
         let h = rate.height as usize;
 
-        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::detector::templates::digit::DIGIT_TEMPLATES.iter().map(|t| {
-            overmax_cv::CvTemplate {
-                char_val: t.char_val,
-                width: t.width,
-                height: t.height,
-                mask: t.mask,
-            }
-        }).collect();
+        let cv_templates = get_digit_templates();
 
         // 1. 고휘도 이진화 전처리
-        let mut max_y = 0u8;
-        let mut y_vals = vec![0u8; w * h];
-        for y in 0..h {
-            for x in 0..w {
-                let idx = (y * w + x) * 4;
-                let b = rate.bgra[idx];
-                let g = rate.bgra[idx + 1];
-                let r = rate.bgra[idx + 2];
-                // BT.601 휘도 가중치 변환
-                let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
-                y_vals[y * w + x] = y_val;
-                if y_val > max_y {
-                    max_y = y_val;
+        let (binary, threshold, max_y) = binarize_by_luminance(
+            rate,
+            |max, _| {
+                if max > 80 {
+                    ((max as f32 * 0.80) as u8).max(max.saturating_sub(45))
+                } else {
+                    180
                 }
-            }
-        }
-
-        let threshold = if max_y > 80 {
-            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(45))
-        } else {
-            180
-        };
-
-        let mut binary = vec![0u8; w * h];
-        for idx in 0..(w * h) {
-            binary[idx] = if y_vals[idx] >= threshold { 255 } else { 0 };
-        }
+            },
+            255,
+        );
 
         // 2. 수직 투영 분할
         let segments = match overmax_cv::segment_characters(&binary, w, h) {
@@ -184,42 +161,20 @@ impl OcrDetector {
         let w = score.width as usize;
         let h = score.height as usize;
 
-        let cv_templates: Vec<overmax_cv::CvTemplate> = crate::detector::templates::digit::DIGIT_TEMPLATES.iter().map(|t| {
-            overmax_cv::CvTemplate {
-                char_val: t.char_val,
-                width: t.width,
-                height: t.height,
-                mask: t.mask,
-            }
-        }).collect();
+        let cv_templates = get_digit_templates();
 
         // 1. 고휘도 이진화 전처리
-        let mut max_y = 0u8;
-        let mut y_vals = vec![0u8; w * h];
-        for y in 0..h {
-            for x in 0..w {
-                let idx = (y * w + x) * 4;
-                let b = score.bgra[idx];
-                let g = score.bgra[idx + 1];
-                let r = score.bgra[idx + 2];
-                let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
-                y_vals[y * w + x] = y_val;
-                if y_val > max_y {
-                    max_y = y_val;
+        let (binary, _, _) = binarize_by_luminance(
+            score,
+            |max, _| {
+                if max > 80 {
+                    ((max as f32 * 0.80) as u8).max(max.saturating_sub(45))
+                } else {
+                    180
                 }
-            }
-        }
-
-        let threshold = if max_y > 80 {
-            ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(45))
-        } else {
-            180
-        };
-
-        let mut binary = vec![0u8; w * h];
-        for idx in 0..(w * h) {
-            binary[idx] = if y_vals[idx] >= threshold { 255 } else { 0 };
-        }
+            },
+            255,
+        );
 
         // 2. 수직 투영 분할
         let segments = match overmax_cv::segment_characters(&binary, w, h) {
@@ -265,240 +220,103 @@ impl OcrDetector {
     pub fn detect_freestyle_mode(&self, mode_img: &ImageRegion) -> Option<String> {
         let w = mode_img.width as usize;
         let h = mode_img.height as usize;
-        let total = w * h;
-        if total == 0 {
+        if w * h == 0 {
             return None;
         }
 
-        // 고휘도 이진화 전처리 (0 또는 1)
-        let threshold = 120u8;
-        let mut binary = vec![0u8; total];
-        for y in 0..h {
-            for x in 0..w {
-                let idx = (y * w + x) * 4;
-                let b = mode_img.bgra[idx];
-                let g = mode_img.bgra[idx + 1];
-                let r = mode_img.bgra[idx + 2];
-                let luma = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
-                binary[y * w + x] = if luma >= threshold { 1 } else { 0 };
-            }
-        }
-
-        // 타겟 템플릿 크기(50x68)로 동적 리사이징 적용하여 해상도 차이 극복
+        let (binary, _, _) = binarize_by_luminance(mode_img, |_, _| 120, 1);
         let (target_w, target_h) = (50usize, 68usize);
-        let resized_binary = if w != target_w || h != target_h {
-            let mut dst = vec![0u8; target_w * target_h];
-            for dy in 0..target_h {
-                let sy = (dy * h) / target_h;
-                let sy_clamped = sy.min(h - 1);
-                for dx in 0..target_w {
-                    let sx = (dx * w) / target_w;
-                    let sx_clamped = sx.min(w - 1);
-                    dst[dy * target_w + dx] = binary[sy_clamped * w + sx_clamped];
-                }
-            }
-            dst
-        } else {
-            binary
-        };
+        let resized_binary = resize_binary(&binary, w, h, target_w, target_h);
 
-        let mut best_score = 0.0f32;
-        let mut best_label: Option<String> = None;
+        let t_infos: Vec<MatchTemplateInfo> = crate::detector::templates::result_mode::RESULT_MODE_TEMPLATES
+            .iter()
+            .map(|t| MatchTemplateInfo {
+                width: t.width,
+                height: t.height,
+                mask: &t.mask,
+                label: &t.mode_label,
+            })
+            .collect();
 
-        for t in &crate::detector::templates::result_mode::RESULT_MODE_TEMPLATES {
-            if t.width != target_w || t.height != target_h {
-                continue;
-            }
-            let mut matches = 0usize;
-            let compare_total = target_w * target_h;
-            for i in 0..compare_total {
-                if resized_binary[i] == t.mask[i] {
-                    matches += 1;
-                }
-            }
-            let score = matches as f32 / compare_total as f32;
-            if score > 0.80 && score > best_score {
-                best_score = score;
-                best_label = Some(t.mode_label.to_string());
-            }
-        }
-
-        best_label
+        match_best_template(&resized_binary, target_w, target_h, &t_infos, 0.80, |_| 0)
     }
 
     /// 결과 화면 전용 난이도 패널 영역을 템플릿 매칭으로 감지합니다.
     pub fn detect_result_difficulty(&self, diff_img: &ImageRegion) -> Option<String> {
         let w = diff_img.width as usize;
         let h = diff_img.height as usize;
-        let total = w * h;
-        if total == 0 {
+        if w * h == 0 {
             return None;
         }
 
-        // 동적 임계값 구하기
-        let mut max_y = 0u8;
-        let mut min_y = 255u8;
-        let mut luma_vals = vec![0u8; total];
-        for y in 0..h {
-            for x in 0..w {
-                let idx = (y * w + x) * 4;
-                let b = diff_img.bgra[idx];
-                let g = diff_img.bgra[idx + 1];
-                let r = diff_img.bgra[idx + 2];
-                let luma = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
-                luma_vals[y * w + x] = luma;
-                if luma > max_y { max_y = luma; }
-                if luma < min_y { min_y = luma; }
-            }
-        }
-
-        let threshold = if max_y - min_y > 30 {
-            (min_y as f32 + (max_y - min_y) as f32 * 0.55) as u8
-        } else {
-            120u8
-        };
-
-        let mut binary = vec![0u8; total];
-        for i in 0..total {
-            binary[i] = if luma_vals[i] >= threshold { 1 } else { 0 };
-        }
-
-        // 타겟 템플릿 크기(90x18)로 동적 리사이징 적용하여 해상도 차이 극복
+        let (binary, _, _) = binarize_by_luminance(
+            diff_img,
+            |max, min| {
+                if max - min > 30 {
+                    (min as f32 + (max - min) as f32 * 0.55) as u8
+                } else {
+                    120
+                }
+            },
+            1,
+        );
         let (target_w, target_h) = (90usize, 18usize);
-        let resized_binary = if w != target_w || h != target_h {
-            let mut dst = vec![0u8; target_w * target_h];
-            for dy in 0..target_h {
-                let sy = (dy * h) / target_h;
-                let sy_clamped = sy.min(h - 1);
-                for dx in 0..target_w {
-                    let sx = (dx * w) / target_w;
-                    let sx_clamped = sx.min(w - 1);
-                    dst[dy * target_w + dx] = binary[sy_clamped * w + sx_clamped];
-                }
-            }
-            dst
-        } else {
-            binary
-        };
+        let resized_binary = resize_binary(&binary, w, h, target_w, target_h);
 
-        let mut best_score = 0.0f32;
-        let mut best_label: Option<String> = None;
+        let t_infos: Vec<MatchTemplateInfo> = crate::detector::templates::result_diff::RESULT_DIFF_TEMPLATES
+            .iter()
+            .map(|t| MatchTemplateInfo {
+                width: t.width,
+                height: t.height,
+                mask: &t.mask,
+                label: &t.name,
+            })
+            .collect();
 
-        for t in &crate::detector::templates::result_diff::RESULT_DIFF_TEMPLATES {
-            if t.width != target_w || t.height != target_h {
-                continue;
-            }
-            let mut matches = 0usize;
-            let compare_total = target_w * target_h;
-            for i in 0..compare_total {
-                if resized_binary[i] == t.mask[i] {
-                    matches += 1;
-                }
-            }
-            let score = matches as f32 / compare_total as f32;
-            if score > 0.80 && score > best_score {
-                best_score = score;
-                best_label = Some(t.name.to_string());
-            }
-        }
-
-        best_label
+        match_best_template(&resized_binary, target_w, target_h, &t_infos, 0.80, |_| 0)
     }
 
     /// 오픈매치 결과 화면 전용 난이도 영역을 템플릿 매칭으로 감지합니다. (106x18 해상도 적용)
     pub fn detect_openmatch_result_difficulty(&self, diff_img: &ImageRegion) -> Option<String> {
         let w = diff_img.width as usize;
         let h = diff_img.height as usize;
-        let total = w * h;
-        if total == 0 {
+        if w * h == 0 {
             return None;
         }
 
-        // 동적 임계값 구하기
-        let mut max_y = 0u8;
-        let mut min_y = 255u8;
-        let mut luma_vals = vec![0u8; total];
-        for y in 0..h {
-            for x in 0..w {
-                let idx = (y * w + x) * 4;
-                let b = diff_img.bgra[idx];
-                let g = diff_img.bgra[idx + 1];
-                let r = diff_img.bgra[idx + 2];
-                let luma = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
-                luma_vals[y * w + x] = luma;
-                if luma > max_y { max_y = luma; }
-                if luma < min_y { min_y = luma; }
-            }
-        }
-
-        let threshold = if max_y - min_y > 30 {
-            (min_y as f32 + (max_y - min_y) as f32 * 0.55) as u8
-        } else {
-            120u8
-        };
-
-        let mut binary = vec![0u8; total];
-        for i in 0..total {
-            binary[i] = if luma_vals[i] >= threshold { 1 } else { 0 };
-        }
-
-        // 타겟 템플릿 크기(106x18)로 동적 리사이징 적용하여 해상도 차이 극복
-        let (target_w, target_h) = (106usize, 18usize);
-        let resized_binary = if w != target_w || h != target_h {
-            let mut dst = vec![0u8; target_w * target_h];
-            for dy in 0..target_h {
-                let sy = (dy * h) / target_h;
-                let sy_clamped = sy.min(h - 1);
-                for dx in 0..target_w {
-                    let sx = (dx * w) / target_w;
-                    let sx_clamped = sx.min(w - 1);
-                    dst[dy * target_w + dx] = binary[sy_clamped * w + sx_clamped];
+        let (binary, _, _) = binarize_by_luminance(
+            diff_img,
+            |max, min| {
+                if max - min > 30 {
+                    (min as f32 + (max - min) as f32 * 0.55) as u8
+                } else {
+                    120
                 }
-            }
-            dst
-        } else {
-            binary
-        };
+            },
+            1,
+        );
+        let (target_w, target_h) = (106usize, 18usize);
+        let resized_binary = resize_binary(&binary, w, h, target_w, target_h);
 
-        let mut best_score = 0.0f32;
-        let mut best_label: Option<String> = None;
+        let t_infos: Vec<MatchTemplateInfo> = crate::detector::templates::result_diff::RESULT_DIFF_OPEN_TEMPLATES
+            .iter()
+            .map(|t| MatchTemplateInfo {
+                width: t.width,
+                height: t.height,
+                mask: &t.mask,
+                label: &t.name,
+            })
+            .collect();
 
-        for t in &crate::detector::templates::result_diff::RESULT_DIFF_OPEN_TEMPLATES {
-            if t.width != target_w || t.height != target_h {
-                continue;
-            }
-            
-            let safe_x = match t.name {
+        match_best_template(&resized_binary, target_w, target_h, &t_infos, 0.80, |label| {
+            match label {
                 "NM" => 15,
                 "HD" => 35,
                 "MX" => 0,
                 "SC" => 55,
                 _ => 0,
-            };
-
-            let mut matches = 0usize;
-            let compare_total = target_w * target_h;
-            
-            for dy in 0..target_h {
-                for dx in 0..target_w {
-                    let i = dy * target_w + dx;
-                    if dx < safe_x {
-                        // safe_x 미만 영역은 배경 노이즈 무시를 위해 무조건 일치 처리
-                        matches += 1;
-                    } else if resized_binary[i] == t.mask[i] {
-                        matches += 1;
-                    }
-                }
             }
-            
-            let score = matches as f32 / compare_total as f32;
-            if score > 0.80 && score > best_score {
-                best_score = score;
-                best_label = Some(t.name.to_string());
-            }
-        }
-
-        best_label
+        })
     }
 
     pub fn recognize_text_color(&self, region: &ImageRegion) -> Option<String> {
@@ -575,6 +393,117 @@ fn scene_label(scene: SceneType) -> String {
         SceneType::ResultOpen2 => "RESULT_OPEN2".to_string(),
         _ => "UNKNOWN".to_string(),
     }
+}
+
+fn binarize_by_luminance(
+    img: &ImageRegion,
+    threshold_calc: impl FnOnce(u8, u8) -> u8,
+    foreground_value: u8,
+) -> (Vec<u8>, u8, u8) {
+    let w = img.width as usize;
+    let h = img.height as usize;
+    let total = w * h;
+    let mut max_y = 0u8;
+    let mut min_y = 255u8;
+    let mut luma_vals = vec![0u8; total];
+    for y in 0..h {
+        for x in 0..w {
+            let idx = (y * w + x) * 4;
+            let b = img.bgra[idx];
+            let g = img.bgra[idx + 1];
+            let r = img.bgra[idx + 2];
+            let luma = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
+            luma_vals[y * w + x] = luma;
+            if luma > max_y { max_y = luma; }
+            if luma < min_y { min_y = luma; }
+        }
+    }
+
+    let threshold = threshold_calc(max_y, min_y);
+    let mut binary = vec![0u8; total];
+    for i in 0..total {
+        binary[i] = if luma_vals[i] >= threshold { foreground_value } else { 0 };
+    }
+    (binary, threshold, max_y)
+}
+
+fn resize_binary(
+    binary: &[u8],
+    w: usize,
+    h: usize,
+    target_w: usize,
+    target_h: usize,
+) -> Vec<u8> {
+    if w == target_w && h == target_h {
+        return binary.to_vec();
+    }
+    let mut dst = vec![0u8; target_w * target_h];
+    for dy in 0..target_h {
+        let sy = (dy * h) / target_h;
+        let sy_clamped = sy.min(h - 1);
+        for dx in 0..target_w {
+            let sx = (dx * w) / target_w;
+            let sx_clamped = sx.min(w - 1);
+            dst[dy * target_w + dx] = binary[sy_clamped * w + sx_clamped];
+        }
+    }
+    dst
+}
+
+fn get_digit_templates() -> Vec<overmax_cv::CvTemplate<'static>> {
+    crate::detector::templates::digit::DIGIT_TEMPLATES
+        .iter()
+        .map(|t| overmax_cv::CvTemplate {
+            char_val: t.char_val,
+            width: t.width,
+            height: t.height,
+            mask: t.mask,
+        })
+        .collect()
+}
+
+struct MatchTemplateInfo<'a> {
+    width: usize,
+    height: usize,
+    mask: &'a [u8],
+    label: &'a str,
+}
+
+fn match_best_template(
+    resized_binary: &[u8],
+    target_w: usize,
+    target_h: usize,
+    templates: &[MatchTemplateInfo],
+    min_score: f32,
+    safe_x_calc: impl Fn(&str) -> usize,
+) -> Option<String> {
+    let mut best_score = 0.0f32;
+    let mut best_label: Option<String> = None;
+    let compare_total = target_w * target_h;
+
+    for t in templates {
+        if t.width != target_w || t.height != target_h {
+            continue;
+        }
+        let safe_x = safe_x_calc(t.label);
+        let mut matches = 0usize;
+        for dy in 0..target_h {
+            for dx in 0..target_w {
+                let i = dy * target_w + dx;
+                if dx < safe_x {
+                    matches += 1;
+                } else if resized_binary[i] == t.mask[i] {
+                    matches += 1;
+                }
+            }
+        }
+        let score = matches as f32 / compare_total as f32;
+        if score > min_score && score > best_score {
+            best_score = score;
+            best_label = Some(t.label.to_string());
+        }
+    }
+    best_label
 }
 
 struct WindowsOcrEngine {
