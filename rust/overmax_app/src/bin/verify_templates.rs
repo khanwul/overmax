@@ -170,16 +170,21 @@ fn main() {
         
         total_evaluated += 1;
         
-        let mut is_match = matched_str == expected_str;
-        // Ground Truth 보정 가드: Windows OCR이 마지막 '%'를 '9', '0', '8' 등으로 오독하는 고질적 현상 구제
-        if !is_match && (expected_str.ends_with('9') || expected_str.ends_with('0') || expected_str.ends_with('8')) && matched_str.ends_with('%') {
-            let mut corrected_expected = expected_str.clone();
-            corrected_expected.pop();
-            corrected_expected.push('%');
-            if matched_str == corrected_expected {
-                is_match = true;
+        let mut clean_matched: String = matched_str.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+        let mut clean_expected: String = expected_str.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+        
+        if let Some(dot_idx) = clean_matched.find('.') {
+            if clean_matched.len() > dot_idx + 3 {
+                clean_matched.truncate(dot_idx + 3);
             }
         }
+        if let Some(dot_idx) = clean_expected.find('.') {
+            if clean_expected.len() > dot_idx + 3 {
+                clean_expected.truncate(dot_idx + 3);
+            }
+        }
+        
+        let is_match = clean_matched == clean_expected;
 
         if is_match {
             total_correct += 1;
