@@ -8,6 +8,13 @@ use std::collections::VecDeque;
 
 pub const MIN_VALID_RATE: f32 = 80.0;
 
+macro_rules! debug_println {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        println!($($arg)*);
+    };
+}
+
 const BTN_MODE_MAX_DIST: f32 = 60.0;
 const DIFF_MIN_BRIGHTNESS: f32 = 45.0;
 const DIFF_CONFIDENT_MARGIN: f32 = 15.0;
@@ -166,7 +173,7 @@ impl PlayStateDetector {
         let metadata_changed = song_id_changed || mode_changed || diff_changed;
 
         let mut telemetry = None;
-        println!("    [detect] song_id={:?}, mode={:?}, diff={:?}, confident={}", song_id, mode, diff, confident);
+        debug_println!("    [detect] song_id={:?}, mode={:?}, diff={:?}, confident={}", song_id, mode, diff, confident);
         let context = if let (Some(sid), Some(m), Some(d)) = (song_id, mode, diff) {
             if confident {
                 let mut rate = 0.0;
@@ -189,7 +196,7 @@ impl PlayStateDetector {
                                 if let Some(score_roi) = rois.get_roi("score") {
                                     if let Some(score_img) = crop_roi(frame, score_roi) {
                                         if let Some(score_val) = ocr.detect_score(&score_img) {
-                                            println!("    [detect] score OCR run. score={}", score_val);
+                                            debug_println!("    [detect] score OCR run. score={}", score_val);
                                             let calc_rate = score_val as f32 / 10000.0;
                                             
                                             // 선곡창인 경우 스코어 OCR 오인식에 대비하여 엄격한 가드 적용
@@ -215,7 +222,7 @@ impl PlayStateDetector {
                                 }
                             }
 
-                            println!("    [detect] rate OCR run. rate={:?}, text='{}'", rate_res.0, rate_res.1);
+                            debug_println!("    [detect] rate OCR run. rate={:?}, text='{}'", rate_res.0, rate_res.1);
                             
                             if is_result {
                                 if let Some(new_r) = rate_res.0 {
@@ -464,17 +471,17 @@ fn resolve_most_plausible_rate(rate_ocr: f32, score_rate: f32, is_song_select: b
 
     if score_plaus != ocr_plaus {
         if score_plaus > ocr_plaus {
-            println!("    [detect] Plausibility: Trusting Score Rate ({:.2}%) over Rate OCR ({:.2}%)", score_rate, rate_ocr);
+            debug_println!("    [detect] Plausibility: Trusting Score Rate ({:.2}%) over Rate OCR ({:.2}%)", score_rate, rate_ocr);
             return Some((score_rate * 100.0).floor() / 100.0);
         } else {
-            println!("    [detect] Plausibility: Trusting Rate OCR ({:.2}%) over Score Rate ({:.2}%)", rate_ocr, score_rate);
+            debug_println!("    [detect] Plausibility: Trusting Rate OCR ({:.2}%) over Score Rate ({:.2}%)", rate_ocr, score_rate);
             return Some(rate_ocr);
         }
     }
 
     if is_song_select {
         // 신뢰 레벨이 같고 오차가 큰 선곡창은 보수적으로 원래 Rate OCR 유지
-        println!("    [detect] Plausibility tie in song select. Keeping Rate OCR: {:.2}%", rate_ocr);
+        debug_println!("    [detect] Plausibility tie in song select. Keeping Rate OCR: {:.2}%", rate_ocr);
         Some(rate_ocr)
     } else {
         // 결과창은 스코어 역산 값을 우선 신뢰

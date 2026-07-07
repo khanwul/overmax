@@ -7,6 +7,13 @@ use crate::capture::screen_capture::CapturedFrame;
 use overmax_core::{GameSessionState, SceneType};
 use overmax_data::ImageIndexDb;
 
+macro_rules! debug_println {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        println!($($arg)*);
+    };
+}
+
 const JACKET_MATCH_INTERVAL: f64 = 0.25;
 const JACKET_CHANGE_THRESHOLD: f32 = 2.5;
 const JACKET_FORCE_RECHECK_SEC: f64 = 2.0;
@@ -142,7 +149,7 @@ impl DetectionPipeline {
             // 선곡 화면에서 플레이 진입(이탈) 시, 직전의 곡 ID를 플레이 이력으로 기록
             if self.hysteresis.is_active && self.current_song_id.is_some() {
                 self.last_played_song_id = self.current_song_id;
-                println!("    [process_frame_shared] Saved last_played_song_id={:?} upon gameplay entry", self.last_played_song_id);
+                debug_println!("    [process_frame_shared] Saved last_played_song_id={:?} upon gameplay entry", self.last_played_song_id);
             }
             // 결과창 상태를 완전히 빠져나가는 경우에도 플레이 이력 소멸
             if !is_result {
@@ -165,7 +172,7 @@ impl DetectionPipeline {
             // 선곡 화면에서 나갈 때도 플레이 이력 확보
             if self.current_song_id.is_some() {
                 self.last_played_song_id = self.current_song_id;
-                println!("    [process_frame_shared] Saved last_played_song_id={:?} upon leaving", self.last_played_song_id);
+                debug_println!("    [process_frame_shared] Saved last_played_song_id={:?} upon leaving", self.last_played_song_id);
             }
             return self.output(
                 logo_detected,
@@ -225,14 +232,14 @@ impl DetectionPipeline {
         };
 
         let Some(logo) = crop_roi(frame, logo_roi) else {
-            println!("    [detect_logo_if_due] logo crop failed! now={}", now);
+            debug_println!("    [detect_logo_if_due] logo crop failed! now={}", now);
             self.last_logo_scene = SceneType::Unknown;
             self.last_logo_ocr_ts = now;
             return Some(SceneType::Unknown);
         };
         
         let (scene, raw_text, _label) = self.ocr.detect_logo(&logo);
-        println!("    [detect_logo_if_due] now={}, crop_size={}x{}, OCR raw='{}', scene={:?}",
+        debug_println!("    [detect_logo_if_due] now={}, crop_size={}x{}, OCR raw='{}', scene={:?}",
                  now, logo.width, logo.height, raw_text, scene);
 
         let mut scene_res = scene;
@@ -267,10 +274,10 @@ impl DetectionPipeline {
                         ext_img.height as usize,
                         margin as usize,
                     ) {
-                        println!("    [detect_logo_if_due] Result screen jacket edge strength: {}", edge_strength);
+                        debug_println!("    [detect_logo_if_due] Result screen jacket edge strength: {}", edge_strength);
                         if edge_strength >= 15.0 {
                             scene_res = SceneType::ResultFreestyle;
-                            println!("    [detect_logo_if_due] Bypassed logo OCR: Result screen detected via jacket edge strength!");
+                            debug_println!("    [detect_logo_if_due] Bypassed logo OCR: Result screen detected via jacket edge strength!");
                         }
                     }
                 }
@@ -285,7 +292,7 @@ impl DetectionPipeline {
                 || norm_logo.contains("TUNE");
             if has_logo_keyword {
                 scene_res = self.last_logo_scene;
-                println!("    [detect_logo_if_due] Lock-in: keeping previous result scene {:?} due to logo keyword match", scene_res);
+                debug_println!("    [detect_logo_if_due] Lock-in: keeping previous result scene {:?} due to logo keyword match", scene_res);
             }
         }
 
@@ -318,7 +325,7 @@ impl DetectionPipeline {
                                 4,
                             ) {
                                 if let Ok(song_id) = match_res.image_id.parse::<u32>() {
-                                    println!(
+                                    debug_println!(
                                         "    [detect_logo_if_due] Result screen jacket verified. SongID={}, Similarity={}",
                                         song_id, match_res.similarity
                                     );
@@ -337,12 +344,12 @@ impl DetectionPipeline {
                     // (결과 화면 폰트가 선곡 화면과 달라 템플릿 매칭이 실패하므로)
                     if scene_res == SceneType::ResultFreestyle {
                         if let Some(mode) = self.ocr.parse_mode_from_text(&raw_text) {
-                            println!("    [detect_logo_if_due] Parsed mode '{}' from logo text '{}'", mode, raw_text.trim());
+                            debug_println!("    [detect_logo_if_due] Parsed mode '{}' from logo text '{}'", mode, raw_text.trim());
                             self.play_state.set_logo_mode(mode);
                         }
                     }
                 } else {
-                    println!("    [detect_logo_if_due] Result screen jacket verification failed. Rejecting scene.");
+                    debug_println!("    [detect_logo_if_due] Result screen jacket verification failed. Rejecting scene.");
                     self.result_scene_streak = 0;
                     self.last_detected_result_scene = SceneType::Unknown;
                     self.last_logo_scene = SceneType::Unknown;
