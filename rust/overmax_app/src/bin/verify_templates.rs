@@ -3,8 +3,10 @@ use std::path::Path;
 use image::GenericImageView;
 use overmax_engine::capture::screen_capture::CapturedFrame;
 use overmax_engine::detector::roi::RoiManager;
+use overmax_engine::detector::ocr_engine::OcrDetector;
 use overmax_engine::capture::frame_utils::crop_roi;
 use overmax_core::SceneType;
+use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
 
 // 자동 생성된 템플릿 배열 상수 바인딩
 use overmax_engine::detector::templates::digit::DIGIT_TEMPLATES;
@@ -115,6 +117,10 @@ fn main() {
         }
     }).collect();
     
+    // WinRT COM MTA 초기화 강제 수행 (데드락 완벽 예방)
+    let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
+    
+    let ocr = OcrDetector::new();
     let mut rois = RoiManager::new(1920, 1080);
     
     let mut total_evaluated = 0;
@@ -125,34 +131,65 @@ fn main() {
         let filename = path.file_name().unwrap().to_string_lossy().to_string();
         let Some(frame) = load_frame(&path) else { continue; };
         
-        let (scene, expected_str, val) = match filename.as_str() {
-            "1783012896.jpg" => (SceneType::ResultFreestyle, "99.78%".to_string(), 99.78),
-            "20260701011933_1.jpg" => (SceneType::ResultFreestyle, "100.00%".to_string(), 100.00),
-            "20260701011939_1.jpg" => (SceneType::ResultFreestyle, "97.90%".to_string(), 97.90),
-            "20260701123442_1.jpg" => (SceneType::ResultOpen3, "100.00%".to_string(), 100.00),
-            "20260701123449_1.jpg" => (SceneType::ResultOpen3, "97.25%".to_string(), 97.25),
-            "20260701124303_1.jpg" => (SceneType::ResultOpen3, "99.63%".to_string(), 99.63),
-            "20260701124615_1.jpg" => (SceneType::ResultOpen3, "99.20%".to_string(), 99.20),
-            "20260701124917_1.jpg" => (SceneType::ResultOpen3, "97.04%".to_string(), 97.04),
-            "20260701164242_1.jpg" => (SceneType::ResultOpen3, "99.82%".to_string(), 99.82),
-            "20260701164800_1.jpg" => (SceneType::ResultOpen3, "99.66%".to_string(), 99.66),
-            "20260701165356_1.jpg" => (SceneType::ResultOpen3, "99.70%".to_string(), 99.70),
-            "20260701172550_1.jpg" => (SceneType::ResultOpen3, "99.95%".to_string(), 99.95),
-            "20260701173729_1.jpg" => (SceneType::ResultOpen3, "99.23%".to_string(), 99.23),
-            "20260702232716_1.jpg" => (SceneType::ResultOpen3, "97.25%".to_string(), 97.25),
-            "20260702233310_1.jpg" => (SceneType::ResultOpen3, "99.54%".to_string(), 99.54),
-            "20260702233605_1.jpg" => (SceneType::ResultOpen3, "99.98%".to_string(), 99.98),
-            "20260702233900_1.jpg" => (SceneType::ResultOpen3, "99.58%".to_string(), 99.58),
-            "20260703020235_1.jpg" => (SceneType::ResultOpen3, "99.76%".to_string(), 99.76),
-            _ => {
-                total_skipped += 1;
-                continue;
-            }
+        // 씬 판별
+        let logo_roi = match rois.get_roi("logo") {
+            Some(roi) => roi,
+            None => continue,
         };
+        let logo_img = match crop_roi(&frame, logo_roi) {
+            Some(img) => img,
+            None => continue,
+        };
+        let (mut scene, _, _) = ocr.detect_logo(&logo_img);
+        
+        // 씬 Unknown 이면 파일명으로 유추
+        if scene == SceneType::Unknown {
+            let fname = filename.to_lowercase();
+            if fname.contains("freestyle") {
+                scene = SceneType::Freestyle;
+            } else if fname.contains("open") || fname.contains("match") {
+                scene = SceneType::OpenMatch;
+            } else if fname.contains("hd_test_2p") {
+                scene = SceneType::ResultOpen2;
+            } else if fname.contains("hd_test_1") || fname.contains("hd_test_3") {
+                scene = SceneType::ResultOpen3;
+            } else if fname.contains("hd_test") {
+                scene = SceneType::ResultFreestyle;
+            }
+        }
+        
+        if scene == SceneType::Unknown {
+            total_skipped += 1;
+            continue;
+        }
         
         rois.set_scene(scene);
-        let Some(rate_roi) = rois.get_roi("rate") else { continue; };
-        let Some(rate_img) = crop_roi(&frame, rate_roi) else { continue; };
+        let Some(rate_roi) = rois.get_roi("rate") else {
+            total_skipped += 1;
+            continue;
+        };
+        let Some(rate_img) = crop_roi(&frame, rate_roi) else {
+            total_skipped += 1;
+            continue;
+        };
+        
+        // 1. Windows OCR로 예상 텍스트 추출 (Ground Truth)
+        let (rate_val, raw_txt, _) = ocr.detect_rate(&rate_img);
+        let Some(val) = rate_val else {
+            total_skipped += 1;
+            continue;
+        };
+        
+        // OCR 텍스트 정규화
+        let expected_str: String = raw_txt
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '%')
+            .collect();
+            
+        if expected_str.is_empty() {
+            total_skipped += 1;
+            continue;
+        }
         
         // 2. 픽셀 전처리 및 수직 분할
         let binary = threshold_luminance(&rate_img.bgra, rate_img.width as usize, rate_img.height as usize);
