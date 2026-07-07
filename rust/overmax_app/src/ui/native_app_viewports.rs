@@ -740,29 +740,55 @@ impl NativeApp {
         data.found_hwnd
     }
 
+    fn game_hwnd_cached(&mut self) -> Option<HWND> {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let mut g_hwnd = self.cached_game_hwnd.map(|h| h as HWND);
+        let is_valid = g_hwnd.map(|h| unsafe { IsWindow(h) } != 0).unwrap_or(false);
+        if !is_valid {
+            let game_title = if let Ok(m) = self.settings.merged.lock() {
+                game_window_title(&m).to_string()
+            } else {
+                "DJMAX RESPECT V".to_string()
+            };
+            let title_wide = window_tracker::encode_wide(&game_title);
+            g_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
+            self.cached_game_hwnd = g_hwnd.map(|h| h as isize);
+        }
+        g_hwnd
+    }
+
+    fn apply_style_and_opacity(hwnd: HWND, is_active: bool, opacity: f32) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        unsafe {
+            if IsWindow(hwnd) == 0 {
+                return false;
+            }
+            let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+            let topmost_flag = if is_active { WS_EX_TOPMOST as i32 } else { 0 };
+            let target_style = (style & !(WS_EX_TOPMOST as i32)) | topmost_flag | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32;
+            if style != target_style {
+                SetWindowLongW(hwnd, GWL_EXSTYLE, target_style);
+            }
+            SetWindowPos(
+                hwnd,
+                if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST },
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
+            SetLayeredWindowAttributes(hwnd, 0, (opacity * 255.0) as u8, 0x00000002) != 0
+        }
+    }
+
     fn apply_window_opacity(&mut self, opacity: f32, force_topmost: bool) -> bool {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
         // 1. 캐싱된 핸들이 있고 투명도가 올바르게 유지되고 있다면 조기 반환
         if let Some(hwnd_val) = self.cached_hwnd {
             let hwnd = hwnd_val as HWND;
-
-            // [성능 개선] 매 프레임 FindWindowW를 부르지 않도록 게임 HWND 캐싱 & 유효성 검사
-            let game_hwnd = {
-                let mut g_hwnd = self.cached_game_hwnd.map(|h| h as HWND);
-                let is_valid = g_hwnd.map(|h| unsafe { IsWindow(h) } != 0).unwrap_or(false);
-                if !is_valid {
-                    let game_title = if let Ok(m) = self.settings.merged.lock() {
-                        game_window_title(&m).to_string()
-                    } else {
-                        "DJMAX RESPECT V".to_string()
-                    };
-                    let title_wide = window_tracker::encode_wide(&game_title);
-                    g_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
-                    self.cached_game_hwnd = g_hwnd.map(|h| h as isize);
-                }
-                g_hwnd
-            };
+            let game_hwnd = self.game_hwnd_cached();
 
             // 게임 창을 Owner로 지정하여 항상 오버레이가 게임 위에 렌더링되도록 보장
             if let Some(g_hwnd) = game_hwnd {
@@ -789,20 +815,9 @@ impl NativeApp {
             }
             
             // 캐시된 핸들은 유효하나 스타일이나 투명도가 풀린 경우: 바로 재적용 시도
-            if unsafe { IsWindow(hwnd) } != 0 {
-                let style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
-                let topmost_flag = if is_active { WS_EX_TOPMOST as i32 } else { 0 };
-                let target_style = (style & !(WS_EX_TOPMOST as i32)) | topmost_flag | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32;
-                if style != target_style {
-                    unsafe { SetWindowLongW(hwnd, GWL_EXSTYLE, target_style) };
-                }
-                unsafe {
-                    SetWindowPos(hwnd, if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST }, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-                }
-                if unsafe { SetLayeredWindowAttributes(hwnd, 0, (opacity * 255.0) as u8, 0x00000002) } != 0 {
-                    self.last_applied_opacity = Some(opacity);
-                    return true;
-                }
+            if Self::apply_style_and_opacity(hwnd, is_active, opacity) {
+                self.last_applied_opacity = Some(opacity);
+                return true;
             }
         }
 
@@ -814,22 +829,7 @@ impl NativeApp {
                 format!("[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})", opacity, hwnd),
             );
 
-            // [성능 개선] 매 프레임 FindWindowW를 부르지 않도록 게임 HWND 캐싱 & 유효성 검사
-            let game_hwnd = {
-                let mut g_hwnd = self.cached_game_hwnd.map(|h| h as HWND);
-                let is_valid = g_hwnd.map(|h| unsafe { IsWindow(h) } != 0).unwrap_or(false);
-                if !is_valid {
-                    let game_title = if let Ok(m) = self.settings.merged.lock() {
-                        game_window_title(&m).to_string()
-                    } else {
-                        "DJMAX RESPECT V".to_string()
-                    };
-                    let title_wide = window_tracker::encode_wide(&game_title);
-                    g_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
-                    self.cached_game_hwnd = g_hwnd.map(|h| h as isize);
-                }
-                g_hwnd
-            };
+            let game_hwnd = self.game_hwnd_cached();
 
             if let Some(g_hwnd) = game_hwnd {
                 unsafe {
@@ -839,19 +839,10 @@ impl NativeApp {
 
             let is_active = self.determine_active_state(game_hwnd);
 
-            unsafe {
-                let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-                let topmost_flag = if is_active { WS_EX_TOPMOST as i32 } else { 0 };
-                let target_style = (style & !(WS_EX_TOPMOST as i32)) | topmost_flag | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32;
-                if style != target_style {
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, target_style);
-                }
-                SetWindowPos(hwnd, if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST }, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-                if SetLayeredWindowAttributes(hwnd, 0, (opacity * 255.0) as u8, 0x00000002) != 0 {
-                    self.cached_hwnd = Some(hwnd as isize);
-                    self.last_applied_opacity = Some(opacity);
-                    return true;
-                }
+            if Self::apply_style_and_opacity(hwnd, is_active, opacity) {
+                self.cached_hwnd = Some(hwnd as isize);
+                self.last_applied_opacity = Some(opacity);
+                return true;
             }
         }
         false
