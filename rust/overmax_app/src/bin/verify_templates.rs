@@ -91,7 +91,7 @@ fn main() {
                 let path = entry.path();
                 let fname = path.file_name().unwrap().to_string_lossy().to_string();
                 let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-                if (ext == "png" || ext == "jpg" || ext == "jpeg") 
+                if (ext == "jpg" || ext == "jpeg") 
                     && !fname.contains("_mcbadge_") 
                     && !fname.starts_with("cropped_")
                     && !fname.starts_with("debug_") 
@@ -119,6 +119,7 @@ fn main() {
     
     let mut total_evaluated = 0;
     let mut total_correct = 0;
+    let mut total_skipped = 0;
     
     for path in paths {
         let filename = path.file_name().unwrap().to_string_lossy().to_string();
@@ -143,7 +144,10 @@ fn main() {
             "20260702233605_1.jpg" => (SceneType::ResultOpen3, "99.98%".to_string(), 99.98),
             "20260702233900_1.jpg" => (SceneType::ResultOpen3, "99.58%".to_string(), 99.58),
             "20260703020235_1.jpg" => (SceneType::ResultOpen3, "99.76%".to_string(), 99.76),
-            _ => continue,
+            _ => {
+                total_skipped += 1;
+                continue;
+            }
         };
         
         rois.set_scene(scene);
@@ -203,8 +207,10 @@ fn main() {
     
     println!("\n==================================================");
     println!("Evaluation Summary:");
-    println!("Total Evaluated Rates: {}", total_evaluated);
-    println!("Successfully Matched:  {}", total_correct);
+    println!("Total Original Screenshots: {}", total_evaluated + total_skipped);
+    println!("  - Rate Evaluated Rates:   {}", total_evaluated);
+    println!("  - Successfully Matched:   {}", total_correct);
+    println!("  - Normal Skipped (No Rate): {}", total_skipped);
     println!("Template Matching Accuracy: {:.2}%", accuracy);
     println!("==================================================");
 }
