@@ -412,7 +412,7 @@ fn binarize_by_luminance(
             let b = img.bgra[idx];
             let g = img.bgra[idx + 1];
             let r = img.bgra[idx + 2];
-            let luma = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
+            let luma = ((r as u32 + g as u32 + b as u32) / 3) as u8;
             luma_vals[y * w + x] = luma;
             if luma > max_y { max_y = luma; }
             if luma < min_y { min_y = luma; }

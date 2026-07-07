@@ -19,6 +19,10 @@ path = "src/main.rs"
 name = "test_screenshots"
 path = "src/bin/test_screenshots.rs"
 
+[[bin]]
+name = "sweep_test"
+path = "src/bin/sweep_test.rs"
+
 [dependencies]
 overmax-engine = { path = "../overmax_engine" }
 eframe = { version = "0.33.2", default-features = false, features = [
