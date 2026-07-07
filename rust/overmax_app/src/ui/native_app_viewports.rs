@@ -577,9 +577,8 @@ impl eframe::App for NativeApp {
                             };
                             
                             // 이전 설정 좌표 및 크기와 다른 경우에만 SetWindowPos 호출
-                            static mut PREV_SNAP_GEOMETRY: Option<(i32, i32, i32, i32)> = None;
                             let current_geom = (px, py, overlay_w_px, overlay_h_px);
-                            let geom_changed = unsafe { PREV_SNAP_GEOMETRY != Some(current_geom) };
+                            let geom_changed = self.prev_snap_geometry != Some(current_geom);
 
                             if geom_changed {
                                 unsafe {
@@ -592,8 +591,8 @@ impl eframe::App for NativeApp {
                                         overlay_h_px,
                                         SWP_NOACTIVATE,
                                     );
-                                    PREV_SNAP_GEOMETRY = Some(current_geom);
                                 }
+                                self.prev_snap_geometry = Some(current_geom);
                             }
                         }
                     }
@@ -607,12 +606,9 @@ impl eframe::App for NativeApp {
             if overlay_on {
                 let found = self.apply_window_opacity(opacity, force_topmost);
                 if !found {
-                    static mut LOGGED: bool = false;
-                    unsafe {
-                        if !LOGGED {
-                            debug_ui::push_log(&self.debug_state.log_lines, self.max_log_lines(), format!("[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})", opacity));
-                            LOGGED = true;
-                        }
+                    if !self.logged_opacity_fail {
+                        debug_ui::push_log(&self.debug_state.log_lines, self.max_log_lines(), format!("[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})", opacity));
+                        self.logged_opacity_fail = true;
                     }
                 }
             } else {

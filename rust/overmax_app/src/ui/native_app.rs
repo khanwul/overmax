@@ -268,6 +268,10 @@ pub struct NativeApp {
     pub(crate) cached_game_hwnd: Option<isize>,
     #[cfg(target_os = "windows")]
     pub(crate) last_applied_opacity: Option<f32>,
+    #[cfg(target_os = "windows")]
+    pub(crate) logged_opacity_fail: bool,
+    #[cfg(target_os = "windows")]
+    pub(crate) prev_snap_geometry: Option<(i32, i32, i32, i32)>,
     pub(crate) last_painted_rect: Option<egui::Rect>,
 }
 
@@ -482,6 +486,10 @@ impl NativeApp {
             cached_game_hwnd: None,
             #[cfg(target_os = "windows")]
             last_applied_opacity: None,
+            #[cfg(target_os = "windows")]
+            logged_opacity_fail: false,
+            #[cfg(target_os = "windows")]
+            prev_snap_geometry: None,
             last_painted_rect: None,
         };
 
