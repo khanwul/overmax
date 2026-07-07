@@ -127,3 +127,5 @@ pub fn match_character(
 ) -> Result<Option<(char, f32)>, error::CvError> {
     Ok(image::match_character(char_bin, char_w, char_h, templates))
 }
+
+pub use image::{LumaMethod, binarize_by_luminance};

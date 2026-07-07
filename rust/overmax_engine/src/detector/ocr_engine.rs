@@ -400,31 +400,14 @@ fn binarize_by_luminance(
     threshold_calc: impl FnOnce(u8, u8) -> u8,
     foreground_value: u8,
 ) -> (Vec<u8>, u8, u8) {
-    let w = img.width as usize;
-    let h = img.height as usize;
-    let total = w * h;
-    let mut max_y = 0u8;
-    let mut min_y = 255u8;
-    let mut luma_vals = vec![0u8; total];
-    for y in 0..h {
-        for x in 0..w {
-            let idx = (y * w + x) * 4;
-            let b = img.bgra[idx];
-            let g = img.bgra[idx + 1];
-            let r = img.bgra[idx + 2];
-            let luma = ((r as u32 + g as u32 + b as u32) / 3) as u8;
-            luma_vals[y * w + x] = luma;
-            if luma > max_y { max_y = luma; }
-            if luma < min_y { min_y = luma; }
-        }
-    }
-
-    let threshold = threshold_calc(max_y, min_y);
-    let mut binary = vec![0u8; total];
-    for i in 0..total {
-        binary[i] = if luma_vals[i] >= threshold { foreground_value } else { 0 };
-    }
-    (binary, threshold, max_y)
+    overmax_cv::binarize_by_luminance(
+        &img.bgra,
+        img.width as usize,
+        img.height as usize,
+        overmax_cv::LumaMethod::Average,
+        threshold_calc,
+        foreground_value,
+    )
 }
 
 fn resize_binary(

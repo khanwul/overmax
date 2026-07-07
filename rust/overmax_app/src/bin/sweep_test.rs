@@ -22,37 +22,19 @@ fn binarize_by_luminance(
     threshold_calc: impl FnOnce(u8, u8) -> u8,
     foreground_value: u8,
 ) -> (Vec<u8>, u8, u8) {
-    let w = img.width;
-    let h = img.height;
-    let total = w * h;
-    let mut max_y = 0u8;
-    let mut min_y = 255u8;
-    let mut luma_vals = vec![0u8; total];
-    for y in 0..h {
-        for x in 0..w {
-            let idx = (y * w + x) * 4;
-            let b = img.bgra[idx];
-            let g = img.bgra[idx + 1];
-            let r = img.bgra[idx + 2];
-            
-            let luma = match method {
-                LumaMethod::Weighted => ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8,
-                LumaMethod::MaxRGB => r.max(g).max(b),
-                LumaMethod::Average => ((r as u32 + g as u32 + b as u32) / 3) as u8,
-            };
-            
-            luma_vals[y * w + x] = luma;
-            if luma > max_y { max_y = luma; }
-            if luma < min_y { min_y = luma; }
-        }
-    }
-
-    let threshold = threshold_calc(max_y, min_y);
-    let mut binary = vec![0u8; total];
-    for i in 0..total {
-        binary[i] = if luma_vals[i] >= threshold { foreground_value } else { 0 };
-    }
-    (binary, threshold, max_y)
+    let cv_method = match method {
+        LumaMethod::Weighted => overmax_cv::LumaMethod::Weighted,
+        LumaMethod::MaxRGB => overmax_cv::LumaMethod::MaxRGB,
+        LumaMethod::Average => overmax_cv::LumaMethod::Average,
+    };
+    overmax_cv::binarize_by_luminance(
+        &img.bgra,
+        img.width,
+        img.height,
+        cv_method,
+        threshold_calc,
+        foreground_value,
+    )
 }
 
 fn match_character_custom(

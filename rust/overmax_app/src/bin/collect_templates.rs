@@ -50,37 +50,22 @@ fn crop_roi_direct(frame: &CapturedFrame, x: usize, y: usize, width: usize, heig
 
 // 고휘도 임계값 필터링 (휘도 Y >= threshold 이면 255, 아니면 0)
 fn threshold_luminance(bgra: &[u8], width: usize, height: usize) -> Vec<u8> {
-    let mut binary = vec![0u8; width * height];
-    let mut max_y = 0u8;
-    let mut y_vals = vec![0u8; width * height];
-    
-    for y in 0..height {
-        for x in 0..width {
-            let idx = (y * width + x) * 4;
-            let b = bgra[idx];
-            let g = bgra[idx + 1];
-            let r = bgra[idx + 2];
-            // BT.601 휘도 가중치 변환
-            let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
-            y_vals[y * width + x] = y_val;
-            if y_val > max_y {
-                max_y = y_val;
+    let (binary, threshold, max_y) = overmax_cv::binarize_by_luminance(
+        bgra,
+        width,
+        height,
+        overmax_cv::LumaMethod::Weighted,
+        |max_y, _| {
+            if max_y > 80 {
+                ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(45))
+            } else {
+                180
             }
-        }
-    }
-    
-    // 동적 임계값: 최대 휘도의 80% 또는 최대 휘도 - 45 중 큰 값 (글자 획 두께 보존 및 배경 배제 밸런스)
-    let threshold = if max_y > 80 {
-        ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(45))
-    } else {
-        180
-    };
+        },
+        255,
+    );
     
     println!("      [Luminance Debug] max_y={}, calculated threshold={}", max_y, threshold);
-
-    for idx in 0..(width * height) {
-        binary[idx] = if y_vals[idx] >= threshold { 255 } else { 0 };
-    }
     binary
 }
 

@@ -36,33 +36,20 @@ fn load_frame(path: &Path) -> Option<CapturedFrame> {
 
 // 고휘도 임계값 필터링
 fn threshold_luminance(bgra: &[u8], width: usize, height: usize) -> Vec<u8> {
-    let mut binary = vec![0u8; width * height];
-    let mut max_y = 0u8;
-    let mut y_vals = vec![0u8; width * height];
-    
-    for y in 0..height {
-        for x in 0..width {
-            let idx = (y * width + x) * 4;
-            let b = bgra[idx];
-            let g = bgra[idx + 1];
-            let r = bgra[idx + 2];
-            let y_val = ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8;
-            y_vals[y * width + x] = y_val;
-            if y_val > max_y {
-                max_y = y_val;
+    let (binary, _, _) = overmax_cv::binarize_by_luminance(
+        bgra,
+        width,
+        height,
+        overmax_cv::LumaMethod::Weighted,
+        |max_y, _| {
+            if max_y > 80 {
+                ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(38))
+            } else {
+                180
             }
-        }
-    }
-    
-    let threshold = if max_y > 80 {
-        ((max_y as f32 * 0.80) as u8).max(max_y.saturating_sub(38))
-    } else {
-        180
-    };
-    
-    for idx in 0..(width * height) {
-        binary[idx] = if y_vals[idx] >= threshold { 255 } else { 0 };
-    }
+        },
+        255,
+    );
     binary
 }
 

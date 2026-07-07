@@ -424,3 +424,49 @@ pub fn match_character(
         None
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LumaMethod {
+    Weighted,  // BT.601: ((77 * r + 150 * g + 29 * b) >> 8)
+    Average,   // (R + G + B) / 3
+    MaxRGB,    // max(R, G, B)
+}
+
+pub fn binarize_by_luminance(
+    bgra: &[u8],
+    width: usize,
+    height: usize,
+    method: LumaMethod,
+    threshold_calc: impl FnOnce(u8, u8) -> u8,
+    foreground_value: u8,
+) -> (Vec<u8>, u8, u8) {
+    let total = width * height;
+    let mut max_y = 0u8;
+    let mut min_y = 255u8;
+    let mut luma_vals = vec![0u8; total];
+    for y in 0..height {
+        for x in 0..width {
+            let idx = (y * width + x) * 4;
+            let b = bgra[idx];
+            let g = bgra[idx + 1];
+            let r = bgra[idx + 2];
+            
+            let luma = match method {
+                LumaMethod::Weighted => ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8,
+                LumaMethod::Average => ((r as u32 + g as u32 + b as u32) / 3) as u8,
+                LumaMethod::MaxRGB => r.max(g).max(b),
+            };
+            
+            luma_vals[y * width + x] = luma;
+            if luma > max_y { max_y = luma; }
+            if luma < min_y { min_y = luma; }
+        }
+    }
+
+    let threshold = threshold_calc(max_y, min_y);
+    let mut binary = vec![0u8; total];
+    for i in 0..total {
+        binary[i] = if luma_vals[i] >= threshold { foreground_value } else { 0 };
+    }
+    (binary, threshold, max_y)
+}
