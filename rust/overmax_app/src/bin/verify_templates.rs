@@ -131,65 +131,105 @@ fn main() {
         let filename = path.file_name().unwrap().to_string_lossy().to_string();
         let Some(frame) = load_frame(&path) else { continue; };
         
-        // 씬 판별
-        let logo_roi = match rois.get_roi("logo") {
-            Some(roi) => roi,
-            None => continue,
-        };
-        let logo_img = match crop_roi(&frame, logo_roi) {
-            Some(img) => img,
-            None => continue,
-        };
-        let (mut scene, _, _) = ocr.detect_logo(&logo_img);
+        let mut expected_str = String::new();
+        let mut val = 0.0;
+        let mut scene = SceneType::Unknown;
         
-        // 씬 Unknown 이면 파일명으로 유추
-        if scene == SceneType::Unknown {
-            let fname = filename.to_lowercase();
-            if fname.contains("freestyle") {
-                scene = SceneType::Freestyle;
-            } else if fname.contains("open") || fname.contains("match") {
-                scene = SceneType::OpenMatch;
-            } else if fname.contains("hd_test_2p") {
-                scene = SceneType::ResultOpen2;
-            } else if fname.contains("hd_test_1") || fname.contains("hd_test_3") {
-                scene = SceneType::ResultOpen3;
-            } else if fname.contains("hd_test") {
-                scene = SceneType::ResultFreestyle;
-            }
-        }
-        
-        if scene == SceneType::Unknown {
-            total_skipped += 1;
-            continue;
-        }
-        
-        rois.set_scene(scene);
-        let Some(rate_roi) = rois.get_roi("rate") else {
-            total_skipped += 1;
-            continue;
-        };
-        let Some(rate_img) = crop_roi(&frame, rate_roi) else {
-            total_skipped += 1;
-            continue;
+        // 사용자 제공 9개/11개 이미지 Ground Truth 수동 오버라이드 매핑
+        let user_mapping = match filename.as_str() {
+            "20260701123941_1.jpg" => Some((SceneType::ResultOpen3, "99.42%".to_string(), 99.42)),
+            "20260701174256_1.jpg" => Some((SceneType::Freestyle, "0.00%".to_string(), 0.00)),
+            "20260701174314_1.jpg" => Some((SceneType::Freestyle, "0.00%".to_string(), 0.00)),
+            "20260702234248_1.jpg" => Some((SceneType::ResultOpen3, "99.93%".to_string(), 99.93)),
+            "20260702234552_1.jpg" => Some((SceneType::ResultOpen3, "99.78%".to_string(), 99.78)),
+            "20260702234845_1.jpg" => Some((SceneType::ResultOpen3, "100.00%".to_string(), 100.00)),
+            "20260702235148_1.jpg" => Some((SceneType::ResultOpen3, "99.37%".to_string(), 99.37)),
+            "20260702235450_1.jpg" => Some((SceneType::ResultOpen3, "99.61%".to_string(), 99.61)),
+            "20260702235812_1.jpg" => Some((SceneType::ResultOpen3, "99.83%".to_string(), 99.83)),
+            "20260703000132_1.jpg" => Some((SceneType::ResultOpen3, "98.09%".to_string(), 98.09)),
+            "20260703000421_1.jpg" => Some((SceneType::ResultOpen3, "97.18%".to_string(), 97.18)),
+            _ => None,
         };
         
-        // 1. Windows OCR로 예상 텍스트 추출 (Ground Truth)
-        let (rate_val, raw_txt, _) = ocr.detect_rate(&rate_img);
-        let Some(val) = rate_val else {
-            total_skipped += 1;
-            continue;
-        };
-        
-        // OCR 텍스트 정규화
-        let expected_str: String = raw_txt
-            .chars()
-            .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '%')
-            .collect();
+        let rate_img = if let Some((s, e_str, v)) = user_mapping {
+            scene = s;
+            expected_str = e_str;
+            val = v;
             
-        if expected_str.is_empty() {
-            total_skipped += 1;
-            continue;
-        }
+            rois.set_scene(scene);
+            let Some(rate_roi) = rois.get_roi("rate") else {
+                total_skipped += 1;
+                continue;
+            };
+            let Some(img) = crop_roi(&frame, rate_roi) else {
+                total_skipped += 1;
+                continue;
+            };
+            img
+        } else {
+            // 씬 판별
+            let logo_roi = match rois.get_roi("logo") {
+                Some(roi) => roi,
+                None => continue,
+            };
+            let logo_img = match crop_roi(&frame, logo_roi) {
+                Some(img) => img,
+                None => continue,
+            };
+            let (mut s, _, _) = ocr.detect_logo(&logo_img);
+            
+            // 씬 Unknown 이면 파일명으로 유추
+            if s == SceneType::Unknown {
+                let fname = filename.to_lowercase();
+                if fname.contains("freestyle") {
+                    s = SceneType::Freestyle;
+                } else if fname.contains("open") || fname.contains("match") {
+                    s = SceneType::OpenMatch;
+                } else if fname.contains("hd_test_2p") {
+                    s = SceneType::ResultOpen2;
+                } else if fname.contains("hd_test_1") || fname.contains("hd_test_3") {
+                    s = SceneType::ResultOpen3;
+                } else if fname.contains("hd_test") {
+                    s = SceneType::ResultFreestyle;
+                }
+            }
+            
+            if s == SceneType::Unknown {
+                total_skipped += 1;
+                continue;
+            }
+            
+            scene = s;
+            rois.set_scene(scene);
+            let Some(rate_roi) = rois.get_roi("rate") else {
+                total_skipped += 1;
+                continue;
+            };
+            let Some(img) = crop_roi(&frame, rate_roi) else {
+                total_skipped += 1;
+                continue;
+            };
+            
+            // Windows OCR로 예상 텍스트 추출 (Ground Truth)
+            let (rate_val, raw_txt, _) = ocr.detect_rate(&img);
+            let Some(v) = rate_val else {
+                total_skipped += 1;
+                continue;
+            };
+            val = v;
+            
+            // OCR 텍스트 정규화
+            expected_str = raw_txt
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '%')
+                .collect();
+                
+            if expected_str.is_empty() {
+                total_skipped += 1;
+                continue;
+            }
+            img
+        };
         
         // 2. 픽셀 전처리 및 수직 분할
         let binary = threshold_luminance(&rate_img.bgra, rate_img.width as usize, rate_img.height as usize);
