@@ -85,6 +85,113 @@ impl PlayStateDetector {
         self.last_detected_mode.update(Some(mode));
     }
 
+    fn resolve_result_mode_diff(
+        &mut self,
+        scene: overmax_core::SceneType,
+        frame: &CapturedFrame,
+        rois: &RoiManager,
+        ocr: &OcrDetector,
+    ) -> (Option<String>, Option<String>) {
+        let mut mode = None;
+        let mut diff = None;
+
+        if self.last_detected_mode.is_some() && self.last_detected_diff.is_some() {
+            mode = self.last_detected_mode.get().clone();
+            diff = self.last_detected_diff.get().clone();
+        } else {
+            match scene {
+                overmax_core::SceneType::ResultFreestyle => {
+                    if let Some(mode_roi) = rois.get_roi("mode_digit") {
+                        if let Some(mode_img) = crop_roi(frame, mode_roi) {
+                            mode = ocr.detect_freestyle_mode(&mode_img);
+                        }
+                    }
+                    if let Some(diff_roi) = rois.get_roi("diff_panel") {
+                        if let Some(diff_img) = crop_roi(frame, diff_roi) {
+                            diff = ocr.detect_result_difficulty(&diff_img);
+                        }
+                    }
+                }
+                overmax_core::SceneType::ResultOpen3 | overmax_core::SceneType::ResultOpen2 => {
+                    mode = detect_button_mode_from_roi(frame, rois, "openmatch_mode");
+                    if let Some(diff_roi) = rois.get_roi("openmatch_diff") {
+                        if let Some(diff_img) = crop_roi(frame, diff_roi) {
+                            diff = ocr.detect_openmatch_result_difficulty(&diff_img);
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            if self.last_detected_mode.is_none() {
+                self.last_detected_mode.update(self.last_mode.get().clone());
+            }
+            if self.last_detected_diff.is_none() {
+                self.last_detected_diff.update(self.last_diff.get().clone());
+            }
+
+            if mode.is_none() {
+                mode = self.last_detected_mode.get().clone();
+            }
+            if diff.is_none() {
+                diff = self.last_detected_diff.get().clone();
+            }
+
+            if mode.is_some() && diff.is_some() {
+                self.last_detected_mode.update(mode.clone());
+                self.last_detected_diff.update(diff.clone());
+            }
+        }
+
+        (mode, diff)
+    }
+
+    fn cross_validate_rate_with_score(
+        ocr: &OcrDetector,
+        frame: &CapturedFrame,
+        rois: &RoiManager,
+        scene: overmax_core::SceneType,
+        is_result: bool,
+        detected_rate: Option<f32>,
+    ) -> Option<f32> {
+        let is_song_select = matches!(scene, overmax_core::SceneType::Freestyle | overmax_core::SceneType::OpenMatch);
+        if !(is_result || is_song_select) {
+            return detected_rate;
+        }
+
+        let score_roi = match rois.get_roi("score") {
+            Some(r) => r,
+            None => return detected_rate,
+        };
+        let score_img = match crop_roi(frame, score_roi) {
+            Some(img) => img,
+            None => return detected_rate,
+        };
+        let score_val = match ocr.detect_score(&score_img) {
+            Some(val) => val,
+            None => return detected_rate,
+        };
+
+        debug_println!("    [detect] score OCR run. score={}", score_val);
+        let calc_rate = score_val as f32 / 10000.0;
+
+        // 선곡창인 경우 스코어 OCR 오인식에 대비하여 엄격한 가드 적용
+        let is_valid_range = if is_song_select {
+            (MIN_VALID_RATE..=100.0).contains(&calc_rate)
+        } else {
+            (0.0..=100.0).contains(&calc_rate)
+        };
+
+        if !is_valid_range {
+            return detected_rate;
+        }
+
+        match detected_rate {
+            Some(r) => resolve_most_plausible_rate(r, calc_rate, is_song_select),
+            None => Some((calc_rate * 100.0).floor() / 100.0),
+        }
+    }
+
     pub fn detect(
         &mut self,
         frame: &CapturedFrame,
@@ -93,12 +200,10 @@ impl PlayStateDetector {
         ocr: &OcrDetector,
         now: f64,
     ) -> (GameSessionState, Option<OcrTelemetry>) {
-        use overmax_core::SceneType;
-
         let scene = rois.current_scene();
         let is_result = matches!(
             scene,
-            SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
+            overmax_core::SceneType::ResultFreestyle | overmax_core::SceneType::ResultOpen3 | overmax_core::SceneType::ResultOpen2
         );
 
         let mut mode = None;
@@ -108,54 +213,9 @@ impl PlayStateDetector {
 
         if is_result {
             is_max_combo = detect_max_combo_result(frame, rois);
-            
-            if self.last_detected_mode.is_some() && self.last_detected_diff.is_some() {
-                mode = self.last_detected_mode.get().clone();
-                diff = self.last_detected_diff.get().clone();
-            } else {
-                match scene {
-                    SceneType::ResultFreestyle => {
-                        if let Some(mode_roi) = rois.get_roi("mode_digit") {
-                            if let Some(mode_img) = crop_roi(frame, mode_roi) {
-                                mode = ocr.detect_freestyle_mode(&mode_img);
-                            }
-                        }
-                        if let Some(diff_roi) = rois.get_roi("diff_panel") {
-                            if let Some(diff_img) = crop_roi(frame, diff_roi) {
-                                diff = ocr.detect_result_difficulty(&diff_img);
-                            }
-                        }
-                    }
-                    SceneType::ResultOpen3 | SceneType::ResultOpen2 => {
-                        mode = detect_button_mode_from_roi(frame, rois, "openmatch_mode");
-                        if let Some(diff_roi) = rois.get_roi("openmatch_diff") {
-                            if let Some(diff_img) = crop_roi(frame, diff_roi) {
-                                diff = ocr.detect_openmatch_result_difficulty(&diff_img);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-
-                if self.last_detected_mode.is_none() {
-                    self.last_detected_mode.update(self.last_mode.get().clone());
-                }
-                if self.last_detected_diff.is_none() {
-                    self.last_detected_diff.update(self.last_diff.get().clone());
-                }
-
-                if mode.is_none() {
-                    mode = self.last_detected_mode.get().clone();
-                }
-                if diff.is_none() {
-                    diff = self.last_detected_diff.get().clone();
-                }
-
-                if mode.is_some() && diff.is_some() {
-                    self.last_detected_mode.update(mode.clone());
-                    self.last_detected_diff.update(diff.clone());
-                }
-            }
+            let (m, d) = self.resolve_result_mode_diff(scene, frame, rois, ocr);
+            mode = m;
+            diff = d;
         } else {
             self.last_detected_mode.update(None);
             self.last_detected_diff.update(None);
@@ -190,37 +250,14 @@ impl PlayStateDetector {
                             let mut rate_res = ocr.detect_rate(&rate_img);
                             self.last_rate_ocr_ts = now;
 
-                            // 결과창 또는 특정 선곡창인 경우 Score OCR을 통한 크로스 검증 수행
-                            let is_song_select = matches!(scene, SceneType::Freestyle | SceneType::OpenMatch);
-                            if is_result || is_song_select {
-                                if let Some(score_roi) = rois.get_roi("score") {
-                                    if let Some(score_img) = crop_roi(frame, score_roi) {
-                                        if let Some(score_val) = ocr.detect_score(&score_img) {
-                                            debug_println!("    [detect] score OCR run. score={}", score_val);
-                                            let calc_rate = score_val as f32 / 10000.0;
-                                            
-                                            // 선곡창인 경우 스코어 OCR 오인식에 대비하여 엄격한 가드 적용
-                                            let is_valid_range = if is_song_select {
-                                                (MIN_VALID_RATE..=100.0).contains(&calc_rate)
-                                            } else {
-                                                (0.0..=100.0).contains(&calc_rate)
-                                            };
-
-                                            if is_valid_range {
-                                                match rate_res.0 {
-                                                    Some(r) => {
-                                                        rate_res.0 = resolve_most_plausible_rate(r, calc_rate, is_song_select);
-                                                    }
-                                                    None => {
-                                                        // Rate OCR 실패 시 Score 역산값으로 메꿈
-                                                        rate_res.0 = Some((calc_rate * 100.0).floor() / 100.0);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            rate_res.0 = Self::cross_validate_rate_with_score(
+                                ocr,
+                                frame,
+                                rois,
+                                scene,
+                                is_result,
+                                rate_res.0,
+                            );
 
                             debug_println!("    [detect] rate OCR run. rate={:?}, text='{}'", rate_res.0, rate_res.1);
                             
