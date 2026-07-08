@@ -7,32 +7,12 @@ use overmax_engine::detector::ocr_engine::OcrDetector;
 use overmax_engine::capture::frame_utils::crop_roi;
 use overmax_core::SceneType;
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+use overmax_app::bin_utils::load_frame;
 
 // 자동 생성된 템플릿 배열 상수 바인딩
 use overmax_engine::detector::templates::digit::DIGIT_TEMPLATES;
 
-fn load_frame(path: &Path) -> Option<CapturedFrame> {
-    let img = match image::open(path) {
-        Ok(i) => i,
-        Err(_) => return None,
-    };
-    let (w, h) = img.dimensions();
-    let img_resized = if w != 1920 || h != 1080 {
-        img.resize_exact(1920, 1080, image::imageops::FilterType::Lanczos3)
-    } else {
-        img
-    };
-    
-    let mut rgba = img_resized.to_rgba8().into_raw();
-    for chunk in rgba.chunks_exact_mut(4) {
-        chunk.swap(0, 2);
-    }
-    Some(CapturedFrame {
-        width: 1920,
-        height: 1080,
-        bgra: rgba,
-    })
-}
+
 
 // 고휘도 임계값 필터링
 fn threshold_luminance(bgra: &[u8], width: usize, height: usize) -> Vec<u8> {

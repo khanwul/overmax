@@ -6,29 +6,9 @@ use overmax_engine::detector::roi::RoiManager;
 use overmax_engine::detector::ocr_engine::OcrDetector;
 use overmax_engine::capture::frame_utils::crop_roi;
 use overmax_core::SceneType;
+use overmax_app::bin_utils::load_frame;
 
-fn load_frame(path: &Path) -> Option<CapturedFrame> {
-    let img = match image::open(path) {
-        Ok(i) => i,
-        Err(_) => return None,
-    };
-    let (w, h) = img.dimensions();
-    let img_resized = if w != 1920 || h != 1080 {
-        img.resize_exact(1920, 1080, image::imageops::FilterType::Lanczos3)
-    } else {
-        img
-    };
-    
-    let mut rgba = img_resized.to_rgba8().into_raw();
-    for chunk in rgba.chunks_exact_mut(4) {
-        chunk.swap(0, 2);
-    }
-    Some(CapturedFrame {
-        width: 1920,
-        height: 1080,
-        bgra: rgba,
-    })
-}
+
 
 fn crop_roi_direct(frame: &CapturedFrame, x: usize, y: usize, width: usize, height: usize) -> overmax_engine::capture::frame_utils::ImageRegion {
     let mut bgra = vec![0u8; width * height * 4];
