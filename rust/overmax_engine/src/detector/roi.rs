@@ -68,8 +68,8 @@ impl RoiManager {
     }
 
     fn logo_roi(&self) -> RoiRect {
-        // logo ROI는 씬과 무관하게 고정 좌표를 가짐 (씬 판별의 트리거 역할이므로 config 밖에 존재)
-        self.transform_roi(RoiRect { x1: 0, y1: 18, x2: 340, y2: 93 })
+        // logo ROI는 씬과 무관하게 고정 좌표를 가짐 (설정의 config.logo 데이터 활용)
+        self.transform_roi(RoiRect::from(self.config.logo.clone()))
     }
 
     /// 지정된 씬의 ROI 영역을 반환합니다.

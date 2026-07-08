@@ -17,6 +17,7 @@ pub struct SceneRoiConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalRoiConfig {
+    pub logo: RoiRect,
     pub scenes: HashMap<SceneType, SceneRoiConfig>,
 }
 
@@ -81,6 +82,9 @@ impl Default for GlobalRoiConfig {
         result_open2_rois.insert("score".to_string(), RoiRect { x: 311, y: 753, width: 320, height: 72 });
         scenes.insert(SceneType::ResultOpen2, SceneRoiConfig { rois: result_open2_rois });
 
-        Self { scenes }
+        Self {
+            logo: RoiRect { x: 0, y: 18, width: 340, height: 75 },
+            scenes,
+        }
     }
 }
