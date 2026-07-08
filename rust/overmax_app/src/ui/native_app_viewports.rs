@@ -457,6 +457,7 @@ impl eframe::App for NativeApp {
                         lite_mode: is_lite,
                         is_snap_manual: snap_position == "manual",
                         record_manager: &self.record_manager,
+                        session_initial_record: self.session_initial_record,
                     },
                 );
 

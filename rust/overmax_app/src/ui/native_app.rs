@@ -296,6 +296,7 @@ pub struct NativeApp {
     pub(crate) game_found_rx: Receiver<()>,
     pub(crate) exit_requested: Arc<AtomicBool>,
     pub(crate) ctx_holder: Arc<Mutex<Option<egui::Context>>>,
+    pub(crate) session_initial_record: Option<(f64, bool)>,
     #[cfg(target_os = "windows")]
     pub(crate) _tray: Option<TrayIcon>,
     #[cfg(target_os = "windows")]
@@ -497,6 +498,7 @@ impl NativeApp {
             game_found_rx,
             exit_requested: exit_requested.clone(),
             ctx_holder: ctx_holder.clone(),
+            session_initial_record: None,
             #[cfg(target_os = "windows")]
             _tray: Some(TrayIcon::spawn(ui_cmd_tx, merged_settings.clone(), ctx_holder)),
             #[cfg(target_os = "windows")]

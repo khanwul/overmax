@@ -8,7 +8,7 @@ use eframe::egui::{
     Frame, Label, Layout, Margin, Rect, RichText, Sense, Vec2,
 };
 use overmax_core::GameSessionState;
-use overmax_data::{RecommendResult, RecordSource};
+use overmax_data::RecommendResult;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -150,6 +150,7 @@ pub struct OverlayProps<'a> {
     pub lite_mode: bool,
     pub is_snap_manual: bool,
     pub record_manager: &'a overmax_data::RecordManager,
+    pub session_initial_record: Option<(f64, bool)>,
 }
 
 pub fn draw_overlay_panel(
@@ -191,6 +192,7 @@ pub fn draw_overlay_panel(
                 props.varchive_account_configured,
                 props.is_snap_manual,
                 Some(props.record_manager),
+                props.session_initial_record,
             );
             ui.add_space(px.panel_gap());
             draw_body(ui, props.state, props.pattern_tabs, props.recommendations, &px);
@@ -344,7 +346,7 @@ fn draw_lite_panel(
             let final_meta = if props.state.scene.is_result() {
                 let mut text_str = "—".to_string();
                 if let Some(ctx) = &props.state.context {
-                    let (curr_rate, curr_mc, comp_str) = get_result_rate_comparison(ctx, Some(props.record_manager));
+                    let (curr_rate, curr_mc, comp_str) = get_result_rate_comparison(ctx, props.session_initial_record);
                     let current_str = if let Some(mc) = curr_mc {
                         format!("{} {}", curr_rate, mc)
                     } else {
@@ -453,7 +455,8 @@ fn draw_header(
     varchive_upload_needed: bool,
     varchive_account_configured: bool,
     is_snap_manual: bool,
-    record_manager: Option<&overmax_data::RecordManager>,
+    _record_manager: Option<&overmax_data::RecordManager>,
+    session_initial_record: Option<(f64, bool)>,
 ) {
     let mut buttons_left_x = None;
     let header = Frame::new()
@@ -539,7 +542,7 @@ fn draw_header(
                 let mut has_rate = false;
 
                 if let Some(ctx) = &state.context {
-                    let (curr_rate, curr_mc, comp_str) = get_result_rate_comparison(ctx, record_manager);
+                    let (curr_rate, curr_mc, comp_str) = get_result_rate_comparison(ctx, session_initial_record);
                     rate_text = Some(curr_rate);
                     combo_text = curr_mc;
                     suffix_str = comp_str;
@@ -799,7 +802,7 @@ fn draw_footer(
 
 fn get_result_rate_comparison(
     ctx: &overmax_core::PlayContext,
-    record_manager: Option<&overmax_data::RecordManager>,
+    session_initial_record: Option<(f64, bool)>,
 ) -> (String, Option<&'static str>, String) {
     let current_rate = ctx.rate as f64;
     let current_rate_str = format!("{:.2}%", current_rate);
@@ -812,10 +815,8 @@ fn get_result_rate_comparison(
     let mut prev_rate = None;
     let mut prev_mc = false;
 
-    if let Some(rm) = record_manager {
-        let song_id = ctx.song_id as i32;
-        let rate_map = rm.get_rate_map(&[song_id]);
-        if let Some(&(r, mc)) = rate_map.get(&(song_id, ctx.mode.clone(), ctx.diff.clone())) {
+    if let Some((r, mc)) = session_initial_record {
+        if r > 0.0 {
             prev_rate = Some(r);
             prev_mc = mc;
         }
@@ -1006,7 +1007,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_detecting, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None);
+                    super::draw_header(ui, &state_detecting, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None, None);
                     h_detecting = ui.cursor().top() - start_y;
                 });
             });
@@ -1018,7 +1019,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_no_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None);
+                    super::draw_header(ui, &state_no_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None, None);
                     h_no_badge = ui.cursor().top() - start_y;
                 });
             });
@@ -1030,7 +1031,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_normal_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None);
+                    super::draw_header(ui, &state_normal_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None, None);
                     h_normal = ui.cursor().top() - start_y;
                 });
             });
@@ -1042,7 +1043,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_perfect_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None);
+                    super::draw_header(ui, &state_perfect_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None, None);
                     h_perfect = ui.cursor().top() - start_y;
                 });
             });

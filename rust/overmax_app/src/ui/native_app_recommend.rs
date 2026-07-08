@@ -2,7 +2,7 @@ use crate::ui::debug_ui;
 use crate::ui::native_app::NativeApp;
 use crate::ui::overlay_recommend_ui::PatternTabInfo;
 use overmax_core::GameSessionState;
-use overmax_data::RecommendResult;
+use overmax_data::{RecommendResult, RecordSource};
 
 const DIFFICULTIES: [&str; 4] = ["NM", "HD", "MX", "SC"];
 
@@ -18,6 +18,22 @@ impl NativeApp {
             }
             if !output.is_song_select {
                 self.recorded_states.clear();
+            }
+
+            if output.state.scene.is_result() {
+                if let Some(ctx_val) = &output.state.context {
+                    if self.session_initial_record.is_none() {
+                        let song_id = ctx_val.song_id as i32;
+                        let rate_map = self.record_manager.get_rate_map(&[song_id]);
+                        if let Some(&(r, mc)) = rate_map.get(&(song_id, ctx_val.mode.clone(), ctx_val.diff.clone())) {
+                            self.session_initial_record = Some((r, mc));
+                        } else {
+                            self.session_initial_record = Some((0.0, false));
+                        }
+                    }
+                }
+            } else {
+                self.session_initial_record = None;
             }
 
             self.confidence = output.confidence;
