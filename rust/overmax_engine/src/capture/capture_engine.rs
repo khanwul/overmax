@@ -31,6 +31,19 @@ impl AdaptiveCaptureEngine {
                 .unwrap_or_else(std::time::Instant::now),
         })
     }
+
+    fn fallback_to_gdi(
+        &mut self,
+        rect: WindowRect,
+        out_frame: &mut CapturedFrame,
+        err_msg: &str,
+    ) -> Result<(), String> {
+        if let Some(ref mut gdi) = self.gdi_backend {
+            gdi.capture_bgra_inplace(rect, out_frame)
+        } else {
+            Err(format!("{err_msg} and GDI fallback unavailable"))
+        }
+    }
 }
 
 impl CaptureEngine for AdaptiveCaptureEngine {
@@ -55,17 +68,11 @@ impl CaptureEngine for AdaptiveCaptureEngine {
                     match DxgiCaptureEngine::new() {
                         Ok(dxgi) => self.dxgi_backend = Some(dxgi),
                         Err(e) => {
-                            if let Some(ref mut gdi) = self.gdi_backend {
-                                return gdi.capture_bgra_inplace(rect, out_frame);
-                            }
-                            return Err(format!("DXGI init failed ({e}) and GDI fallback unavailable"));
+                            return self.fallback_to_gdi(rect, out_frame, &format!("DXGI init failed ({e})"));
                         }
                     }
                 } else {
-                    if let Some(ref mut gdi) = self.gdi_backend {
-                        return gdi.capture_bgra_inplace(rect, out_frame);
-                    }
-                    return Err("DXGI retry cooldown active and GDI fallback unavailable".to_string());
+                    return self.fallback_to_gdi(rect, out_frame, "DXGI retry cooldown active");
                 }
             }
 
@@ -74,11 +81,7 @@ impl CaptureEngine for AdaptiveCaptureEngine {
                     Ok(_) => Ok(()),
                     Err(e) => {
                         self.dxgi_backend = None;
-                        if let Some(ref mut gdi) = self.gdi_backend {
-                            gdi.capture_bgra_inplace(rect, out_frame)
-                        } else {
-                            Err(format!("DXGI capture failed ({e}) and GDI fallback unavailable"))
-                        }
+                        self.fallback_to_gdi(rect, out_frame, &format!("DXGI capture failed ({e})"))
                     }
                 }
             } else {
