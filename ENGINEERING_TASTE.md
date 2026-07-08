@@ -61,6 +61,18 @@ Rule of thumb:
 
 ---
 
+## Path References
+
+문서(`.md`)와 코드(`.rs`)에서 파일을 참조할 때:
+
+- 항상 프로젝트 루트 기준 상대경로를 사용한다
+- `D:\dev\...`, `C:\Users\...` 등 로컬 절대경로를 절대 사용하지 않는다
+
+Good: `rust/overmax_engine/src/detector/play_state.rs`
+Bad: `D:\dev\overmax\rust\overmax_engine\src\detector\play_state.rs`
+
+---
+
 ## Scope Control
 
 Only solve the requested problem.
