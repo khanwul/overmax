@@ -502,7 +502,7 @@ fn color_dist(left: (u8, u8, u8), right: (u8, u8, u8)) -> f32 {
     (db * db + dg * dg + dr * dr).sqrt()
 }
 
-fn resolve_most_plausible_rate(rate_ocr: f32, score_rate: f32, is_song_select: bool) -> Option<f32> {
+pub fn resolve_most_plausible_rate(rate_ocr: f32, score_rate: f32, is_song_select: bool) -> Option<f32> {
     if (rate_ocr - score_rate).abs() < 0.1 {
         return Some((score_rate * 100.0).floor() / 100.0);
     }
@@ -530,7 +530,7 @@ fn resolve_most_plausible_rate(rate_ocr: f32, score_rate: f32, is_song_select: b
     }
 }
 
-fn get_rate_plausibility(rate: f32) -> i32 {
+pub fn get_rate_plausibility(rate: f32) -> i32 {
     if (90.0..=100.0).contains(&rate) {
         3
     } else if (70.0..=90.0).contains(&rate) {

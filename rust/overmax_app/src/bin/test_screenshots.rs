@@ -7,6 +7,7 @@ use overmax_engine::detector::roi::RoiManager;
 use overmax_engine::detector::ocr_engine::OcrDetector;
 use overmax_engine::capture::frame_utils::crop_roi;
 use overmax_engine::detector::detection_pipeline::detect_scene_from_logo;
+use overmax_engine::detector::play_state::resolve_most_plausible_rate;
 use overmax_core::SceneType;
 use overmax_data::ImageIndexDb;
 
@@ -438,40 +439,4 @@ fn run_roi_test(
     }
 }
 
-fn resolve_most_plausible_rate(rate_ocr: f32, score_rate: f32, is_song_select: bool) -> Option<f32> {
-    if (rate_ocr - score_rate).abs() < 0.1 {
-        return Some((score_rate * 100.0).floor() / 100.0);
-    }
 
-    let score_plaus = get_rate_plausibility(score_rate);
-    let ocr_plaus = get_rate_plausibility(rate_ocr);
-
-    if score_plaus != ocr_plaus {
-        if score_plaus > ocr_plaus {
-            println!("    [Plausibility] Trusting Score Rate ({:.2}%) over Rate OCR ({:.2}%)", score_rate, rate_ocr);
-            return Some((score_rate * 100.0).floor() / 100.0);
-        } else {
-            println!("    [Plausibility] Trusting Rate OCR ({:.2}%) over Score Rate ({:.2}%)", rate_ocr, score_rate);
-            return Some(rate_ocr);
-        }
-    }
-
-    if is_song_select {
-        println!("    [Plausibility] Tie in song select. Keeping Rate OCR: {:.2}%", rate_ocr);
-        Some(rate_ocr)
-    } else {
-        Some((score_rate * 100.0).floor() / 100.0)
-    }
-}
-
-fn get_rate_plausibility(rate: f32) -> i32 {
-    if (90.0..=100.0).contains(&rate) {
-        3
-    } else if (70.0..=90.0).contains(&rate) {
-        2
-    } else if (50.0..=70.0).contains(&rate) {
-        1
-    } else {
-        0
-    }
-}
