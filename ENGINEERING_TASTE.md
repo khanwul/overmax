@@ -137,16 +137,14 @@ Do not.
 
 ---
 
-## Red Flags
+## Red Flags (정지 후 사용자 확인 트리거)
 
-Stop and ask before:
+다음과 같이 위험도가 높거나 영향 범위가 큰 변경을 시도하기 전에는 반드시 작업을 멈추고 사용자에게 명시적으로 확인을 구해야 한다. (단순 리팩토링이나 국소 수정 시 과도한 정지를 방지하기 위해 트리거를 좁힘)
 
-- Replacing working systems
-- Changing build/release pipelines
-- Introducing databases/services/frameworks
-- Touching many unrelated files
-- Changing architecture
-- Increasing operational complexity
+- **핵심 모듈 교체**: 작동 중인 기존 핵심 파이프라인(예: 캡처, 매칭 엔진)을 다른 라이브러리나 다른 아키텍처로 완전히 대체할 때
+- **의존성 및 인프라 추가**: 새로운 외부 데이터베이스, 서비스, 프레임워크 또는 무거운 외부 크레이트(dependency)를 추가할 때
+- **빌드/릴리스 시스템 변경**: 빌드 스크립트(`build.bat`)나 릴리스 파이프라인의 구조적 변경
+- **광범위한 아키텍처 변경**: 3개 이상의 서로 다른 크레이트(Crate)에 걸쳐 핵심 데이터 모델(예: `PlayContext`, `GameSessionState`)을 수정하거나 설계를 변경할 때
 
 ---
 
