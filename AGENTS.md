@@ -51,7 +51,7 @@
 
 # Constraints
 
-- 상세 제약 조건은 단일 Source of Truth인 [CONTEXT.md](file:///D:/dev/overmax/CONTEXT.md)의 제약 조건 섹션을 참고하고 이를 엄격히 준수한다.
+- 상세 제약 조건은 단일 Source of Truth인 CONTEXT.md의 제약 조건 섹션을 참고하고 이를 엄격히 준수한다.
 
 ---
 
