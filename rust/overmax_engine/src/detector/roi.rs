@@ -72,6 +72,10 @@ impl RoiManager {
         self.transform_roi(RoiRect { x1: 0, y1: 18, x2: 340, y2: 93 })
     }
 
+    /// 지정된 씬의 ROI 영역을 반환합니다.
+    ///
+    /// # Special Cases
+    /// - `"logo"`: 씬과 무관한 전역 고정 ROI인 `logo_roi`를 반환합니다.
     pub fn get_roi_for_scene(&self, name: &str, scene: SceneType) -> Option<RoiRect> {
         if name == "logo" {
             return Some(self.logo_roi());
