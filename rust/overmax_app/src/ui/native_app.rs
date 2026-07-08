@@ -190,6 +190,16 @@ pub struct SharedSettings {
     pub draft: Arc<Mutex<Value>>,
 }
 
+impl SharedSettings {
+    pub fn get_merged(&self) -> overmax_data::Settings {
+        let val = match self.merged.lock() {
+            Ok(g) => g.clone(),
+            Err(_) => serde_json::Value::Object(serde_json::Map::new()),
+        };
+        serde_json::from_value(val).unwrap_or_default()
+    }
+}
+
 pub struct SharedUiState {
     pub debug_open: Arc<AtomicBool>,
     pub settings_open: Arc<AtomicBool>,

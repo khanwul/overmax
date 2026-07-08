@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -344,5 +345,249 @@ mod tests {
             settings["varchive"]["user_map"]["some_id"],
             json!({"v_id": "some_v_id", "account_path": ""})
         );
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct WindowTrackerSettings {
+    #[serde(default = "default_window_title")]
+    pub window_title: String,
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval_sec: f64,
+}
+
+fn default_window_title() -> String { "DJMAX RESPECT V".to_string() }
+fn default_poll_interval() -> f64 { 0.5 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ScreenCaptureSettings {
+    #[serde(default = "default_logo_cooldown")]
+    pub logo_ocr_cooldown_sec: f64,
+    #[serde(default = "default_idle_sleep")]
+    pub idle_sleep_sec: f64,
+}
+
+fn default_logo_cooldown() -> f64 { 1.0 }
+fn default_idle_sleep() -> f64 { 0.5 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DebugWindowSettings {
+    #[serde(default = "default_max_lines")]
+    pub max_lines: usize,
+    #[serde(default = "default_debug_title")]
+    pub title: String,
+}
+
+fn default_max_lines() -> usize { 500 }
+fn default_debug_title() -> String { "Overmax Debug Log".to_string() }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct OverlayPosition {
+    #[serde(default = "default_snap")]
+    pub snap: String,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+}
+
+fn default_snap() -> String { "manual".to_string() }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct OverlaySettings {
+    #[serde(default = "default_base_opacity")]
+    pub base_opacity: f64,
+    #[serde(default = "default_scale")]
+    pub scale: f64,
+    #[serde(default)]
+    pub lite_mode: bool,
+    #[serde(default)]
+    pub position: OverlayPosition,
+}
+
+fn default_base_opacity() -> f64 { 0.8 }
+fn default_scale() -> f64 { 1.0 }
+
+impl Default for OverlayPosition {
+    fn default() -> Self {
+        Self {
+            snap: default_snap(),
+            x: None,
+            y: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct JacketMatcherSettings {
+    #[serde(default = "default_db_path")]
+    pub db_path: String,
+    #[serde(default = "default_similarity")]
+    pub similarity_threshold: f64,
+    #[serde(default)]
+    pub disable_hog: bool,
+    #[serde(default = "default_margin")]
+    pub margin_threshold: f64,
+}
+
+fn default_db_path() -> String { "cache/image_index.db".to_string() }
+fn default_similarity() -> f64 { 0.75 }
+fn default_margin() -> f64 { 3.0 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct AppUpdateSettings {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub owner: Option<String>,
+    pub repo: Option<String>,
+    pub asset_name: Option<String>,
+    pub latest_release_url: Option<String>,
+}
+
+fn default_true() -> bool { true }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct VArchiveUserMap {
+    pub v_id: Option<String>,
+    pub account_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct VArchiveSettings {
+    #[serde(default = "default_songs_url")]
+    pub songs_api_url: String,
+    #[serde(default = "default_songs_cache")]
+    pub songs_cache_path: String,
+    #[serde(default = "default_dlcs_url")]
+    pub dlcs_api_url: String,
+    #[serde(default = "default_dlcs_cache")]
+    pub dlcs_cache_path: String,
+    #[serde(default = "default_songs_cache")]
+    pub cache_path: String,
+    #[serde(default = "default_ttl")]
+    pub cache_ttl_sec: u64,
+    #[serde(default = "default_timeout")]
+    pub download_timeout_sec: u64,
+    #[serde(default)]
+    pub auto_refresh: bool,
+    #[serde(default)]
+    pub user_map: std::collections::HashMap<String, VArchiveUserMap>,
+}
+
+fn default_songs_url() -> String { "https://v-archive.net/db/v2/songs.json".to_string() }
+fn default_songs_cache() -> String { "cache/songs.json".to_string() }
+fn default_dlcs_url() -> String { "https://v-archive.net/db/dlcs.json".to_string() }
+fn default_dlcs_cache() -> String { "cache/dlcs.json".to_string() }
+fn default_ttl() -> u64 { 86400 }
+fn default_timeout() -> u64 { 10 }
+
+impl Default for WindowTrackerSettings {
+    fn default() -> Self {
+        Self {
+            window_title: default_window_title(),
+            poll_interval_sec: default_poll_interval(),
+        }
+    }
+}
+impl Default for ScreenCaptureSettings {
+    fn default() -> Self {
+        Self {
+            logo_ocr_cooldown_sec: default_logo_cooldown(),
+            idle_sleep_sec: default_idle_sleep(),
+        }
+    }
+}
+impl Default for DebugWindowSettings {
+    fn default() -> Self {
+        Self {
+            max_lines: default_max_lines(),
+            title: default_debug_title(),
+        }
+    }
+}
+impl Default for OverlaySettings {
+    fn default() -> Self {
+        Self {
+            base_opacity: default_base_opacity(),
+            scale: default_scale(),
+            lite_mode: false,
+            position: OverlayPosition::default(),
+        }
+    }
+}
+impl Default for JacketMatcherSettings {
+    fn default() -> Self {
+        Self {
+            db_path: default_db_path(),
+            similarity_threshold: default_similarity(),
+            disable_hog: false,
+            margin_threshold: default_margin(),
+        }
+    }
+}
+impl Default for AppUpdateSettings {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            owner: None,
+            repo: None,
+            asset_name: None,
+            latest_release_url: None,
+        }
+    }
+}
+impl Default for VArchiveSettings {
+    fn default() -> Self {
+        Self {
+            songs_api_url: default_songs_url(),
+            songs_cache_path: default_songs_cache(),
+            dlcs_api_url: default_dlcs_url(),
+            dlcs_cache_path: default_dlcs_cache(),
+            cache_path: default_songs_cache(),
+            cache_ttl_sec: default_ttl(),
+            download_timeout_sec: default_timeout(),
+            auto_refresh: false,
+            user_map: std::collections::HashMap::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
+pub struct Settings {
+    #[serde(default)]
+    pub window_tracker: Option<WindowTrackerSettings>,
+    #[serde(default)]
+    pub screen_capture: Option<ScreenCaptureSettings>,
+    #[serde(default)]
+    pub debug_window: Option<DebugWindowSettings>,
+    #[serde(default)]
+    pub overlay: Option<OverlaySettings>,
+    #[serde(default)]
+    pub jacket_matcher: Option<JacketMatcherSettings>,
+    #[serde(default)]
+    pub app_update: Option<AppUpdateSettings>,
+    #[serde(default)]
+    pub varchive: Option<VArchiveSettings>,
+}
+
+impl Settings {
+    pub fn window_tracker(&self) -> WindowTrackerSettings {
+        self.window_tracker.clone().unwrap_or_default()
+    }
+    pub fn screen_capture(&self) -> ScreenCaptureSettings {
+        self.screen_capture.clone().unwrap_or_default()
+    }
+    pub fn debug_window(&self) -> DebugWindowSettings {
+        self.debug_window.clone().unwrap_or_default()
+    }
+    pub fn overlay(&self) -> OverlaySettings {
+        self.overlay.clone().unwrap_or_default()
+    }
+    pub fn jacket_matcher(&self) -> JacketMatcherSettings {
+        self.jacket_matcher.clone().unwrap_or_default()
+    }
+    pub fn app_update(&self) -> AppUpdateSettings {
+        self.app_update.clone().unwrap_or_default()
+    }
+    pub fn varchive(&self) -> VArchiveSettings {
+        self.varchive.clone().unwrap_or_default()
     }
 }

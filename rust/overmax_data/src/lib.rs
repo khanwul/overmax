@@ -19,7 +19,9 @@ pub use record_manager::{RecordManager, RecordSource};
 pub use scene_config::{GlobalRoiConfig, RoiRect, SceneRoiConfig};
 pub use settings::{
     diff_settings, load_base_settings, load_merged_settings, merge_settings_layers,
-    normalize_settings, save_user_settings, SettingsPaths,
+    normalize_settings, save_user_settings, SettingsPaths, Settings, WindowTrackerSettings,
+    ScreenCaptureSettings, DebugWindowSettings, OverlaySettings, JacketMatcherSettings,
+    AppUpdateSettings, VArchiveSettings, OverlayPosition, VArchiveUserMap,
 };
 pub use sheet_meta::{PatternSheetMeta, PatternSheetMetaItem};
 pub use sync::{
