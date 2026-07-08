@@ -47,8 +47,19 @@ pub fn preprocess_logo_bgra(
     encode_bmp_gray(&padded, upscaled_w + 20, upscaled_h + 20)
 }
 
+#[derive(Clone, Default)]
+pub struct OcrPreprocessResult {
+    pub bmp: Vec<u8>,
+    pub threshold: u8,
+    pub bg_mean: f32,
+    pub use_invert: bool,
+    pub padded_pixels: Vec<u8>,
+    pub padded_width: usize,
+    pub padded_height: usize,
+}
+
 pub fn preprocess_bgra(data: &[u8], width: usize, height: usize, force_invert: bool, binarize: bool) -> Vec<u8> {
-    preprocess_bgra_with_telemetry(data, width, height, force_invert, binarize).0
+    preprocess_bgra_with_telemetry(data, width, height, force_invert, binarize).bmp
 }
 
 pub fn preprocess_bgra_with_telemetry(
@@ -57,7 +68,7 @@ pub fn preprocess_bgra_with_telemetry(
     height: usize,
     force_invert: bool,
     binarize: bool,
-) -> (Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize) {
+) -> OcrPreprocessResult {
     let mut gray = to_gray_ocr(data, 4);
     autocontrast_gray(&mut gray);
     
@@ -90,18 +101,27 @@ pub fn preprocess_bgra_with_telemetry(
     let bmp = encode_bmp_gray(&padded, upscaled_w + 20, upscaled_h + 20);
     let padded_width = upscaled_w + 20;
     let padded_height = upscaled_h + 20;
-    (bmp, threshold, bg_mean, use_invert, padded, padded_width, padded_height)
+    
+    OcrPreprocessResult {
+        bmp,
+        threshold,
+        bg_mean,
+        use_invert,
+        padded_pixels: padded,
+        padded_width,
+        padded_height,
+    }
 }
 
 pub fn preprocess_color_bgra(data: &[u8], width: usize, height: usize) -> Vec<u8> {
-    preprocess_color_bgra_with_telemetry(data, width, height).0
+    preprocess_color_bgra_with_telemetry(data, width, height).bmp
 }
 
 pub fn preprocess_color_bgra_with_telemetry(
     data: &[u8],
     width: usize,
     height: usize,
-) -> (Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize) {
+) -> OcrPreprocessResult {
     // Color preprocess upscaler also dynamically scaled for small regions
     let scale = (120.0 / height as f64).ceil().max(5.0) as usize;
     let upscaled_w = width * scale;
@@ -110,15 +130,15 @@ pub fn preprocess_color_bgra_with_telemetry(
     let padded = pad_bgra(&upscaled, upscaled_w, upscaled_h, 10);
     let bmp = encode_bmp_bgra(&padded, upscaled_w + 20, upscaled_h + 20);
     
-    (
+    OcrPreprocessResult {
         bmp,
-        0,
-        0.0,
-        false,
-        padded,
-        upscaled_w + 20,
-        upscaled_h + 20,
-    )
+        threshold: 0,
+        bg_mean: 0.0,
+        use_invert: false,
+        padded_pixels: padded,
+        padded_width: upscaled_w + 20,
+        padded_height: upscaled_h + 20,
+    }
 }
 
 fn to_gray_ocr(data: &[u8], channels: usize) -> Vec<u8> {

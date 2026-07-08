@@ -18,6 +18,20 @@ pub struct OcrTelemetry {
     pub image_height: usize,
 }
 
+impl From<(String, overmax_cv::OcrPreprocessResult)> for OcrTelemetry {
+    fn from((rate_text, result): (String, overmax_cv::OcrPreprocessResult)) -> Self {
+        Self {
+            rate_text,
+            threshold: result.threshold,
+            bg_mean: result.bg_mean,
+            use_invert: result.use_invert,
+            image_pixels: result.padded_pixels,
+            image_width: result.padded_width,
+            image_height: result.padded_height,
+        }
+    }
+}
+
 impl fmt::Debug for OcrTelemetry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OcrTelemetry")
@@ -68,17 +82,9 @@ impl OcrDetector {
         } else {
             self.engine.recognize_with_telemetry(rate, force_invert, false)
         };
-        let (txt, threshold, bg_mean, use_invert, pixels, w, h) = res.ok()?;
+        let (txt, preprocess_res) = res.ok()?;
         let val = parse_rate_text(&txt);
-        let telemetry = OcrTelemetry {
-            rate_text: txt.clone(),
-            threshold,
-            bg_mean,
-            use_invert,
-            image_pixels: pixels,
-            image_width: w,
-            image_height: h,
-        };
+        let telemetry = OcrTelemetry::from((txt.clone(), preprocess_res));
         Some((val, txt, telemetry))
     }
 
@@ -541,35 +547,33 @@ impl WindowsOcrEngine {
         image: &ImageRegion,
         force_invert: bool,
         binarize: bool,
-    ) -> Result<(String, u8, f32, bool, Vec<u8>, usize, usize), String> {
+    ) -> Result<(String, overmax_cv::OcrPreprocessResult), String> {
         let Some(engine) = &self.engine else {
-            return Ok((String::new(), 0, 0.0, false, Vec::new(), 0, 0));
+            return Ok((String::new(), overmax_cv::OcrPreprocessResult::default()));
         };
-        let (bmp, threshold, bg_mean, use_invert, pixels, w, h) =
-            preprocess_ocr_bmp_with_telemetry(image, force_invert, binarize)?;
-        let text = recognize_bmp(engine, &bmp).map(|t| t.trim().to_string())?;
-        Ok((text, threshold, bg_mean, use_invert, pixels, w, h))
+        let preprocess = preprocess_ocr_bmp_with_telemetry(image, force_invert, binarize)?;
+        let text = recognize_bmp(engine, &preprocess.bmp).map(|t| t.trim().to_string())?;
+        Ok((text, preprocess))
     }
 
     fn recognize_color_with_telemetry(
         &self,
         image: &ImageRegion,
-    ) -> Result<(String, u8, f32, bool, Vec<u8>, usize, usize), String> {
+    ) -> Result<(String, overmax_cv::OcrPreprocessResult), String> {
         let Some(engine) = &self.engine else {
-            return Ok((String::new(), 0, 0.0, false, Vec::new(), 0, 0));
+            return Ok((String::new(), overmax_cv::OcrPreprocessResult::default()));
         };
         if image.width <= 0 || image.height <= 0 {
             return Err("OCR image has invalid dimensions".to_string());
         }
-        let (bmp, threshold, bg_mean, use_invert, pixels, w, h) =
-            overmax_cv::preprocess_ocr_color_bgra_with_telemetry(
-                &image.bgra,
-                image.width as usize,
-                image.height as usize,
-            )
-            .map_err(|e| e.to_string())?;
-        let text = recognize_bmp(engine, &bmp).map(|t| t.trim().to_string())?;
-        Ok((text, threshold, bg_mean, use_invert, pixels, w, h))
+        let preprocess = overmax_cv::preprocess_ocr_color_bgra_with_telemetry(
+            &image.bgra,
+            image.width as usize,
+            image.height as usize,
+        )
+        .map_err(|e| e.to_string())?;
+        let text = recognize_bmp(engine, &preprocess.bmp).map(|t| t.trim().to_string())?;
+        Ok((text, preprocess))
     }
 
 }
@@ -578,7 +582,7 @@ fn preprocess_ocr_bmp_with_telemetry(
     image: &ImageRegion,
     force_invert: bool,
     binarize: bool,
-) -> Result<(Vec<u8>, u8, f32, bool, Vec<u8>, usize, usize), String> {
+) -> Result<overmax_cv::OcrPreprocessResult, String> {
     if image.width <= 0 || image.height <= 0 {
         return Err("OCR image has invalid dimensions".to_string());
     }
