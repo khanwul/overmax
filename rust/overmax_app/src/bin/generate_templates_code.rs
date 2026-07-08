@@ -22,12 +22,12 @@ fn main() {
         ("0", '0', "0_char_20260701124615_1_4_78.png"),
         ("1", '1', "1_char_20260701011933_1_0_5.png"),
         ("2", '2', "2_char_20260701164242_1_4_80.png"),
+        ("8", '8', "8_char_20260701164242_1_3_61.png"), // '8' moved before '3' to resolve tie-breaker in favor of '8'
         ("3", '3', "3_char_20260701124303_1_4_79.png"),
         ("4", '4', "4_char_20260701124917_1_4_77.png"),
         ("5", '5', "5_char_20260702233310_1_3_61.png"),
         ("6", '6', "6_char_20260701164800_1_3_61.png"),
         ("7", '7', "7_char_20260701165356_1_3_62.png"),
-        ("8", '8', "8_char_20260701164242_1_3_61.png"),
         ("9", '9', "9_char_20260701164242_1_0_16.png"),
         ("dot", '.', "dot_char_20260701164242_1_2_53.png"),
         ("percent", '%', "percent_char_20260701173729_1_5_61.png"),
@@ -106,7 +106,7 @@ fn main() {
     }
     code.push_str("];\n");
     
-    let out_file_path = Path::new("rust/overmax_app/src/detector/templates/digit.rs");
+    let out_file_path = Path::new("rust/overmax_engine/src/detector/templates/digit.rs");
     fs::write(out_file_path, code).expect("Failed to write detector/templates/digit.rs");
     println!("Successfully generated Rust templates source in {:?}", out_file_path);
 }

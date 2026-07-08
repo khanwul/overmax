@@ -156,4 +156,5 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07 | OCR 1-Pass 강제, 다중 패스 루프 금지 | 3-pass OCR이 CPU 과부하 유발 → 오인식은 HysteresisBuffer 다수결로 해결 | [ocr-elimination-plan.md](docs/2026-07-01-ocr-elimination-and-template-matching-plan.md) |
 | 2026-07 | 이진화 → 엣지 디텍션 전환 검토 | BGA 투과 시 고정 threshold 불안정, Sobel 엣지가 BGA에 강건 | [edge-detection-migration-plan.md](docs/2026-07-07-edge-detection-migration-plan.md) |
 | 2026-07-08 | 결과창 내 Rate 비교 헤더 표시 | 결과창 오버레이 헤더 2열 및 라이트모드 2열에서 메타를 제외하고 기존 최고 기록 대비 실시간 Rate 차이 비교 텍스트 표기 | [overlay_ui.rs](rust/overmax_app/src/ui/overlay_ui.rs) |
+| 2026-07-08 | 템플릿 매칭 '8' 가중치 부여 및 정렬 순서 조정 | 8의 왼쪽 세로선 손실 시 '3'으로 오인식되는 타이 브레이킹/우선순위 문제 방지 | [image.rs](rust/overmax_cv/src/image.rs) / [digit.rs](rust/overmax_engine/src/detector/templates/digit.rs) |
 
