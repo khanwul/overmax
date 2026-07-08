@@ -116,6 +116,17 @@ impl Default for VArchiveDB {
     }
 }
 
+mod match_score {
+    pub const EXACT_TITLE: f64 = 100.0;
+    pub const PREFIX_TITLE: f64 = 80.0;
+    pub const FUZZY_TITLE: f64 = 50.0;
+    pub const PATTERN_EXISTS: f64 = 50.0;
+    pub const LEVEL_MATCH: f64 = 100.0;
+    pub const LEVEL_MISMATCH_PENALTY: f64 = -50.0;
+    pub const CATEGORY_DLC_MATCH: f64 = 80.0;
+    pub const COMPOSER_IN_NOTE: f64 = 150.0;
+}
+
 impl VArchiveDB {
     pub fn new() -> Self {
         Self {
@@ -300,17 +311,17 @@ impl VArchiveDB {
 
             // 1. Title match
             if query_norm == song_name_norm {
-                score += 100.0;
+                score += match_score::EXACT_TITLE;
             } else if query_norm.starts_with(&song_name_norm) || song_name_norm.starts_with(&query_norm) {
                 if query_norm.len() >= 5 && song_name_norm.len() >= 5 {
-                    score += 80.0;
+                    score += match_score::PREFIX_TITLE;
                 } else {
                     continue;
                 }
             } else {
                 let dist = normalized_damerau_levenshtein(&query_norm, &song_name_norm);
                 if dist >= 0.8 {
-                    score += 50.0;
+                    score += match_score::FUZZY_TITLE;
                 } else {
                     continue; // Skip if title is too different
                 }
@@ -319,12 +330,12 @@ impl VArchiveDB {
             // 2. Pattern (mode, diff) & Level check
             if let (Some(m), Some(d)) = (Mode::from_str(mode), Difficulty::from_str(diff)) {
                 if let Some(p_info) = &song.patterns[m as usize][d as usize] {
-                    score += 50.0;
+                    score += match_score::PATTERN_EXISTS;
                     if let Some(target_lvl) = level {
                         if p_info.level == Some(target_lvl) {
-                            score += 100.0;
+                            score += match_score::LEVEL_MATCH;
                         } else {
-                            score -= 50.0; // Level mismatch penalty
+                            score += match_score::LEVEL_MISMATCH_PENALTY; // Level mismatch penalty
                         }
                     }
                 }
@@ -332,7 +343,7 @@ impl VArchiveDB {
 
             // 3. Category / DLC match
             if category_matches_dlc(category, &song.dlc_code, &self.dlcs) {
-                score += 80.0;
+                score += match_score::CATEGORY_DLC_MATCH;
             }
 
             // 4. Composer in note check
@@ -340,7 +351,7 @@ impl VArchiveDB {
             let comp_lower = song.composer.to_lowercase();
             if !note_lower.is_empty() && !comp_lower.is_empty() {
                 if note_lower.contains(&comp_lower) || comp_lower.contains(&note_lower) {
-                    score += 150.0;
+                    score += match_score::COMPOSER_IN_NOTE;
                 }
             }
 
