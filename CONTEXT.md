@@ -155,8 +155,8 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-06 | Image DB 빌드를 Rust CLI로 이전 | overmax_cv를 피처 연산 SSOT로 통일 | [image_db_redesign_plan.md](docs/2026-06-15-image_db_redesign_plan.md) |
 | 2026-07 | OCR 1-Pass 강제, 다중 패스 루프 금지 | 3-pass OCR이 CPU 과부하 유발 → 오인식은 HysteresisBuffer 다수결로 해결 | [ocr-elimination-plan.md](docs/2026-07-01-ocr-elimination-and-template-matching-plan.md) |
 | 2026-07 | 이진화 → 엣지 디텍션 전환 검토 | BGA 투과 시 고정 threshold 불안정, Sobel 엣지가 BGA에 강건 | [edge-detection-migration-plan.md](docs/2026-07-07-edge-detection-migration-plan.md) |
-| 2026-07-08 | 결과창 내 Rate 비교 헤더 표시 | 결과창 오버레이 헤더 2열 및 라이트모드 2열에서 메타를 제외하고 기존 최고 기록 대비 실시간 Rate 차이 비교 텍스트 표기 | [overlay_ui.rs](rust/overmax_app/src/ui/overlay_ui.rs) |
-| 2026-07-08 | 템플릿 매칭 '8' 가중치 부여 및 정렬 순서 조정 | 8의 왼쪽 세로선 손실 시 '3'으로 오인식되는 타이 브레이킹/우선순위 문제 방지 | [image.rs](rust/overmax_cv/src/image.rs) / [digit.rs](rust/overmax_engine/src/detector/templates/digit.rs) |
-| 2026-07-08 | 선곡창 및 결과창 Rate OCR 캐시 비활성화 | 동일 곡/난이도 내 수치 변경 시 오버레이 미갱신으로 인한 DB 오염 및 결과창 오독 고착 방지 | [play_state.rs](rust/overmax_engine/src/detector/play_state.rs) |
 | 2026-07-08 | 결과창 괄호 및 선곡창 메타 텍스트 폰트 축소 | 뱃지 텍스트(9.0)와 비교/메타 텍스트(10.0) 간의 크기 불일치 시각적 불균형 일괄 해결 | [overlay_ui.rs](rust/overmax_app/src/ui/overlay_ui.rs) |
+| 2026-07-09 | PlayStateDetector rate OCR 로직 플래튼화 | 중첩 if 제어 블록을 `process_rate_ocr` 헬퍼 함수로 추출하여 가독성 개선 | [play_state.rs](rust/overmax_engine/src/detector/play_state.rs) |
+| 2026-07-09 | logo ROI 좌표 하드코딩 제거 | `GlobalRoiConfig`에 logo 설정을 통합하고 `RoiManager`가 참조하도록 구조화 | [roi.rs](rust/overmax_engine/src/detector/roi.rs) / [scene_config.rs](rust/overmax_data/src/scene_config.rs) |
+| 2026-07-09 | NativeApp::update 330줄 분할 및 락 오버헤드 최적화 | 자이언트 함수를 3개 헬퍼 함수로 분해하고 `game_rect` 락 획득을 1회로 병합 | [native_app_viewports.rs](rust/overmax_app/src/ui/native_app_viewports.rs) |
 
