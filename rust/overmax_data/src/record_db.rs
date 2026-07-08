@@ -154,8 +154,8 @@ impl RecordDB {
                     existing_max_combo = mc;
                 }
 
-                let should_update_rate = existing_rate.map_or(true, |ext_r| rate > ext_r);
-                let should_update_combo = existing_max_combo.map_or(true, |ext_mc| is_max_combo_int > ext_mc);
+                let should_update_rate = existing_rate.is_none_or(|ext_r| rate > ext_r);
+                let should_update_combo = existing_max_combo.is_none_or(|ext_mc| is_max_combo_int > ext_mc);
 
                 if !should_update_rate && !should_update_combo {
                     return false;

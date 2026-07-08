@@ -125,8 +125,9 @@ impl RecordManager {
         let Ok(cache) = self.varchive_cache.lock() else {
             return;
         };
+        let song_ids_set: HashSet<i32> = song_ids.iter().copied().collect();
         for (key, &(v_rate, v_mc)) in cache.iter() {
-            if !song_ids.contains(&key.0) {
+            if !song_ids_set.contains(&key.0) {
                 continue;
             }
             result
