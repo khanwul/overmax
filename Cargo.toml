@@ -14,7 +14,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace.lints.clippy]
-# 인지 복잡도(Cognitive Complexity) 한계를 15로 강제 제한 (초과 시 컴파일 실패)
+# 인지 복잡도(Cognitive Complexity) 한계를 55로 강제 제한 (초과 시 컴파일 실패)
 cognitive_complexity = { level = "deny", priority = 1 }
 type_complexity = "allow"
 
