@@ -109,3 +109,38 @@ Small change → report → wait.
 하지 않아야 할 것:
 
 Large autonomous rewrite.
+
+---
+
+# Session Handoff Protocol
+
+모든 작업 세션 종료 직전에 반드시:
+
+1. `TASKS.md`의 완료 항목을 `[x]`로 갱신한다
+2. 새로운 제약 조건이나 아키텍처 변경이 있었다면 `CONTEXT.md`를 갱신한다
+3. 중요한 설계 결정이 있었다면 Decision Log 요약 행을 추가한다
+
+---
+
+# Quick Reference
+
+## 빌드 & 검증
+- 전체 빌드: `cargo build --workspace`
+- 테스트: `cargo test --workspace`
+- Clippy: `cargo clippy --all-targets`
+- 릴리스 빌드: `build.bat`
+
+## 주요 진입점
+- 메인 앱: `rust/overmax_app/src/main.rs`
+- 디텍션 파이프라인: `rust/overmax_engine/src/detector/detection_pipeline.rs`
+- 디텍션 워커: `rust/overmax_engine/src/detector/detection_worker.rs`
+- PlayState 감지: `rust/overmax_engine/src/detector/play_state.rs`
+- OCR 엔진: `rust/overmax_engine/src/detector/ocr_engine.rs`
+- CV 코어: `rust/overmax_cv/src/lib.rs`
+
+## 설정 파일
+- 기본 설정: `settings.json`
+- 사용자 설정: `settings.user.json` (delta 형식, 기본값과 다른 항목만 저장)
+- 곡 DB: `cache/songs.json`
+- 기록 DB: `cache/record.db` (SQLite)
+- 이미지 인덱스: `cache/image_index.db`

@@ -20,5 +20,14 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# 3. 유닛 테스트 수행 (로직 회귀 방지)
+cargo test --workspace
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "[Antigravity Hook] Unit tests failed! Rolling back changes."
+    exit 1
+}
+
 Write-Host "[Antigravity Hook] All checks passed successfully." -ForegroundColor Green
 exit 0
+

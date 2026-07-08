@@ -132,12 +132,27 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
    - FREESTYLE 및 ONLINE 대기방 외에도 래더 매칭 씬이나 결과 화면 등 감지 가능 범위를 추가 확장 (`SceneType::LadderMatch` 등).
 2. **전체화면(Fullscreen) 호환성 검증 (완료)**:
    - `AdaptiveCaptureEngine` 동적 위임 연동(DXGI 캡처 백엔드) 및 포커스 차단용 Win32 스타일 적용 완료. 전체 창 모드(Borderless Fullscreen)에서 드래그 종료 후 포커스 복원 시 Z-Order 밀림 현상을 Win32 Owner 윈도우 연동(`GWL_HWNDPARENT`)을 통해 해결 완료. 단, OS 설계 제약 및 안티치트 충돌로 인해 하드웨어 독점 전체화면(Exclusive Fullscreen) 모드에서의 오버레이 표시는 지원하지 않으며, 보더리스 모드 실행이 필수 권장 사항임.
-3. **OBS 방송 송출용 화면 모드 (OBS Mode)**:
-   - 인터넷 방송 스트리머들을 위해 크로마키(Chroma key) 전용 스킨이나 OBS에서 캡처/배치가 편리한 방송 특화 레이아웃 모드 지원.
-4. **V-Archive 클라이언트 완전 대체 (장기 목표)**:
+3. **V-Archive 클라이언트 완전 대체 (장기 목표)**:
    - 공식 데스크톱 클라이언트의 도움 없이 Overmax 자체 앱 내에서 플레이 기록 수집부터 V-Archive 연동 및 백업 업로드까지 전담하는 올인원 클라이언트 구현.
-5. **HOG 피처 데이터베이스 갱신 및 재빌드**:
+4. **HOG 피처 데이터베이스 갱신 및 재빌드**:
    - 로컬 이미지 왜곡으로 인한 HOG 유사도 저하 근본 해결 및 매칭 임계치를 기존 값(`0.85`)으로 원복하기 위한 피처 일괄 갱신.
-6. **마우스 호버 시 투명도 반응 지연, 커서 사라짐 및 깜빡임 개선 (완료 - v0.2.3)**:
+5. **마우스 호버 시 투명도 반응 지연, 커서 사라짐 및 깜빡임 개선 (완료 - v0.2.3)**:
    - egui의 MousePassthrough 전환 시 topmost 스타일 검증 캐시 오판독 버그를 해결하고 `ViewportCommand::StartDrag`와의 조화를 통해 마우스 호버 및 투명도 전환으로 인한 깜빡임 및 불투명 고착 현상을 안정화 완료함.
     - 마우스가 투명 오버레이로 진입해 passthrough가 풀렸을 때 마우스 포인터가 소실되는 문제를 방지하기 위해, 오버레이 위에 마우스가 있는 동안 하드웨어 시스템 커서를 완전히 숨기고 십자선 모양(Crosshair)의 소프트웨어 커서를 직접 그리도록 조치하여 Active/Deactive 상태 전환 시에도 일관된 마우스 커서의 일정성과 가시성을 확보함.
+
+---
+
+# Decision Log
+
+주요 설계 결정의 배경(why)을 요약한다. 상세 분석은 참조 문서를 확인할 것.
+
+| 날짜 | 결정 | 이유 | 참조 |
+|------|------|------|------|
+| 2026-05 | GDI 캡처 버퍼 인플레이스 재사용 | CPU 프로파일링 결과 memcpy 힙 할당이 주 병목 | [cpu-optimization-message-pump.md](docs/2026-05-24-cpu-optimization-message-pump.md) |
+| 2026-05 | WindowTracker 동적 폴링 주기 | win32u 시스템 콜 오버헤드 해소 | [cpu-optimization-message-pump-review.md](docs/2026-05-24-cpu-optimization-message-pump-review.md) |
+| 2026-05 | HysteresisBuffer 기반 씬 전이 안정화 | 단일 프레임 판단의 Jitter 방지 | [scene-detection-experiment.md](docs/2026-05-28-scene-detection-experiment.md) |
+| 2026-06 | HOG 기본 비활성화 (`disable_hog: true`) | CPU 프로파일링 결과 HOG가 주 연산 병목, 3종 해시만으로 충분한 변별력 확보 | [detection-pipeline-architecture.md](docs/2026-06-23-detection-pipeline-architecture-and-recognition-logic.md) |
+| 2026-06 | Image DB 빌드를 Rust CLI로 이전 | overmax_cv를 피처 연산 SSOT로 통일 | [image_db_redesign_plan.md](docs/2026-06-15-image_db_redesign_plan.md) |
+| 2026-07 | OCR 1-Pass 강제, 다중 패스 루프 금지 | 3-pass OCR이 CPU 과부하 유발 → 오인식은 HysteresisBuffer 다수결로 해결 | [ocr-elimination-plan.md](docs/2026-07-01-ocr-elimination-and-template-matching-plan.md) |
+| 2026-07 | 이진화 → 엣지 디텍션 전환 검토 | BGA 투과 시 고정 threshold 불안정, Sobel 엣지가 BGA에 강건 | [edge-detection-migration-plan.md](docs/2026-07-07-edge-detection-migration-plan.md) |
+
