@@ -264,6 +264,31 @@ impl NativeApp {
     }
 }
 
+struct OverlaySettingsSnapshot {
+    scale: f32,
+    opacity: f32,
+    is_lite: bool,
+    snap_position: String,
+}
+
+fn read_overlay_settings(settings: &std::sync::Arc<std::sync::Mutex<serde_json::Value>>) -> OverlaySettingsSnapshot {
+    let Ok(m) = settings.lock() else {
+        return OverlaySettingsSnapshot {
+            scale: 1.0,
+            opacity: 0.8,
+            is_lite: false,
+            snap_position: "manual".into(),
+        };
+    };
+    let overlay = m.get("overlay");
+    OverlaySettingsSnapshot {
+        scale: overlay.and_then(|o| o.get("scale")).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+        opacity: overlay.and_then(|o| o.get("base_opacity")).and_then(|v| v.as_f64()).unwrap_or(0.8) as f32,
+        is_lite: overlay.and_then(|o| o.get("lite_mode")).and_then(|v| v.as_bool()).unwrap_or(false),
+        snap_position: overlay.and_then(|o| o.get("position")).and_then(|p| p.get("snap")).and_then(|v| v.as_str()).unwrap_or("manual").to_string(),
+    }
+}
+
 impl eframe::App for NativeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Ok(mut holder) = self.ctx_holder.lock() {
@@ -334,36 +359,11 @@ impl eframe::App for NativeApp {
             ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
         }
 
-        let scale = if let Ok(m) = self.settings.merged.lock() {
-
-            m.get("overlay").and_then(|o| o.get("scale")).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32
-        } else {
-            1.0
-        };
-
-        let opacity = if let Ok(m) = self.settings.merged.lock() {
-            m.get("overlay").and_then(|o| o.get("base_opacity")).and_then(|v| v.as_f64()).unwrap_or(0.8) as f32
-        } else {
-            0.8
-        };
-
-        // 라이트 모드 판정: 설정에서 명시적으로 활성화했을 때만 적용
-        let is_lite = if let Ok(m) = self.settings.merged.lock() {
-            m.get("overlay").and_then(|o| o.get("lite_mode")).and_then(|v| v.as_bool()).unwrap_or(false)
-        } else {
-            false
-        };
-
-        let snap_position = if let Ok(m) = self.settings.merged.lock() {
-            m.get("overlay")
-                .and_then(|o| o.get("position"))
-                .and_then(|p| p.get("snap"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("manual")
-                .to_string()
-        } else {
-            "manual".to_string()
-        };
+        let ovs = read_overlay_settings(&self.settings.merged);
+        let scale = ovs.scale;
+        let opacity = ovs.opacity;
+        let is_lite = ovs.is_lite;
+        let snap_position = ovs.snap_position;
 
         let height = if is_lite {
             overlay_ui::LITE_BASE_HEIGHT
