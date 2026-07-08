@@ -477,3 +477,11 @@ pub fn binarize_by_luminance(
     }
     (binary, threshold, max_y)
 }
+
+pub fn diff_panel_threshold(max: u8, min: u8) -> u8 {
+    if max - min > 30 {
+        (min as f32 + (max - min) as f32 * 0.55) as u8
+    } else {
+        120
+    }
+}

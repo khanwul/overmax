@@ -54,11 +54,7 @@ fn main() {
 
         // 임계값 = (min_y + max_y) / 2 또는 max_y * 0.75 등의 동적 결정
         // NORMAL, HARD, MAXIMUM, SC 의 글자 색상이 배경색 대비 밝으므로, 적정 지점을 찾음
-        let threshold = if max_y - min_y > 30 {
-            (min_y as f32 + (max_y - min_y) as f32 * 0.55) as u8
-        } else {
-            120u8
-        };
+        let threshold = overmax_cv::diff_panel_threshold(max_y, min_y);
 
         println!("[{}] Path: {}, Min Luma: {}, Max Luma: {}, Auto Threshold: {}", label, path, min_y, max_y, threshold);
 

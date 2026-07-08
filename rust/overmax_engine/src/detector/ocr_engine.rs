@@ -183,13 +183,7 @@ impl OcrDetector {
 
         let (binary, _, _) = binarize_by_luminance(
             diff_img,
-            |max, min| {
-                if max - min > 30 {
-                    (min as f32 + (max - min) as f32 * 0.55) as u8
-                } else {
-                    120
-                }
-            },
+            overmax_cv::diff_panel_threshold,
             1,
         );
         let (target_w, target_h) = (90usize, 18usize);
@@ -218,13 +212,7 @@ impl OcrDetector {
 
         let (binary, _, _) = binarize_by_luminance(
             diff_img,
-            |max, min| {
-                if max - min > 30 {
-                    (min as f32 + (max - min) as f32 * 0.55) as u8
-                } else {
-                    120
-                }
-            },
+            overmax_cv::diff_panel_threshold,
             1,
         );
         let (target_w, target_h) = (106usize, 18usize);
