@@ -30,33 +30,16 @@ impl Default for AppUpdateConfig {
 }
 
 impl AppUpdateConfig {
-    pub fn from_merged_settings(v: &Value) -> Self {
+    pub fn from_settings(settings: &overmax_data::Settings) -> Self {
         let mut c = Self::default();
-        let Some(u) = v.get("app_update") else {
-            return c;
-        };
-        c.enabled = u.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true);
-        c.owner = u
-            .get("owner")
-            .and_then(|x| x.as_str())
-            .unwrap_or("orphera")
-            .to_string();
-        c.repo = u
-            .get("repo")
-            .and_then(|x| x.as_str())
-            .unwrap_or("overmax")
-            .to_string();
-        c.asset_name = u
-            .get("asset_name")
-            .and_then(|x| x.as_str())
-            .unwrap_or("overmax.zip")
-            .to_string();
-        c.latest_release_url = u
-            .get("latest_release_url")
-            .and_then(|x| x.as_str())
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
+        let u = settings.app_update();
+        c.enabled = u.enabled;
+        c.owner = u.owner.unwrap_or_else(|| "orphera".to_string());
+        c.repo = u.repo.unwrap_or_else(|| "overmax".to_string());
+        c.asset_name = u.asset_name.unwrap_or_else(|| "overmax.zip".to_string());
+        c.latest_release_url = u.latest_release_url
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         if let Ok(ov) = std::env::var("OVERMAX_UPDATE_LATEST_URL") {
             let t = ov.trim();
             if !t.is_empty() {

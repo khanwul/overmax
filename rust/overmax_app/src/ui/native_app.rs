@@ -73,7 +73,8 @@ pub fn run_native_app() -> eframe::Result<()> {
     .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
     let mut merged = load_merged_settings(root.as_path(), defaults);
     normalize_settings(&mut merged);
-    let upd_cfg = AppUpdateConfig::from_merged_settings(&merged);
+    let app_settings: overmax_data::Settings = serde_json::from_value(merged.clone()).unwrap_or_default();
+    let upd_cfg = AppUpdateConfig::from_settings(&app_settings);
     let ok_notify = updater::notify_previous_update(root.as_path()).unwrap_or_else(|e| {
         eprintln!("[AppUpdater] notify: {e}");
         true
@@ -100,7 +101,7 @@ pub fn run_native_app() -> eframe::Result<()> {
         }
     }
 
-    let options = native_options(&merged);
+    let options = native_options(&app_settings);
 
     eframe::run_native(
         "Overmax",
@@ -145,8 +146,9 @@ fn is_position_on_screen(_x: f32, _y: f32) -> bool {
     true
 }
 
-fn native_options(merged: &Value) -> eframe::NativeOptions {
-    let is_lite = merged.get("overlay").and_then(|o| o.get("lite_mode")).and_then(|v| v.as_bool()).unwrap_or(false);
+fn native_options(settings: &overmax_data::Settings) -> eframe::NativeOptions {
+    let overlay = settings.overlay();
+    let is_lite = overlay.lite_mode;
 
     let mut builder = ViewportBuilder::default()
         .with_title("Overmax")
@@ -163,16 +165,12 @@ fn native_options(merged: &Value) -> eframe::NativeOptions {
     }
 
     if !is_lite {
-        if let Some(pos) = merged.get("overlay").and_then(|o| o.get("position")) {
-            if let (Some(x), Some(y)) = (
-                pos.get("x").and_then(|v| v.as_f64()),
-                pos.get("y").and_then(|v| v.as_f64()),
-            ) {
-                let px = x as f32;
-                let py = y as f32;
-                if is_position_on_screen(px, py) {
-                    builder = builder.with_position(eframe::egui::pos2(px, py));
-                }
+        let pos = &overlay.position;
+        if let (Some(x), Some(y)) = (pos.x, pos.y) {
+            let px = x as f32;
+            let py = y as f32;
+            if is_position_on_screen(px, py) {
+                builder = builder.with_position(eframe::egui::pos2(px, py));
             }
         }
     }
@@ -366,10 +364,8 @@ impl NativeApp {
         ));
 
         let steam0 = {
-            let mg = merged_settings
-                .lock()
-                .map_err(|_| "settings lock poisoned")?;
-            let mut sid = first_steam_from_settings(mg.clone());
+            let settings: overmax_data::Settings = serde_json::from_value(merged.clone()).unwrap_or_default();
+            let mut sid = first_steam_from_settings(&settings);
             if sid.is_empty() {
                 sid = recent_steam.unwrap_or_default();
             }
@@ -390,20 +386,15 @@ impl NativeApp {
         let (fetch_res_tx, fetch_res_rx) = mpsc::channel();
 
         // 시작 시 자동 갱신
-        if merged.get("varchive").and_then(|v| v.get("auto_refresh")).and_then(|v| v.as_bool()).unwrap_or(false) {
-            let v_id = merged.get("varchive")
-                .and_then(|v| v.get("user_map"))
-                .and_then(|m| m.get(&steam0))
-                .and_then(|u| {
-                    if u.is_object() {
-                        u.get("v_id").and_then(|v| v.as_str())
-                    } else {
-                        u.as_str()
+        let startup_settings: overmax_data::Settings = serde_json::from_value(merged.clone()).unwrap_or_default();
+        let varchive_settings = startup_settings.varchive();
+        if varchive_settings.auto_refresh {
+            if let Some(user_info) = varchive_settings.user_map.get(&steam0) {
+                if let Some(v_id) = &user_info.v_id {
+                    if !v_id.is_empty() {
+                        let _ = fetch_req_tx.send((steam0.clone(), v_id.to_string(), 0));
                     }
-                })
-                .unwrap_or("");
-            if !v_id.is_empty() {
-                let _ = fetch_req_tx.send((steam0.clone(), v_id.to_string(), 0));
+                }
             }
         }
 
@@ -689,14 +680,11 @@ impl NativeApp {
     }
 
     fn spawn_upload(&self, index: usize, candidate: SyncCandidate, ctx: egui::Context) {
-        let merged = match self.settings.merged.lock() {
-            Ok(g) => g.clone(),
-            Err(_) => return,
-        };
+        let settings = self.settings.get_merged();
         let steam = self.sync_state.steam_id.lock()
             .map(|g| g.clone())
             .unwrap_or_default();
-        let account_path = account_path_for_steam(&merged, &steam);
+        let account_path = account_path_for_steam(&settings, &steam);
         let tx = self.sync_channels.upload_res_tx.clone();
         let root = self.root.clone();
 
@@ -754,14 +742,11 @@ impl NativeApp {
     }
 
     pub(crate) fn is_varchive_account_configured(&self) -> bool {
-        let merged = match self.settings.merged.lock() {
-            Ok(g) => g.clone(),
-            Err(_) => return false,
-        };
+        let settings = self.settings.get_merged();
         let steam = self.sync_state.steam_id.lock()
             .map(|g| g.clone())
             .unwrap_or_default();
-        let account_path = account_path_for_steam(&merged, &steam);
+        let account_path = account_path_for_steam(&settings, &steam);
         if account_path.is_empty() {
             return false;
         }
@@ -938,7 +923,7 @@ mod tests {
 
     #[test]
     fn main_overlay_stays_out_of_taskbar() {
-        let options = native_options(&serde_json::json!({}));
+        let options = native_options(&overmax_data::Settings::default());
 
         assert_eq!(options.viewport.taskbar, Some(false));
     }
