@@ -43,6 +43,37 @@ pub struct PlayStateDetector {
 }
 
 impl PlayStateDetector {
+    fn should_run_rate_ocr(&self, is_result: bool, metadata_changed: bool, now: f64) -> bool {
+        let is_rate_cached = self.last_rate_result.0.is_some();
+        let should_ocr = is_result || metadata_changed || !is_rate_cached;
+        should_ocr && now - self.last_rate_ocr_ts >= 0.20
+    }
+
+    fn apply_rate_ocr_result(&mut self, is_result: bool, mut res: (Option<f32>, String, Option<OcrTelemetry>)) {
+        if is_result {
+            if let Some(new_r) = res.0 {
+                self.push_result_rate_sample(new_r);
+                res.0 = self.median_result_rate();
+            }
+        } else {
+            self.result_rate_window.clear();
+        }
+        self.last_rate_result = res;
+    }
+
+    fn push_result_rate_sample(&mut self, r: f32) {
+        self.result_rate_window.push_back(r);
+        if self.result_rate_window.len() > 7 {
+            self.result_rate_window.pop_front();
+        }
+    }
+
+    fn median_result_rate(&self) -> Option<f32> {
+        let mut sorted: Vec<f32> = self.result_rate_window.iter().cloned().collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.get(sorted.len() / 2).copied()
+    }
+
     pub fn new(history_size: usize) -> Self {
         Self {
             history_size: history_size.max(1),
@@ -238,14 +269,7 @@ impl PlayStateDetector {
             if confident {
                 let mut rate = 0.0;
                 if let Some(rate_roi) = rois.get_roi("rate") {
-                    let is_rate_cached = self.last_rate_result.0.is_some();
-                    let should_ocr = if is_result {
-                        true
-                    } else {
-                        metadata_changed || !is_rate_cached
-                    };
-
-                    if should_ocr && now - self.last_rate_ocr_ts >= 0.20 {
+                    if self.should_run_rate_ocr(is_result, metadata_changed, now) {
                         if let Some(rate_img) = crop_roi(frame, rate_roi) {
                             let mut rate_res = ocr.detect_rate(&rate_img);
                             self.last_rate_ocr_ts = now;
@@ -261,27 +285,7 @@ impl PlayStateDetector {
 
                             debug_println!("    [detect] rate OCR run. rate={:?}, text='{}'", rate_res.0, rate_res.1);
                             
-                            if is_result {
-                                if let Some(new_r) = rate_res.0 {
-                                    self.result_rate_window.push_back(new_r);
-                                    if self.result_rate_window.len() > 7 {
-                                        self.result_rate_window.pop_front();
-                                    }
-                                    
-                                    // 윈도우 버퍼에서 중간값(Median)을 취하여 노이즈 억제
-                                    let mut sorted: Vec<f32> = self.result_rate_window.iter().cloned().collect();
-                                    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                                    let mid = sorted.len() / 2;
-                                    rate_res.0 = Some(sorted[mid]);
-                                }
-                                self.last_rate_result = rate_res;
-                            } else {
-                                // 결과창이 아닐 때는 윈도우 버퍼를 항상 클리어
-                                if !self.result_rate_window.is_empty() {
-                                    self.result_rate_window.clear();
-                                }
-                                self.last_rate_result = rate_res;
-                            }
+                            self.apply_rate_ocr_result(is_result, rate_res);
                         }
                     }
 
