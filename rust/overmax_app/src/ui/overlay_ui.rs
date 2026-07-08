@@ -572,7 +572,7 @@ fn draw_header(
                     total_width += 6.0 * scale;
                 }
 
-                let font_meta = FontId::proportional(10.0 * scale);
+                let font_meta = FontId::proportional(9.0 * scale);
                 let galley_meta = ui.painter().layout_no_wrap(suffix_str.clone(), font_meta.clone(), Theme::TEXT_ACCENT);
                 total_width += galley_meta.size().x;
 
@@ -641,7 +641,7 @@ fn draw_header(
                     total_width += 10.0 * scale; // 구분선 `|` 가로폭 (여백 포함)
                 }
 
-                let font_meta = FontId::proportional(10.0 * scale);
+                let font_meta = FontId::proportional(9.0 * scale);
                 let galley_meta = ui.painter().layout_no_wrap(text_str.clone(), font_meta.clone(), Theme::TEXT_ACCENT);
                 total_width += galley_meta.size().x;
 
