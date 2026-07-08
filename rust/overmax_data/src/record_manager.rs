@@ -81,7 +81,9 @@ impl RecordManager {
                 guard.remove(&(song_id, button_mode.to_string(), difficulty.to_string()));
             }
             if !steam_id.is_empty() && steam_id != "__unknown__" {
-                let btn = button_mode.replace("B", "").parse::<i32>().unwrap_or(4);
+                let btn = crate::varchive::Mode::from_str(button_mode)
+                    .map(|m| m.button_count())
+                    .unwrap_or(4);
                 let _ = crate::sync::delete_varchive_cache_record(
                     &self.varchive_cache_root,
                     &steam_id,

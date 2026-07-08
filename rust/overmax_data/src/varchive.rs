@@ -36,6 +36,15 @@ impl Mode {
             Self::B8 => "8B",
         }
     }
+
+    pub fn button_count(&self) -> i32 {
+        match self {
+            Self::B4 => 4,
+            Self::B5 => 5,
+            Self::B6 => 6,
+            Self::B8 => 8,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
