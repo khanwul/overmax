@@ -40,7 +40,9 @@ pub struct PlayStateDetector {
 impl PlayStateDetector {
     fn should_run_rate_ocr(&self, is_result: bool, metadata_changed: bool, now: f64) -> bool {
         let is_rate_cached = self.last_rate_result.0.is_some();
-        let should_ocr = is_result || metadata_changed || !is_rate_cached;
+        // 선곡창(!is_result)에서는 실시간 수치 변화를 놓치지 않도록 항상 OCR을 실행하고,
+        // 결과창(is_result)에서는 성능 최적화를 위해 메타데이터가 변경되거나 캐시가 없을 때만 OCR을 허용합니다.
+        let should_ocr = !is_result || metadata_changed || !is_rate_cached;
         should_ocr && now - self.last_rate_ocr_ts >= 0.20
     }
 
