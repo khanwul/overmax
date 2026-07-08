@@ -851,13 +851,14 @@ mod tests {
 
     #[test]
     fn game_window_title_uses_settings_or_python_default() {
-        let settings = serde_json::json!({
+        let val = serde_json::json!({
             "window_tracker": {"window_title": "DJMAX TEST"}
         });
+        let settings: overmax_data::Settings = serde_json::from_value(val).unwrap_or_default();
 
         assert_eq!(super::game_window_title(&settings), "DJMAX TEST");
         assert_eq!(
-            super::game_window_title(&serde_json::json!({})),
+            super::game_window_title(&overmax_data::Settings::default()),
             "DJMAX RESPECT V"
         );
     }
