@@ -238,6 +238,40 @@ pub(crate) struct SyncWorkerChannels {
     pub(crate) delete_req_tx: Sender<usize>,
 }
 
+pub struct AppStateTracker {
+    pub prev_settings_open: Changed<bool>,
+    pub prev_sync_open: Changed<bool>,
+    pub prev_scale: Changed<f32>,
+    pub prev_overlay_on: Changed<bool>,
+    pub prev_is_lite: Changed<bool>,
+    pub prev_passthrough: Changed<Option<bool>>,
+    pub prev_protected: Changed<Option<bool>>,
+}
+
+impl AppStateTracker {
+    pub fn new() -> Self {
+        Self {
+            prev_settings_open: Changed::new(false),
+            prev_sync_open: Changed::new(false),
+            prev_scale: Changed::new(1.0),
+            prev_overlay_on: Changed::new(false),
+            prev_is_lite: Changed::new(false),
+            prev_passthrough: Changed::new(None),
+            prev_protected: Changed::new(None),
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Default)]
+pub struct WindowsWindowCache {
+    pub cached_hwnd: Option<isize>,
+    pub cached_game_hwnd: Option<isize>,
+    pub last_applied_opacity: Option<f32>,
+    pub logged_opacity_fail: bool,
+    pub prev_snap_geometry: Option<(i32, i32, i32, i32)>,
+}
+
 pub struct NativeApp {
     pub(crate) root: Arc<std::path::PathBuf>,
     pub(crate) settings: SharedSettings,
@@ -256,14 +290,8 @@ pub struct NativeApp {
     pub(crate) sheet_meta: Arc<PatternSheetMeta>,
     pub(crate) recommendations: RecommendResult,
     pub(crate) pattern_tabs: Vec<crate::ui::overlay_recommend_ui::PatternTabInfo>,
-    pub(crate) prev_settings_open: Changed<bool>,
-    pub(crate) prev_sync_open: Changed<bool>,
-    pub(crate) prev_scale: Changed<f32>,
-    pub(crate) prev_overlay_on: Changed<bool>,
-    pub(crate) prev_is_lite: Changed<bool>,
-    pub(crate) prev_passthrough: Changed<Option<bool>>,
+    pub(crate) state_tracker: AppStateTracker,
     pub(crate) is_dragging: bool,
-    pub(crate) prev_protected: Changed<Option<bool>>,
     pub(crate) record_db: Arc<RecordDB>,
     pub(crate) record_manager: Arc<RecordManager>,
     pub(crate) recommender: Arc<Recommender>,
@@ -273,15 +301,7 @@ pub struct NativeApp {
     #[cfg(target_os = "windows")]
     pub(crate) _tray: Option<TrayIcon>,
     #[cfg(target_os = "windows")]
-    pub(crate) cached_hwnd: Option<isize>,
-    #[cfg(target_os = "windows")]
-    pub(crate) cached_game_hwnd: Option<isize>,
-    #[cfg(target_os = "windows")]
-    pub(crate) last_applied_opacity: Option<f32>,
-    #[cfg(target_os = "windows")]
-    pub(crate) logged_opacity_fail: bool,
-    #[cfg(target_os = "windows")]
-    pub(crate) prev_snap_geometry: Option<(i32, i32, i32, i32)>,
+    pub(crate) win_cache: WindowsWindowCache,
     pub(crate) last_painted_rect: Option<egui::Rect>,
 }
 
@@ -482,14 +502,8 @@ impl NativeApp {
             sheet_meta,
             recommendations: RecommendResult::empty(),
             pattern_tabs: Vec::new(),
-            prev_settings_open: Changed::new(false),
-            prev_sync_open: Changed::new(false),
-            prev_scale: Changed::new(1.0),
-            prev_overlay_on: Changed::new(false),
-            prev_is_lite: Changed::new(false),
-            prev_passthrough: Changed::new(None),
+            state_tracker: AppStateTracker::new(),
             is_dragging: false,
-            prev_protected: Changed::new(None),
             record_db,
             record_manager,
             recommender,
@@ -499,15 +513,7 @@ impl NativeApp {
             #[cfg(target_os = "windows")]
             _tray: Some(TrayIcon::spawn(ui_cmd_tx, merged_settings.clone(), ctx_holder)),
             #[cfg(target_os = "windows")]
-            cached_hwnd: None,
-            #[cfg(target_os = "windows")]
-            cached_game_hwnd: None,
-            #[cfg(target_os = "windows")]
-            last_applied_opacity: None,
-            #[cfg(target_os = "windows")]
-            logged_opacity_fail: false,
-            #[cfg(target_os = "windows")]
-            prev_snap_geometry: None,
+            win_cache: WindowsWindowCache::default(),
             last_painted_rect: None,
         };
 

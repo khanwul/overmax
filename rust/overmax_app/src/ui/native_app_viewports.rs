@@ -304,7 +304,7 @@ impl eframe::App for NativeApp {
         let settings_on = self.ui_state.settings_open.load(Ordering::Relaxed);
         let sync_on = self.ui_state.sync_open.load(Ordering::Relaxed);
 
-        let settings_open_changed = self.prev_settings_open.update(settings_on);
+        let settings_open_changed = self.state_tracker.prev_settings_open.update(settings_on);
         if settings_on && settings_open_changed {
             if let (Ok(m), Ok(mut d)) = (self.settings.merged.lock(), self.settings.draft.lock()) {
                 *d = m.clone();
@@ -312,7 +312,7 @@ impl eframe::App for NativeApp {
             self.refresh_steam_session("설정 창 열림");
         }
 
-        let sync_open_changed = self.prev_sync_open.update(sync_on);
+        let sync_open_changed = self.state_tracker.prev_sync_open.update(sync_on);
         if sync_on && sync_open_changed {
             self.refresh_steam_session("동기화 창 열림");
         }
@@ -331,7 +331,7 @@ impl eframe::App for NativeApp {
         self.drain_fetch_results();
         self.poll_delete_requests(ctx);
         self.drain_game_found_refresh_steam();
-        if self.prev_protected.update(Some(true)) {
+        if self.state_tracker.prev_protected.update(Some(true)) {
             ctx.send_viewport_cmd(ViewportCommand::ContentProtected(true));
         }
 
@@ -351,13 +351,13 @@ impl eframe::App for NativeApp {
         let game_found = self.game_rect.lock().map(|r| r.is_some()).unwrap_or(false);
         let overlay_on = game_found && self.confidence > 0.1;
 
-        let prev_overlay = *self.prev_overlay_on;
-        let prev_scale_val = *self.prev_scale;
-        let prev_lite = *self.prev_is_lite;
+        let prev_overlay = *self.state_tracker.prev_overlay_on;
+        let prev_scale_val = *self.state_tracker.prev_scale;
+        let prev_lite = *self.state_tracker.prev_is_lite;
 
-        let scale_changed = (scale - prev_scale_val).abs() > 0.001 && self.prev_scale.update(scale);
-        let overlay_on_changed = self.prev_overlay_on.update(overlay_on);
-        let is_lite_changed = self.prev_is_lite.update(is_lite);
+        let scale_changed = (scale - prev_scale_val).abs() > 0.001 && self.state_tracker.prev_scale.update(scale);
+        let overlay_on_changed = self.state_tracker.prev_overlay_on.update(overlay_on);
+        let is_lite_changed = self.state_tracker.prev_is_lite.update(is_lite);
 
         if overlay_on_changed 
             || (overlay_on && (scale_changed || is_lite_changed))
@@ -392,10 +392,10 @@ impl eframe::App for NativeApp {
         let _hidden_size = Vec2::new(1.0, 1.0);
 
         // 마우스가 오버레이 영역 위에 있을 때만 상호작용 가능하게 함 (보조창 조작을 위해)
-        let local_mouse = get_local_mouse_pos(ctx, self.cached_hwnd);
+        let local_mouse = get_local_mouse_pos(ctx, self.win_cache.cached_hwnd);
         let is_over = local_mouse.is_some() || self.is_dragging;
         let passthrough = !overlay_on || !is_over;
-        if self.prev_passthrough.update(Some(passthrough)) {
+        if self.state_tracker.prev_passthrough.update(Some(passthrough)) {
             ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(passthrough));
         }
 
@@ -409,7 +409,7 @@ impl eframe::App for NativeApp {
         #[cfg(target_os = "windows")]
         {
             if overlay_on && snap_position != "manual" {
-                if let (Some(overlay_hwnd), Some(game_hwnd)) = (self.cached_hwnd, self.cached_game_hwnd) {
+                if let (Some(overlay_hwnd), Some(game_hwnd)) = (self.win_cache.cached_hwnd, self.win_cache.cached_game_hwnd) {
                     unsafe {
                         let fg = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
                         if fg == overlay_hwnd as windows_sys::Win32::Foundation::HWND {
@@ -530,7 +530,7 @@ impl eframe::App for NativeApp {
         #[cfg(target_os = "windows")]
         {
             if overlay_on && snap_position != "manual" {
-                if let Some(hwnd_val) = self.cached_hwnd {
+                if let Some(hwnd_val) = self.win_cache.cached_hwnd {
                     if let Ok(g_rect_opt) = self.game_rect.try_lock() {
                         if let Some(g_rect) = *g_rect_opt {
                             use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -557,7 +557,7 @@ impl eframe::App for NativeApp {
                             
                             // 이전 설정 좌표 및 크기와 다른 경우에만 SetWindowPos 호출
                             let current_geom = (px, py, overlay_w_px, overlay_h_px);
-                            let geom_changed = self.prev_snap_geometry != Some(current_geom);
+                            let geom_changed = self.win_cache.prev_snap_geometry != Some(current_geom);
 
                             if geom_changed {
                                 unsafe {
@@ -571,7 +571,7 @@ impl eframe::App for NativeApp {
                                         SWP_NOACTIVATE,
                                     );
                                 }
-                                self.prev_snap_geometry = Some(current_geom);
+                                self.win_cache.prev_snap_geometry = Some(current_geom);
                             }
                         }
                     }
@@ -585,9 +585,9 @@ impl eframe::App for NativeApp {
             if overlay_on {
                 let found = self.apply_window_opacity(opacity, force_topmost);
                 if !found {
-                    if !self.logged_opacity_fail {
+                    if !self.win_cache.logged_opacity_fail {
                         debug_ui::push_log(&self.debug_state.log_lines, self.max_log_lines(), format!("[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})", opacity));
-                        self.logged_opacity_fail = true;
+                        self.win_cache.logged_opacity_fail = true;
                     }
                 }
             } else {
@@ -597,8 +597,8 @@ impl eframe::App for NativeApp {
                         windows_sys::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes(hwnd as _, 0, 0, 0x00000002);
                     }
                 }
-                self.cached_hwnd = None;
-                self.last_applied_opacity = None;
+                self.win_cache.cached_hwnd = None;
+                self.win_cache.last_applied_opacity = None;
             }
         }
     }
@@ -719,7 +719,7 @@ impl NativeApp {
 
     fn game_hwnd_cached(&mut self) -> Option<HWND> {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        let mut g_hwnd = self.cached_game_hwnd.map(|h| h as HWND);
+        let mut g_hwnd = self.win_cache.cached_game_hwnd.map(|h| h as HWND);
         let is_valid = g_hwnd.map(|h| unsafe { IsWindow(h) } != 0).unwrap_or(false);
         if !is_valid {
             let game_title = if let Ok(m) = self.settings.merged.lock() {
@@ -729,7 +729,7 @@ impl NativeApp {
             };
             let title_wide = window_tracker::encode_wide(&game_title);
             g_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
-            self.cached_game_hwnd = g_hwnd.map(|h| h as isize);
+            self.win_cache.cached_game_hwnd = g_hwnd.map(|h| h as isize);
         }
         g_hwnd
     }
@@ -763,7 +763,7 @@ impl NativeApp {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
         // 1. 캐싱된 핸들이 있고 투명도가 올바르게 유지되고 있다면 조기 반환
-        if let Some(hwnd_val) = self.cached_hwnd {
+        if let Some(hwnd_val) = self.win_cache.cached_hwnd {
             let hwnd = hwnd_val as HWND;
             let game_hwnd = self.game_hwnd_cached();
 
@@ -793,7 +793,7 @@ impl NativeApp {
             
             // 캐시된 핸들은 유효하나 스타일이나 투명도가 풀린 경우: 바로 재적용 시도
             if Self::apply_style_and_opacity(hwnd, is_active, opacity) {
-                self.last_applied_opacity = Some(opacity);
+                self.win_cache.last_applied_opacity = Some(opacity);
                 return true;
             }
         }
@@ -817,8 +817,8 @@ impl NativeApp {
             let is_active = self.determine_active_state(game_hwnd);
 
             if Self::apply_style_and_opacity(hwnd, is_active, opacity) {
-                self.cached_hwnd = Some(hwnd as isize);
-                self.last_applied_opacity = Some(opacity);
+                self.win_cache.cached_hwnd = Some(hwnd as isize);
+                self.win_cache.last_applied_opacity = Some(opacity);
                 return true;
             }
         }
