@@ -272,20 +272,7 @@ impl DetectionPipeline {
 
     fn try_result_edge_detection(&self, frame: &CapturedFrame) -> Option<SceneType> {
         let jacket_roi = self.rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle)?;
-        let margin = 8;
-        let ext_roi = crate::detector::roi::RoiRect {
-            x1: jacket_roi.x1 - margin,
-            y1: jacket_roi.y1 - margin,
-            x2: jacket_roi.x2 + margin,
-            y2: jacket_roi.y2 + margin,
-        };
-        let ext_img = crop_roi(frame, ext_roi)?;
-        if let Ok(edge_strength) = overmax_cv::detect_rect_edges(
-            &ext_img.bgra,
-            ext_img.width as usize,
-            ext_img.height as usize,
-            margin as usize,
-        ) {
+        if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
             debug_println!("    [detect_logo_if_due] Result screen jacket edge strength: {}", edge_strength);
             if edge_strength >= 15.0 {
                 debug_println!("    [detect_logo_if_due] Bypassed logo OCR: Result screen detected via jacket edge strength!");
@@ -297,20 +284,7 @@ impl DetectionPipeline {
 
     fn try_openmatch_edge_similarity(&self, frame: &CapturedFrame) -> Option<SceneType> {
         let jacket_roi = self.rois.get_roi_for_scene("jacket", SceneType::OpenMatch)?;
-        let margin = 8;
-        let ext_roi = crate::detector::roi::RoiRect {
-            x1: jacket_roi.x1 - margin,
-            y1: jacket_roi.y1 - margin,
-            x2: jacket_roi.x2 + margin,
-            y2: jacket_roi.y2 + margin,
-        };
-        let ext_img = crop_roi(frame, ext_roi)?;
-        if let Ok(edge_strength) = overmax_cv::detect_rect_edges(
-            &ext_img.bgra,
-            ext_img.width as usize,
-            ext_img.height as usize,
-            margin as usize,
-        ) {
+        if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
             if edge_strength >= 25.0 {
                 if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
                     if let Some(match_res) = self.jacket_matcher.match_jacket(
@@ -594,23 +568,9 @@ pub fn detect_scene_from_logo(
     // 2단계 엣지 디텍션 폴백 (실제 DetectionPipeline과 동일한 엣지 구원 로직)
     if scene == SceneType::Unknown {
         if let Some(jacket_roi) = rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle) {
-            let margin = 8;
-            let ext_roi = crate::detector::roi::RoiRect {
-                x1: jacket_roi.x1 - margin,
-                y1: jacket_roi.y1 - margin,
-                x2: jacket_roi.x2 + margin,
-                y2: jacket_roi.y2 + margin,
-            };
-            if let Some(ext_img) = crop_roi(frame, ext_roi) {
-                if let Ok(edge_strength) = overmax_cv::detect_rect_edges(
-                    &ext_img.bgra,
-                    ext_img.width as usize,
-                    ext_img.height as usize,
-                    margin as usize,
-                ) {
-                    if edge_strength >= 15.0 {
-                        scene = SceneType::ResultFreestyle;
-                    }
+            if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
+                if edge_strength >= 15.0 {
+                    scene = SceneType::ResultFreestyle;
                 }
             }
         }
@@ -619,31 +579,17 @@ pub fn detect_scene_from_logo(
     // 3단계 오픈매치 선곡창 재킷 엣지 + 유사도 폴백
     if scene == SceneType::Unknown {
         if let Some(jacket_roi) = rois.get_roi_for_scene("jacket", SceneType::OpenMatch) {
-            let margin = 8;
-            let ext_roi = crate::detector::roi::RoiRect {
-                x1: jacket_roi.x1 - margin,
-                y1: jacket_roi.y1 - margin,
-                x2: jacket_roi.x2 + margin,
-                y2: jacket_roi.y2 + margin,
-            };
-            if let Some(ext_img) = crop_roi(frame, ext_roi) {
-                if let Ok(edge_strength) = overmax_cv::detect_rect_edges(
-                    &ext_img.bgra,
-                    ext_img.width as usize,
-                    ext_img.height as usize,
-                    margin as usize,
-                ) {
-                    if edge_strength >= 25.0 {
-                        if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
-                            if let Some(match_res) = matcher.match_jacket(
-                                &jacket_img.bgra,
-                                jacket_img.width as usize,
-                                jacket_img.height as usize,
-                                4,
-                            ) {
-                                if match_res.similarity >= 0.65 {
-                                    scene = SceneType::OpenMatch;
-                                }
+            if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
+                if edge_strength >= 25.0 {
+                    if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
+                        if let Some(match_res) = matcher.match_jacket(
+                            &jacket_img.bgra,
+                            jacket_img.width as usize,
+                            jacket_img.height as usize,
+                            4,
+                        ) {
+                            if match_res.similarity >= 0.65 {
+                                scene = SceneType::OpenMatch;
                             }
                         }
                     }
@@ -806,4 +752,21 @@ mod tests {
             }
         }
     }
+}
+
+fn detect_jacket_edges(frame: &CapturedFrame, jacket_roi: crate::detector::roi::RoiRect) -> Option<f32> {
+    let margin = 8;
+    let ext_roi = crate::detector::roi::RoiRect {
+        x1: jacket_roi.x1 - margin,
+        y1: jacket_roi.y1 - margin,
+        x2: jacket_roi.x2 + margin,
+        y2: jacket_roi.y2 + margin,
+    };
+    let ext_img = crop_roi(frame, ext_roi)?;
+    overmax_cv::detect_rect_edges(
+        &ext_img.bgra,
+        ext_img.width as usize,
+        ext_img.height as usize,
+        margin as usize,
+    ).ok()
 }
