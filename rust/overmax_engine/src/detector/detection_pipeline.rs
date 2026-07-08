@@ -242,107 +242,131 @@ impl DetectionPipeline {
         debug_println!("    [detect_logo_if_due] now={}, crop_size={}x{}, OCR raw='{}', scene={:?}",
                  now, logo.width, logo.height, raw_text, scene);
 
-        let mut scene_res = scene;
+        let scene_candidate = self.resolve_scene_candidate(frame, &raw_text, scene);
+        
+        if scene_candidate != SceneType::Unknown && scene_candidate != SceneType::Online {
+            self.rois.set_scene(scene_candidate);
+        }
 
+        let final_scene = self.commit_result_scene(frame, scene_candidate, &raw_text);
+        self.last_logo_ocr_ts = now;
+        Some(final_scene)
+    }
+
+    fn resolve_scene_candidate(
+        &self,
+        frame: &CapturedFrame,
+        raw_text: &str,
+        initial_scene: SceneType,
+    ) -> SceneType {
+        let mut scene = initial_scene;
+        if scene == SceneType::Unknown {
+            scene = check_open_match_badge(frame, &self.rois).unwrap_or(scene);
+        }
+        if scene == SceneType::Unknown {
+            scene = self.try_result_edge_detection(frame).unwrap_or(scene);
+        }
+        if scene == SceneType::Unknown {
+            scene = self.try_openmatch_edge_similarity(frame).unwrap_or(scene);
+        }
+        if scene == SceneType::Unknown {
+            scene = self.try_keyword_lockin(raw_text).unwrap_or(scene);
+        }
+        scene
+    }
+
+    fn try_result_edge_detection(&self, frame: &CapturedFrame) -> Option<SceneType> {
+        let jacket_roi = self.rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle)?;
+        let margin = 8;
+        let ext_roi = crate::detector::roi::RoiRect {
+            x1: jacket_roi.x1 - margin,
+            y1: jacket_roi.y1 - margin,
+            x2: jacket_roi.x2 + margin,
+            y2: jacket_roi.y2 + margin,
+        };
+        let ext_img = crop_roi(frame, ext_roi)?;
+        if let Ok(edge_strength) = overmax_cv::detect_rect_edges(
+            &ext_img.bgra,
+            ext_img.width as usize,
+            ext_img.height as usize,
+            margin as usize,
+        ) {
+            debug_println!("    [detect_logo_if_due] Result screen jacket edge strength: {}", edge_strength);
+            if edge_strength >= 15.0 {
+                debug_println!("    [detect_logo_if_due] Bypassed logo OCR: Result screen detected via jacket edge strength!");
+                return Some(SceneType::ResultFreestyle);
+            }
+        }
+        None
+    }
+
+    fn try_openmatch_edge_similarity(&self, frame: &CapturedFrame) -> Option<SceneType> {
+        let jacket_roi = self.rois.get_roi_for_scene("jacket", SceneType::OpenMatch)?;
+        let margin = 8;
+        let ext_roi = crate::detector::roi::RoiRect {
+            x1: jacket_roi.x1 - margin,
+            y1: jacket_roi.y1 - margin,
+            x2: jacket_roi.x2 + margin,
+            y2: jacket_roi.y2 + margin,
+        };
+        let ext_img = crop_roi(frame, ext_roi)?;
+        if let Ok(edge_strength) = overmax_cv::detect_rect_edges(
+            &ext_img.bgra,
+            ext_img.width as usize,
+            ext_img.height as usize,
+            margin as usize,
+        ) {
+            if edge_strength >= 25.0 {
+                if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
+                    if let Some(match_res) = self.jacket_matcher.match_jacket(
+                        &jacket_img.bgra,
+                        jacket_img.width as usize,
+                        jacket_img.height as usize,
+                        4,
+                    ) {
+                        if match_res.similarity >= 0.65 {
+                            debug_println!("    [detect_logo_if_due] Bypassed logo OCR: OpenMatch screen detected via jacket edge ({:.2}) and similarity ({:.4})!", edge_strength, match_res.similarity);
+                            return Some(SceneType::OpenMatch);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn try_keyword_lockin(&self, raw_text: &str) -> Option<SceneType> {
         let is_prev_result = matches!(
             self.last_logo_scene,
             SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
         );
-
-        if scene_res == SceneType::Unknown {
-            // 하단 가이드바 단축키에 의존하지 않고, 모드 배지(mode_diff_badge) 영역 of 4B/5B/6B/8B 버튼 모드 키워드를 단독 앵커로 사용하여 오픈매치 결과창 씬 변별
-            if let Some(fallback_scene) = check_open_match_badge(frame, &self.rois) {
-                scene_res = fallback_scene;
-                self.rois.set_scene(scene_res); // Sync configurations
-            }
+        if !is_prev_result {
+            return None;
         }
-
-        // 로고 OCR과 오픈매치 뱃지 OCR이 모두 실패한 경우, 결과창 재킷 사각형의 엣지 디텍션으로 최종 구원
-        if scene_res == SceneType::Unknown {
-            if let Some(jacket_roi) = self.rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle) {
-                let margin = 8;
-                let ext_roi = crate::detector::roi::RoiRect {
-                    x1: jacket_roi.x1 - margin,
-                    y1: jacket_roi.y1 - margin,
-                    x2: jacket_roi.x2 + margin,
-                    y2: jacket_roi.y2 + margin,
-                };
-                if let Some(ext_img) = crop_roi(frame, ext_roi) {
-                    if let Ok(edge_strength) = overmax_cv::detect_rect_edges(
-                        &ext_img.bgra,
-                        ext_img.width as usize,
-                        ext_img.height as usize,
-                        margin as usize,
-                    ) {
-                        debug_println!("    [detect_logo_if_due] Result screen jacket edge strength: {}", edge_strength);
-                        if edge_strength >= 15.0 {
-                            scene_res = SceneType::ResultFreestyle;
-                            debug_println!("    [detect_logo_if_due] Bypassed logo OCR: Result screen detected via jacket edge strength!");
-                        }
-                    }
-                }
-            }
+        let norm_logo = raw_text.to_uppercase();
+        let has_logo_keyword = norm_logo.contains("BUTTON")
+            || norm_logo.contains("TUNES")
+            || norm_logo.contains("TIJNFS")
+            || norm_logo.contains("TUNE");
+        if has_logo_keyword {
+            debug_println!("    [detect_logo_if_due] Lock-in: keeping previous result scene {:?} due to logo keyword match", self.last_logo_scene);
+            Some(self.last_logo_scene)
+        } else {
+            None
         }
+    }
 
-        // 로고 OCR, 뱃지 OCR, 결과창 엣지 디텍션이 모두 실패한 경우, 오픈매치 선곡창 재킷 엣지 + 유사도 교차 매칭으로 구원
-        if scene_res == SceneType::Unknown {
-            if let Some(jacket_roi) = self.rois.get_roi_for_scene("jacket", SceneType::OpenMatch) {
-                let margin = 8;
-                let ext_roi = crate::detector::roi::RoiRect {
-                    x1: jacket_roi.x1 - margin,
-                    y1: jacket_roi.y1 - margin,
-                    x2: jacket_roi.x2 + margin,
-                    y2: jacket_roi.y2 + margin,
-                };
-                if let Some(ext_img) = crop_roi(frame, ext_roi) {
-                    if let Ok(edge_strength) = overmax_cv::detect_rect_edges(
-                        &ext_img.bgra,
-                        ext_img.width as usize,
-                        ext_img.height as usize,
-                        margin as usize,
-                    ) {
-                        if edge_strength >= 25.0 {
-                            if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
-                                if let Some(match_res) = self.jacket_matcher.match_jacket(
-                                    &jacket_img.bgra,
-                                    jacket_img.width as usize,
-                                    jacket_img.height as usize,
-                                    4,
-                                ) {
-                                    if match_res.similarity >= 0.65 {
-                                        scene_res = SceneType::OpenMatch;
-                                        debug_println!("    [detect_logo_if_due] Bypassed logo OCR: OpenMatch screen detected via jacket edge ({:.2}) and similarity ({:.4})!", edge_strength, match_res.similarity);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if scene_res == SceneType::Unknown && is_prev_result {
-            let norm_logo = raw_text.to_uppercase();
-            let has_logo_keyword = norm_logo.contains("BUTTON")
-                || norm_logo.contains("TUNES")
-                || norm_logo.contains("TIJNFS")
-                || norm_logo.contains("TUNE");
-            if has_logo_keyword {
-                scene_res = self.last_logo_scene;
-                debug_println!("    [detect_logo_if_due] Lock-in: keeping previous result scene {:?} due to logo keyword match", scene_res);
-            }
-        }
-
+    fn commit_result_scene(&mut self, frame: &CapturedFrame, candidate: SceneType, raw_text: &str) -> SceneType {
         let is_detected_result = matches!(
-            scene_res,
+            candidate,
             SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
         );
 
         if is_detected_result {
-            if scene_res == self.last_detected_result_scene {
+            if candidate == self.last_detected_result_scene {
                 self.result_scene_streak += 1;
             } else {
-                self.last_detected_result_scene = scene_res;
+                self.last_detected_result_scene = candidate;
                 self.result_scene_streak = 1;
             }
 
@@ -353,7 +377,7 @@ impl DetectionPipeline {
                 // 만약 플레이 이력이 없다면 결과창 재킷 매칭을 통해 2차 검증을 수행
                 if self.last_played_song_id.is_none() {
                     allow_entry = false; // 기본적으로 차단
-                    if let Some(jacket_roi) = self.rois.get_roi_for_scene("jacket", scene_res) {
+                    if let Some(jacket_roi) = self.rois.get_roi_for_scene("jacket", candidate) {
                         if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
                             if let Some(match_res) = self.jacket_matcher.match_jacket(
                                 &jacket_img.bgra,
@@ -376,11 +400,11 @@ impl DetectionPipeline {
                 }
 
                 if allow_entry {
-                    self.last_logo_scene = scene_res;
+                    self.last_logo_scene = candidate;
                     // ResultFreestyle 확정 시, 로고 OCR raw_text에서 모드를 파싱하여 play_state에 주입
                     // (결과 화면 폰트가 선곡 화면과 달라 템플릿 매칭이 실패하므로)
-                    if scene_res == SceneType::ResultFreestyle {
-                        if let Some(mode) = self.ocr.parse_mode_from_text(&raw_text) {
+                    if candidate == SceneType::ResultFreestyle {
+                        if let Some(mode) = self.ocr.parse_mode_from_text(raw_text) {
                             debug_println!("    [detect_logo_if_due] Parsed mode '{}' from logo text '{}'", mode, raw_text.trim());
                             self.play_state.set_logo_mode(mode);
                         }
@@ -395,11 +419,10 @@ impl DetectionPipeline {
         } else {
             self.result_scene_streak = 0;
             self.last_detected_result_scene = SceneType::Unknown;
-            self.last_logo_scene = scene_res;
+            self.last_logo_scene = candidate;
         }
 
-        self.last_logo_ocr_ts = now;
-        Some(self.last_logo_scene)
+        self.last_logo_scene
     }
 
 
