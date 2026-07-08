@@ -320,6 +320,7 @@ impl PlayStateDetector {
 
         if let Some(stable) = self.stable_raw() {
             let state = GameSessionState {
+                scene,
                 context: stable.context.clone(),
                 is_stable: true,
                 is_fullscreen: false, // will be overwritten/updated by detection worker
@@ -329,6 +330,7 @@ impl PlayStateDetector {
         }
 
         (GameSessionState {
+            scene,
             context,
             is_stable: false,
             is_fullscreen: false,

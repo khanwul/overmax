@@ -13,6 +13,15 @@ pub enum SceneType {
     ResultOpen2,
 }
 
+impl SceneType {
+    pub fn is_result(&self) -> bool {
+        matches!(
+            self,
+            Self::ResultFreestyle | Self::ResultOpen3 | Self::ResultOpen2
+        )
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayContext {
     pub song_id: u32,
@@ -24,6 +33,7 @@ pub struct PlayContext {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameSessionState {
+    pub scene: SceneType,
     pub context: Option<PlayContext>,
     pub is_stable: bool,
     pub is_fullscreen: bool,
@@ -32,6 +42,7 @@ pub struct GameSessionState {
 impl GameSessionState {
     pub fn detecting() -> Self {
         Self {
+            scene: SceneType::Unknown,
             context: None,
             is_stable: false,
             is_fullscreen: false,
@@ -81,11 +92,12 @@ impl fmt::Display for GameSessionState {
 
 #[cfg(test)]
 mod tests {
-    use super::{GameSessionState, PlayContext};
+    use super::{GameSessionState, PlayContext, SceneType};
 
     #[test]
     fn song_id_zero_is_valid_when_state_is_stable() {
         let state = GameSessionState {
+            scene: SceneType::Freestyle,
             context: Some(PlayContext {
                 song_id: 0,
                 mode: "4B".to_string(),
@@ -103,6 +115,7 @@ mod tests {
     #[test]
     fn unstable_state_is_not_valid() {
         let state = GameSessionState {
+            scene: SceneType::Freestyle,
             context: Some(PlayContext {
                 song_id: 1,
                 mode: "4B".to_string(),

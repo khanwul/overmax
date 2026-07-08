@@ -8,7 +8,7 @@ use eframe::egui::{
     Frame, Label, Layout, Margin, Rect, RichText, Sense, Vec2,
 };
 use overmax_core::GameSessionState;
-use overmax_data::RecommendResult;
+use overmax_data::{RecommendResult, RecordSource};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -149,6 +149,7 @@ pub struct OverlayProps<'a> {
     pub varchive_account_configured: bool,
     pub lite_mode: bool,
     pub is_snap_manual: bool,
+    pub record_manager: &'a overmax_data::RecordManager,
 }
 
 pub fn draw_overlay_panel(
@@ -189,6 +190,7 @@ pub fn draw_overlay_panel(
                 props.varchive_upload_needed,
                 props.varchive_account_configured,
                 props.is_snap_manual,
+                Some(props.record_manager),
             );
             ui.add_space(px.panel_gap());
             draw_body(ui, props.state, props.pattern_tabs, props.recommendations, &px);
@@ -339,27 +341,41 @@ fn draw_lite_panel(
             });
             
             // 2열: Rate + 콤보상태 + sheet_meta 정보 (황배 | 보조 | 메모 등) - 가운데 정렬
-            let mut meta_parts = Vec::new();
-            if let Some(ctx) = &props.state.context {
-                if ctx.rate > 0.0 {
-                    let mut rate_str = format!("{:.2}%", ctx.rate);
-                    if ctx.is_max_combo {
-                        let combo_symbol = if ctx.rate >= 100.0 { "[P]" } else { "[M]" };
-                        rate_str = format!("{} {}", rate_str, combo_symbol);
-                    }
-                    meta_parts.push(rate_str);
+            let final_meta = if props.state.scene.is_result() {
+                let mut text_str = "—".to_string();
+                if let Some(ctx) = &props.state.context {
+                    let (curr_rate, curr_mc, comp_str) = get_result_rate_comparison(ctx, Some(props.record_manager));
+                    let current_str = if let Some(mc) = curr_mc {
+                        format!("{} {}", curr_rate, mc)
+                    } else {
+                        curr_rate
+                    };
+                    text_str = format!("{} {}", current_str, comp_str);
                 }
-            }
-            
-            let meta_text_str = meta_text(props.state, props.pattern_tabs);
-            if meta_text_str != "—" && !meta_text_str.is_empty() {
-                meta_parts.push(meta_text_str);
-            }
-            
-            let final_meta = if meta_parts.is_empty() {
-                "—".to_string()
+                text_str
             } else {
-                meta_parts.join(" | ")
+                let mut meta_parts = Vec::new();
+                if let Some(ctx) = &props.state.context {
+                    if ctx.rate > 0.0 {
+                        let mut rate_str = format!("{:.2}%", ctx.rate);
+                        if ctx.is_max_combo {
+                            let combo_symbol = if ctx.rate >= 100.0 { "P" } else { "M" };
+                            rate_str = format!("{} {}", rate_str, combo_symbol);
+                        }
+                        meta_parts.push(rate_str);
+                    }
+                }
+                
+                let meta_text_str = meta_text(props.state, props.pattern_tabs);
+                if meta_text_str != "—" && !meta_text_str.is_empty() {
+                    meta_parts.push(meta_text_str);
+                }
+                
+                if meta_parts.is_empty() {
+                    "—".to_string()
+                } else {
+                    meta_parts.join(" | ")
+                }
             };
 
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
@@ -437,6 +453,7 @@ fn draw_header(
     varchive_upload_needed: bool,
     varchive_account_configured: bool,
     is_snap_manual: bool,
+    record_manager: Option<&overmax_data::RecordManager>,
 ) {
     let mut buttons_left_x = None;
     let header = Frame::new()
@@ -505,20 +522,7 @@ fn draw_header(
                     }
                 });
             });
-            let mut rate = 0.0;
-            let mut is_perfect = false;
-            let mut is_max_combo = false;
-            let mut has_badge = false;
-            if let Some(ctx) = &state.context {
-                rate = ctx.rate;
-                is_perfect = rate >= 100.0;
-                is_max_combo = ctx.is_max_combo;
-                has_badge = rate > 0.0;
-            }
-
             ui.add_space(px.header_meta_gap());
-
-            let text_str = meta_text(state, pattern_tabs);
             let scale = px.scale;
             let second_row_height = 15.0 * scale;
 
@@ -528,70 +532,151 @@ fn draw_header(
                 egui::Sense::hover(),
             );
 
-            let mut total_width = 0.0;
-            let mut has_rate = false;
-            let rate_text = if has_badge && rate > 0.0 {
-                let s = format!("{:.2}%", rate);
-                total_width += (s.len() as f32 * 5.2 + 8.0) * scale;
-                has_rate = true;
-                Some(s)
-            } else {
-                None
-            };
+            if state.scene.is_result() {
+                let mut suffix_str = "—".to_string();
+                let mut rate_text = None;
+                let mut combo_text = None;
+                let mut has_rate = false;
 
-            let combo_text = if has_badge && is_max_combo {
-                let s = if is_perfect { "P" } else { "M" };
-                if has_rate {
-                    total_width += 3.0 * scale;
+                if let Some(ctx) = &state.context {
+                    let (curr_rate, curr_mc, comp_str) = get_result_rate_comparison(ctx, record_manager);
+                    rate_text = Some(curr_rate);
+                    combo_text = curr_mc;
+                    suffix_str = comp_str;
+                    has_rate = true;
                 }
-                total_width += (s.len() as f32 * 5.2 + 8.0) * scale;
-                Some(s)
-            } else {
-                None
-            };
 
-            if has_badge {
-                total_width += 10.0 * scale; // 구분선 `|` 가로폭 (여백 포함)
-            }
+                let mut total_width = 0.0;
 
-            let font_meta = FontId::proportional(10.0 * scale);
-            let galley_meta = ui.painter().layout_no_wrap(text_str.clone(), font_meta.clone(), Theme::TEXT_ACCENT);
-            total_width += galley_meta.size().x;
+                let rate_badge_text = if let Some(ref r_txt) = rate_text {
+                    total_width += (r_txt.len() as f32 * 5.2 + 8.0) * scale;
+                    Some(r_txt.clone())
+                } else {
+                    None
+                };
 
-            let mut current_x = row_rect.left() + (row_rect.width() - total_width) / 2.0;
-            let center_y = row_rect.center().y;
+                let combo_badge_text = if let Some(c_txt) = combo_text {
+                    if rate_badge_text.is_some() {
+                        total_width += 3.0 * scale;
+                    }
+                    total_width += (c_txt.len() as f32 * 5.2 + 8.0) * scale;
+                    Some(c_txt.to_string())
+                } else {
+                    None
+                };
 
-            if let Some(r_txt) = &rate_text {
-                current_x = draw_meta_badge(ui.painter(), r_txt, current_x, center_y, scale, Theme::OK);
-            }
-
-            if let Some(c_txt) = &combo_text {
                 if has_rate {
-                    current_x += 3.0 * scale;
+                    total_width += 6.0 * scale;
                 }
-                current_x = draw_meta_badge(ui.painter(), c_txt, current_x, center_y, scale, Theme::TEXT_ACCENT);
-            }
 
-            if has_badge {
-                current_x += 4.0 * scale;
+                let font_meta = FontId::proportional(10.0 * scale);
+                let galley_meta = ui.painter().layout_no_wrap(suffix_str.clone(), font_meta.clone(), Theme::TEXT_ACCENT);
+                total_width += galley_meta.size().x;
+
+                let mut current_x = row_rect.left() + (row_rect.width() - total_width) / 2.0;
+                let center_y = row_rect.center().y;
+
+                if let Some(ref r_txt) = rate_badge_text {
+                    current_x = draw_meta_badge(ui.painter(), r_txt, current_x, center_y, scale, Theme::OK);
+                }
+
+                if let Some(ref c_txt) = combo_badge_text {
+                    if rate_badge_text.is_some() {
+                        current_x += 3.0 * scale;
+                    }
+                    current_x = draw_meta_badge(ui.painter(), c_txt, current_x, center_y, scale, Theme::TEXT_ACCENT);
+                }
+
+                if has_rate {
+                    current_x += 6.0 * scale;
+                }
+
                 ui.painter().text(
                     egui::pos2(current_x, center_y),
                     egui::Align2::LEFT_CENTER,
-                    "|",
-                    FontId::proportional(10.0 * scale),
-                    Theme::TEXT_MUTED,
+                    &suffix_str,
+                    font_meta,
+                    Theme::TEXT_ACCENT,
                 );
-                current_x += 2.0 * scale;
-                current_x += 4.0 * scale;
-            }
+            } else {
+                let mut rate = 0.0;
+                let mut is_perfect = false;
+                let mut is_max_combo = false;
+                let mut has_badge = false;
+                if let Some(ctx) = &state.context {
+                    rate = ctx.rate;
+                    is_perfect = rate >= 100.0;
+                    is_max_combo = ctx.is_max_combo;
+                    has_badge = rate > 0.0;
+                }
 
-            ui.painter().text(
-                egui::pos2(current_x, center_y),
-                egui::Align2::LEFT_CENTER,
-                &text_str,
-                font_meta,
-                Theme::TEXT_ACCENT,
-            );
+                let text_str = meta_text(state, pattern_tabs);
+
+                let mut total_width = 0.0;
+                let mut has_rate = false;
+                let rate_text = if has_badge && rate > 0.0 {
+                    let s = format!("{:.2}%", rate);
+                    total_width += (s.len() as f32 * 5.2 + 8.0) * scale;
+                    has_rate = true;
+                    Some(s)
+                } else {
+                    None
+                };
+
+                let combo_text = if has_badge && is_max_combo {
+                    let s = if is_perfect { "P" } else { "M" };
+                    if has_rate {
+                        total_width += 3.0 * scale;
+                    }
+                    total_width += (s.len() as f32 * 5.2 + 8.0) * scale;
+                    Some(s)
+                } else {
+                    None
+                };
+
+                if has_badge {
+                    total_width += 10.0 * scale; // 구분선 `|` 가로폭 (여백 포함)
+                }
+
+                let font_meta = FontId::proportional(10.0 * scale);
+                let galley_meta = ui.painter().layout_no_wrap(text_str.clone(), font_meta.clone(), Theme::TEXT_ACCENT);
+                total_width += galley_meta.size().x;
+
+                let mut current_x = row_rect.left() + (row_rect.width() - total_width) / 2.0;
+                let center_y = row_rect.center().y;
+
+                if let Some(r_txt) = &rate_text {
+                    current_x = draw_meta_badge(ui.painter(), r_txt, current_x, center_y, scale, Theme::OK);
+                }
+
+                if let Some(c_txt) = &combo_text {
+                    if has_rate {
+                        current_x += 3.0 * scale;
+                    }
+                    current_x = draw_meta_badge(ui.painter(), c_txt, current_x, center_y, scale, Theme::TEXT_ACCENT);
+                }
+
+                if has_badge {
+                    current_x += 4.0 * scale;
+                    ui.painter().text(
+                        egui::pos2(current_x, center_y),
+                        egui::Align2::LEFT_CENTER,
+                        "|",
+                        FontId::proportional(10.0 * scale),
+                        Theme::TEXT_MUTED,
+                    );
+                    current_x += 2.0 * scale;
+                    current_x += 4.0 * scale;
+                }
+
+                ui.painter().text(
+                    egui::pos2(current_x, center_y),
+                    egui::Align2::LEFT_CENTER,
+                    &text_str,
+                    font_meta,
+                    Theme::TEXT_ACCENT,
+                );
+            }
         });
 
     if is_snap_manual {
@@ -712,6 +797,57 @@ fn draw_footer(
         });
 }
 
+fn get_result_rate_comparison(
+    ctx: &overmax_core::PlayContext,
+    record_manager: Option<&overmax_data::RecordManager>,
+) -> (String, Option<&'static str>, String) {
+    let current_rate = ctx.rate as f64;
+    let current_rate_str = format!("{:.2}%", current_rate);
+    let current_mc = if ctx.is_max_combo {
+        if current_rate >= 100.0 { Some("P") } else { Some("M") }
+    } else {
+        None
+    };
+
+    let mut prev_rate = None;
+    let mut prev_mc = false;
+
+    if let Some(rm) = record_manager {
+        let song_id = ctx.song_id as i32;
+        let rate_map = rm.get_rate_map(&[song_id]);
+        if let Some(&(r, mc)) = rate_map.get(&(song_id, ctx.mode.clone(), ctx.diff.clone())) {
+            prev_rate = Some(r);
+            prev_mc = mc;
+        }
+    }
+
+    let format_prev = |rate: f64, is_mc: bool| -> String {
+        let mc_symbol = if is_mc {
+            if rate >= 100.0 { " P" } else { " M" }
+        } else {
+            ""
+        };
+        format!("{:.2}%{}", rate, mc_symbol)
+    };
+
+    let comparison_str = if let Some(p_rate) = prev_rate {
+        if p_rate >= 80.0 {
+            if current_rate > p_rate {
+                let diff = current_rate - p_rate;
+                format!("({} +{:.2}%)", format_prev(p_rate, prev_mc), diff)
+            } else {
+                format!("({})", format_prev(p_rate, prev_mc))
+            }
+        } else {
+            "(NEW!)".to_string()
+        }
+    } else {
+        "(NEW!)".to_string()
+    };
+
+    (current_rate_str, current_mc, comparison_str)
+}
+
 fn meta_text(state: &GameSessionState, pattern_tabs: &[PatternTabInfo]) -> String {
     let Some(ctx) = &state.context else {
         return "—".to_string();
@@ -765,6 +901,7 @@ mod tests {
     #[test]
     fn formats_sheet_meta_like_pyqt_header() {
         let state = GameSessionState {
+            scene: overmax_core::SceneType::Unknown,
             context: Some(PlayContext {
                 song_id: 1,
                 mode: "5B".into(),
@@ -808,6 +945,7 @@ mod tests {
         let state_detecting = GameSessionState::detecting();
 
         let state_no_badge = GameSessionState {
+            scene: overmax_core::SceneType::Unknown,
             context: Some(overmax_core::PlayContext {
                 song_id: 1,
                 mode: "5B".into(),
@@ -820,6 +958,7 @@ mod tests {
         };
 
         let state_normal_badge = GameSessionState {
+            scene: overmax_core::SceneType::Unknown,
             context: Some(overmax_core::PlayContext {
                 song_id: 1,
                 mode: "5B".into(),
@@ -832,6 +971,7 @@ mod tests {
         };
 
         let state_perfect_badge = GameSessionState {
+            scene: overmax_core::SceneType::Unknown,
             context: Some(overmax_core::PlayContext {
                 song_id: 1,
                 mode: "5B".into(),
@@ -866,7 +1006,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_detecting, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true);
+                    super::draw_header(ui, &state_detecting, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None);
                     h_detecting = ui.cursor().top() - start_y;
                 });
             });
@@ -878,7 +1018,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_no_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true);
+                    super::draw_header(ui, &state_no_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None);
                     h_no_badge = ui.cursor().top() - start_y;
                 });
             });
@@ -890,7 +1030,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_normal_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true);
+                    super::draw_header(ui, &state_normal_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None);
                     h_normal = ui.cursor().top() - start_y;
                 });
             });
@@ -902,7 +1042,7 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_perfect_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true);
+                    super::draw_header(ui, &state_perfect_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None);
                     h_perfect = ui.cursor().top() - start_y;
                 });
             });

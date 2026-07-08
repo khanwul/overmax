@@ -456,6 +456,7 @@ impl eframe::App for NativeApp {
                         varchive_account_configured: self.is_varchive_account_configured(),
                         lite_mode: is_lite,
                         is_snap_manual: snap_position == "manual",
+                        record_manager: &self.record_manager,
                     },
                 );
 
