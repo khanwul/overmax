@@ -44,6 +44,44 @@ impl PlayStateDetector {
         now - self.last_rate_ocr_ts >= 0.20
     }
 
+    fn process_rate_ocr(
+        &mut self,
+        frame: &CapturedFrame,
+        rois: &RoiManager,
+        ocr: &OcrDetector,
+        scene: overmax_core::SceneType,
+        is_result: bool,
+        now: f64,
+    ) -> (f32, Option<OcrTelemetry>) {
+        let Some(rate_roi) = rois.get_roi("rate") else {
+            return (0.0, None);
+        };
+
+        if self.should_run_rate_ocr(now) {
+            if let Some(rate_img) = crop_roi(frame, rate_roi) {
+                let mut rate_res = ocr.detect_rate(&rate_img);
+                self.last_rate_ocr_ts = now;
+
+                rate_res.0 = Self::cross_validate_rate_with_score(
+                    ocr,
+                    frame,
+                    rois,
+                    scene,
+                    is_result,
+                    rate_res.0,
+                );
+
+                debug_println!("    [detect] rate OCR run. rate={:?}, text='{}'", rate_res.0, rate_res.1);
+                
+                self.apply_rate_ocr_result(is_result, rate_res);
+            }
+        }
+
+        let rate = self.last_rate_result.0.unwrap_or(0.0);
+        let telemetry = self.last_rate_result.2.clone();
+        (rate, telemetry)
+    }
+
     fn apply_rate_ocr_result(&mut self, is_result: bool, mut res: (Option<f32>, String, Option<OcrTelemetry>)) {
         if is_result {
             if let Some(new_r) = res.0 {
@@ -261,31 +299,8 @@ impl PlayStateDetector {
         debug_println!("    [detect] song_id={:?}, mode={:?}, diff={:?}, confident={}", song_id, mode, diff, confident);
         let context = if let (Some(sid), Some(m), Some(d)) = (song_id, mode, diff) {
             if confident {
-                let mut rate = 0.0;
-                if let Some(rate_roi) = rois.get_roi("rate") {
-                    if self.should_run_rate_ocr(now) {
-                        if let Some(rate_img) = crop_roi(frame, rate_roi) {
-                            let mut rate_res = ocr.detect_rate(&rate_img);
-                            self.last_rate_ocr_ts = now;
-
-                            rate_res.0 = Self::cross_validate_rate_with_score(
-                                ocr,
-                                frame,
-                                rois,
-                                scene,
-                                is_result,
-                                rate_res.0,
-                            );
-
-                            debug_println!("    [detect] rate OCR run. rate={:?}, text='{}'", rate_res.0, rate_res.1);
-                            
-                            self.apply_rate_ocr_result(is_result, rate_res);
-                        }
-                    }
-
-                    rate = self.last_rate_result.0.unwrap_or(0.0);
-                    telemetry = self.last_rate_result.2.clone();
-                }
+                let (rate, tel) = self.process_rate_ocr(frame, rois, ocr, scene, is_result, now);
+                telemetry = tel;
 
                 let mut rate_valid = true;
                 if is_result {
