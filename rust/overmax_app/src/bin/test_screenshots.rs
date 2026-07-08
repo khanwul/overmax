@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use image::GenericImageView;
 
 use overmax_engine::capture::screen_capture::CapturedFrame;
 use overmax_engine::detector::roi::RoiManager;
@@ -272,7 +271,8 @@ fn run_roi_test(
 
     // 3. Mode & Difficulty 테스트
 
-    let mut detected_mode = None;
+    #[allow(unused_assignments)]
+    let mut detected_mode: Option<String> = None;
     let mut detected_diff = None;
 
     if is_result {

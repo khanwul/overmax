@@ -3,7 +3,6 @@
 pub mod version;
 
 use std::path::Path;
-use serde_json::Value;
 
 use version::is_newer_version;
 

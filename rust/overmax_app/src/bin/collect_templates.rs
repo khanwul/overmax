@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::Path;
-use image::GenericImageView;
 use overmax_engine::capture::screen_capture::CapturedFrame;
 use overmax_engine::detector::roi::RoiManager;
 use overmax_engine::detector::ocr_engine::OcrDetector;

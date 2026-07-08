@@ -232,8 +232,8 @@ impl PlayStateDetector {
             overmax_core::SceneType::ResultFreestyle | overmax_core::SceneType::ResultOpen3 | overmax_core::SceneType::ResultOpen2
         );
 
-        let mut mode = None;
-        let mut diff = None;
+        let mode;
+        let diff;
         let mut confident = true;
         let is_max_combo;
 

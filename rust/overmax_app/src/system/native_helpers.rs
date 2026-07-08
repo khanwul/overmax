@@ -1,5 +1,4 @@
 use eframe::egui::ViewportId;
-use serde_json::Value;
 
 pub fn vp_debug() -> ViewportId {
     ViewportId::from_hash_of("overmax_debug_vp")
