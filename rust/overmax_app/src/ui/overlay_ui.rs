@@ -416,6 +416,10 @@ fn draw_lite_panel(
     actions
 }
 
+fn badge_width(text: &str, scale: f32) -> f32 {
+    (text.len() as f32 * 5.2 + 8.0) * scale
+}
+
 fn draw_meta_badge(
     painter: &egui::Painter,
     text: &str,
@@ -424,7 +428,7 @@ fn draw_meta_badge(
     scale: f32,
     color: egui::Color32,
 ) -> f32 {
-    let badge_w = (text.len() as f32 * 5.2 + 8.0) * scale;
+    let badge_w = badge_width(text, scale);
     let badge_rect = Rect::from_center_size(
         egui::pos2(current_x + badge_w / 2.0, center_y),
         Vec2::new(badge_w, 13.0 * scale),
@@ -552,7 +556,7 @@ fn draw_header(
                 let mut total_width = 0.0;
 
                 let rate_badge_text = if let Some(ref r_txt) = rate_text {
-                    total_width += (r_txt.len() as f32 * 5.2 + 8.0) * scale;
+                    total_width += badge_width(r_txt, scale);
                     Some(r_txt.clone())
                 } else {
                     None
@@ -562,7 +566,7 @@ fn draw_header(
                     if rate_badge_text.is_some() {
                         total_width += 3.0 * scale;
                     }
-                    total_width += (c_txt.len() as f32 * 5.2 + 8.0) * scale;
+                    total_width += badge_width(c_txt, scale);
                     Some(c_txt.to_string())
                 } else {
                     None
@@ -619,7 +623,7 @@ fn draw_header(
                 let mut has_rate = false;
                 let rate_text = if has_badge && rate > 0.0 {
                     let s = format!("{:.2}%", rate);
-                    total_width += (s.len() as f32 * 5.2 + 8.0) * scale;
+                    total_width += badge_width(&s, scale);
                     has_rate = true;
                     Some(s)
                 } else {
@@ -631,7 +635,7 @@ fn draw_header(
                     if has_rate {
                         total_width += 3.0 * scale;
                     }
-                    total_width += (s.len() as f32 * 5.2 + 8.0) * scale;
+                    total_width += badge_width(s, scale);
                     Some(s)
                 } else {
                     None
