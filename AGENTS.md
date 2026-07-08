@@ -51,11 +51,7 @@
 
 # Constraints
 
-- 메모리 접근 / 인젝션 금지
-- 화면 캡처 기반 유지
-- Python + 현재 라이브러리 스택 유지
-- 실시간 처리 성능 저하 금지
-- OCR 1-Pass 강제 (인게임 성능 보호를 위해 3-pass 등 다중 패스 루프 구현 금지)
+- 상세 제약 조건은 단일 Source of Truth인 [CONTEXT.md](file:///D:/dev/overmax/CONTEXT.md)의 제약 조건 섹션을 참고하고 이를 엄격히 준수한다.
 
 ---
 
