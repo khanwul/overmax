@@ -78,7 +78,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 ## 3. 곡 인식 (Song Recognition)
 - **재킷 이미지 매칭**: `ImageIndexDb`를 통해 캡처된 재킷 영역과 미리 색인된 곡 재킷의 유사도를 계산.
-- **Rust Native CV**: `overmax_cv`를 통해 3종 Perceptual Hash(pHash, dHash, aHash)를 사용한 재킷 매칭 및 검색 지원. CPU 성능 최적화를 위해 무거운 HOG 특징 연산은 기본 비활성화(`disable_hog: true`)로 고정 적용되어 있습니다.
+- **Rust Native CV**: `overmax_cv`를 통해 3종 Perceptual Hash(pHash, dHash, aHash)를 사용한 재킷 매칭 및 검색 지원. CPU 성능 최적화를 위한 HOG 특징 연산 비활성화 옵션(`disable_hog`, 기본값 `false`)을 지원합니다.
 
 ## 3. 원자적 상태 감지 및 안정화 (Atomic Play Context Sync)
 - **PlayState 감지**:
@@ -151,7 +151,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-05 | GDI 캡처 버퍼 인플레이스 재사용 | CPU 프로파일링 결과 memcpy 힙 할당이 주 병목 | [cpu-optimization-message-pump.md](docs/2026-05-24-cpu-optimization-message-pump.md) |
 | 2026-05 | WindowTracker 동적 폴링 주기 | win32u 시스템 콜 오버헤드 해소 | [cpu-optimization-message-pump-review.md](docs/2026-05-24-cpu-optimization-message-pump-review.md) |
 | 2026-05 | HysteresisBuffer 기반 씬 전이 안정화 | 단일 프레임 판단의 Jitter 방지 | [scene-detection-experiment.md](docs/2026-05-28-scene-detection-experiment.md) |
-| 2026-06 | HOG 기본 비활성화 (`disable_hog: true`) | CPU 프로파일링 결과 HOG가 주 연산 병목, 3종 해시만으로 충분한 변별력 확보 | [detection-pipeline-architecture.md](docs/2026-06-23-detection-pipeline-architecture-and-recognition-logic.md) |
+| 2026-06 | HOG 선택적 비활성화 (`disable_hog`) 지원 | HOG 특징 연산 스파이크 예방을 위해 필요 시 설정에서 비활성화할 수 있는 옵션 지원 | [detection-pipeline-architecture.md](docs/2026-06-23-detection-pipeline-architecture-and-recognition-logic.md) |
 | 2026-06 | Image DB 빌드를 Rust CLI로 이전 | overmax_cv를 피처 연산 SSOT로 통일 | [image_db_redesign_plan.md](docs/2026-06-15-image_db_redesign_plan.md) |
 | 2026-07 | OCR 1-Pass 강제, 다중 패스 루프 금지 | 3-pass OCR이 CPU 과부하 유발 → 오인식은 HysteresisBuffer 다수결로 해결 | [ocr-elimination-plan.md](docs/2026-07-01-ocr-elimination-and-template-matching-plan.md) |
 | 2026-07 | 이진화 → 엣지 디텍션 전환 검토 | BGA 투과 시 고정 threshold 불안정, Sobel 엣지가 BGA에 강건 | [edge-detection-migration-plan.md](docs/2026-07-07-edge-detection-migration-plan.md) |
