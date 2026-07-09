@@ -37,66 +37,6 @@ fn binarize_by_luminance(
     )
 }
 
-fn match_character_custom(
-    char_bin: &[u8],
-    char_w: usize,
-    char_h: usize,
-    templates: &[CvTemplate],
-) -> Option<(char, f32)> {
-    if char_w == 0 || char_h == 0 || templates.is_empty() {
-        return None;
-    }
-
-    let target_h = 32usize;
-    let target_w = ((char_w as f32 * target_h as f32 / char_h as f32).round()) as usize;
-    if target_w == 0 {
-        return None;
-    }
-
-    let resized_bin = overmax_cv::image::resize_binary_nearest(char_bin, char_w, char_h, target_w, target_h);
-
-    let mut best_char = None;
-    let mut best_score = 0.0f32;
-
-    for t in templates {
-        let diff_w = (t.width as isize - target_w as isize).abs();
-        if diff_w > 6 {
-            continue;
-        }
-
-        let scaled_template = overmax_cv::image::resize_binary_nearest(t.mask, t.width, t.height, target_w, target_h);
-
-        let mut diff_pixels = 0usize;
-        let total_pixels = target_w * target_h;
-        for i in 0..total_pixels {
-            let a = if resized_bin[i] > 0 { 1u8 } else { 0u8 };
-            let b = if scaled_template[i] > 0 { 1u8 } else { 0u8 };
-            if a != b {
-                diff_pixels += 1;
-            }
-        }
-
-        let match_rate = (total_pixels - diff_pixels) as f32 / total_pixels as f32;
-        
-        // 8이 3으로 오독되는 현상을 방지하기 위해 8 템플릿에 미세 가중치 부여 (+0.005, 약 0.5% 기여)
-        let score = if t.char_val == '8' {
-            match_rate + 0.005
-        } else {
-            match_rate
-        };
-        
-        if score > best_score {
-            best_score = score;
-            best_char = Some(t.char_val);
-        }
-    }
-
-    if best_score >= 0.65 {
-        best_char.map(|c| (c, best_score))
-    } else {
-        None
-    }
-}
 
 fn evaluate_sweep(templates: &[CvTemplate], method: LumaMethod) -> (usize, usize, std::time::Duration) {
     let mut sweep_values = Vec::new();
@@ -147,7 +87,7 @@ fn evaluate_sweep(templates: &[CvTemplate], method: LumaMethod) -> (usize, usize
                     255,
                 );
                 
-                if let Some((matched_char, _)) = match_character_custom(&binary, w, h, templates) {
+                if let Some((matched_char, _)) = overmax_cv::image::match_character(&binary, w, h, templates) {
                     if matched_char == t.char_val {
                         success_count += 1;
                     }
@@ -248,7 +188,7 @@ fn main() {
                                 char_bin[y * char_w + x] = binary[y * w as usize + (x1 + x)];
                             }
                         }
-                        if let Some((ch, _)) = match_character_custom(&char_bin, char_w, h as usize, &original_templates) {
+                        if let Some((ch, _)) = overmax_cv::image::match_character(&char_bin, char_w, h as usize, &original_templates) {
                             matched.push(ch);
                         } else {
                             matched.push('?');
@@ -293,7 +233,7 @@ fn main() {
                                 char_bin[y * char_w + x] = binary[y * w as usize + (x1 + x)];
                             }
                         }
-                        if let Some((ch, _)) = match_character_custom(&char_bin, char_w, h as usize, &original_templates) {
+                        if let Some((ch, _)) = overmax_cv::image::match_character(&char_bin, char_w, h as usize, &original_templates) {
                             matched.push(ch);
                         } else {
                             matched.push('?');

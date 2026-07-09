@@ -161,8 +161,7 @@ impl PlayStateDetector {
     }
 
     pub fn clear_detected_cache(&mut self) {
-        self.cache.result_mode.update(None);
-        self.cache.result_diff.update(None);
+        self.cache.clear_result_cache();
     }
 
     /// 로고 OCR raw_text에서 파싱된 모드를 직접 주입합니다.
