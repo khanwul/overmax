@@ -22,6 +22,35 @@ struct RawPlayState {
     context: Option<PlayContext>,
 }
 
+/// 결과창/선곡창 mode·diff 인식 결과 캐시.
+///
+/// - `result_*`: 결과창에서 인식 시도한 값. 채워져 있으면 우선 사용되어
+///   결과창 진입 후 프레임 간 흔들림 없이 유지된다.
+/// - `song_select_*`: 선곡창에서 인식한 값. 결과창 인식에 실패하면 이 값으로 복구된다.
+struct ModeDiffCache {
+    result_mode: Changed<Option<String>>,
+    result_diff: Changed<Option<String>>,
+    song_select_mode: Changed<Option<String>>,
+    song_select_diff: Changed<Option<String>>,
+}
+
+impl ModeDiffCache {
+    fn new() -> Self {
+        Self {
+            result_mode: Changed::new(None),
+            result_diff: Changed::new(None),
+            song_select_mode: Changed::new(None),
+            song_select_diff: Changed::new(None),
+        }
+    }
+
+    /// 결과창 -> 선곡창 복귀 시 결과창 인식값만 초기화하고 선곡창 값은 보존한다.
+    fn clear_result_cache(&mut self) {
+        self.result_mode.update(None);
+        self.result_diff.update(None);
+    }
+}
+
 pub struct PlayStateDetector {
     history_size: usize,
     history: VecDeque<Option<RawPlayState>>,
@@ -29,11 +58,8 @@ pub struct PlayStateDetector {
     last_rate_checksum: Option<u64>,
     last_rate_result: (Option<f32>, String, Option<OcrTelemetry>),
     last_rate_ocr_ts: f64,
-    last_detected_mode: Changed<Option<String>>,
-    last_detected_diff: Changed<Option<String>>,
+    cache: ModeDiffCache,
     last_song_id: Changed<Option<u32>>,
-    last_mode: Changed<Option<String>>,
-    last_diff: Changed<Option<String>>,
     result_rate_window: VecDeque<f32>,
 }
 
@@ -115,11 +141,8 @@ impl PlayStateDetector {
             last_rate_checksum: None,
             last_rate_result: (None, String::new(), None),
             last_rate_ocr_ts: 0.0,
-            last_detected_mode: Changed::new(None),
-            last_detected_diff: Changed::new(None),
+            cache: ModeDiffCache::new(),
             last_song_id: Changed::new(None),
-            last_mode: Changed::new(None),
-            last_diff: Changed::new(None),
             result_rate_window: VecDeque::new(),
         }
     }
@@ -130,23 +153,23 @@ impl PlayStateDetector {
         self.last_rate_checksum = None;
         self.last_rate_result = (None, String::new(), None);
         self.last_rate_ocr_ts = 0.0;
-        // 결과창 진입 시 복구용으로 사용하기 위해 last_detected_mode/diff 캐시는 reset 시에도 보존합니다.
+        // 결과창 진입 시 복구용(result_mode/diff) 캐시는 reset 시에도 보존합니다.
         self.last_song_id.update(None);
-        self.last_mode.update(None);
-        self.last_diff.update(None);
+        self.cache.song_select_mode.update(None);
+        self.cache.song_select_diff.update(None);
         self.result_rate_window.clear();
     }
 
     pub fn clear_detected_cache(&mut self) {
-        self.last_detected_mode.update(None);
-        self.last_detected_diff.update(None);
+        self.cache.result_mode.update(None);
+        self.cache.result_diff.update(None);
     }
 
     /// 로고 OCR raw_text에서 파싱된 모드를 직접 주입합니다.
     /// detect_freestyle_mode 템플릿 매칭이 실패하는 결과 화면에서
     /// detection_pipeline이 로고 텍스트로부터 모드를 추출하여 세팅합니다.
     pub fn set_logo_mode(&mut self, mode: String) {
-        self.last_detected_mode.update(Some(mode));
+        self.cache.result_mode.update(Some(mode));
     }
 
     fn resolve_result_mode_diff(
@@ -159,9 +182,9 @@ impl PlayStateDetector {
         let mut mode = None;
         let mut diff = None;
 
-        if self.last_detected_mode.is_some() && self.last_detected_diff.is_some() {
-            mode = self.last_detected_mode.get().clone();
-            diff = self.last_detected_diff.get().clone();
+        if self.cache.result_mode.is_some() && self.cache.result_diff.is_some() {
+            mode = self.cache.result_mode.get().clone();
+            diff = self.cache.result_diff.get().clone();
         } else {
             match scene {
                 overmax_core::SceneType::ResultFreestyle => {
@@ -187,23 +210,23 @@ impl PlayStateDetector {
                 _ => {}
             }
 
-            if self.last_detected_mode.is_none() {
-                self.last_detected_mode.update(self.last_mode.get().clone());
+            if self.cache.result_mode.is_none() {
+                self.cache.result_mode.update(self.cache.song_select_mode.get().clone());
             }
-            if self.last_detected_diff.is_none() {
-                self.last_detected_diff.update(self.last_diff.get().clone());
+            if self.cache.result_diff.is_none() {
+                self.cache.result_diff.update(self.cache.song_select_diff.get().clone());
             }
 
             if mode.is_none() {
-                mode = self.last_detected_mode.get().clone();
+                mode = self.cache.result_mode.get().clone();
             }
             if diff.is_none() {
-                diff = self.last_detected_diff.get().clone();
+                diff = self.cache.result_diff.get().clone();
             }
 
             if mode.is_some() && diff.is_some() {
-                self.last_detected_mode.update(mode.clone());
-                self.last_detected_diff.update(diff.clone());
+                self.cache.result_mode.update(mode.clone());
+                self.cache.result_diff.update(diff.clone());
             }
         }
 
@@ -281,8 +304,8 @@ impl PlayStateDetector {
             mode = m;
             diff = d;
         } else {
-            self.last_detected_mode.update(None);
-            self.last_detected_diff.update(None);
+            self.cache.result_mode.update(None);
+            self.cache.result_diff.update(None);
 
             mode = detect_button_mode(frame, rois);
             let (d, conf) = detect_difficulty(frame, rois);
@@ -292,8 +315,8 @@ impl PlayStateDetector {
         }
 
         self.last_song_id.update(song_id);
-        self.last_mode.update(mode.clone());
-        self.last_diff.update(diff.clone());
+        self.cache.song_select_mode.update(mode.clone());
+        self.cache.song_select_diff.update(diff.clone());
 
         let mut telemetry = None;
         debug_println!("    [detect] song_id={:?}, mode={:?}, diff={:?}, confident={}", song_id, mode, diff, confident);
@@ -582,6 +605,40 @@ mod tests {
         assert!(!detector.detect(&frame, &rois, Some(7), &ocr, 1.0).0.is_stable);
         assert!(!detector.detect(&frame, &rois, Some(7), &ocr, 2.0).0.is_stable);
         assert!(detector.detect(&frame, &rois, Some(7), &ocr, 3.0).0.is_stable);
+    }
+
+    #[test]
+    fn recovers_result_mode_diff_from_song_select_cache() {
+        let mut detector = PlayStateDetector::new(3);
+
+        // 선곡창에서 인식된 mode/diff 를 song_select 캐시에 주입
+        detector
+            .cache
+            .song_select_mode
+            .update(Some("4B".to_string()));
+        detector
+            .cache
+            .song_select_diff
+            .update(Some("MX".to_string()));
+        // 결과창 진입 직후 상태: 결과창 인식값(result)은 비워짐
+        detector.cache.clear_result_cache();
+
+        let frame = blank_frame();
+        let mut rois = RoiManager::new(1920, 1080);
+        rois.set_scene(SceneType::ResultFreestyle);
+        let ocr = crate::detector::ocr_engine::OcrDetector::new();
+
+        // 결과창에서 mode_digit/diff_panel ROI 가 없어 인식에 실패하면
+        // 선곡창 캐시(song_select) 값으로 복구되어야 한다.
+        let (state, _) = detector.detect(&frame, &rois, Some(7), &ocr, 1.0);
+        assert_eq!(
+            state.context.as_ref().map(|c| c.mode.as_str()),
+            Some("4B")
+        );
+        assert_eq!(
+            state.context.as_ref().map(|c| c.diff.as_str()),
+            Some("MX")
+        );
     }
 
     fn blank_frame() -> CapturedFrame {
