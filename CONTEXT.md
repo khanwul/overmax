@@ -161,4 +161,5 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-09 | NativeApp::update 330줄 분할 및 락 오버헤드 최적화 | 자이언트 함수를 3개 헬퍼 함수로 분해하고 `game_rect` 락 획득을 1회로 병합 | [native_app_viewports.rs](rust/overmax_app/src/ui/native_app_viewports.rs) |
 | 2026-07-09 | 결과창 스코어용 얇은 폰트 템플릿 수집 및 추가 | 결과창의 얇은 폰트 조건에서 스코어 '8'이 '3'으로 오독되는 문제를 새로운 템플릿 마스크 추가로 완벽 해결 | [generate_templates_code.rs](rust/overmax_app/src/bin/generate_templates_code.rs) |
 | 2026-07-09 | 결과창 모드 매칭에 Bradley-Roth 적응형 이진화 적용 | BGA 배경이 밝아져 '8B' 등 모드 글자가 배경에 묻히는 문제를 적분 이미지 기반 적응형 이진화 도입으로 완벽 해결 | [ocr_engine.rs](rust/overmax_engine/src/detector/ocr_engine.rs) |
+| 2026-07-10 | 곡 제목 영역 width 고정 및 페이드 아웃 마스크 적용 | 긴 곡 제목으로 인해 오버레이 창 width가 늘어나는 문제를 해결하기 위해, 가용 너비를 제한하고 우측 끝에 그라디언트 투명도 마스크를 적용 | [overlay_ui.rs](rust/overmax_app/src/ui/overlay_ui.rs) |
 
