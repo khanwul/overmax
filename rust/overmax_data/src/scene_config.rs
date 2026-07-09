@@ -54,7 +54,7 @@ impl Default for GlobalRoiConfig {
         // ResultFreestyle ROI
         let mut result_freestyle_rois = HashMap::new();
         result_freestyle_rois.insert("jacket".to_string(), RoiRect { x: 705, y: 14, width: 60, height: 60 });
-        result_freestyle_rois.insert("rate".to_string(), RoiRect { x: 891, y: 608, width: 109, height: 32 });
+        result_freestyle_rois.insert("rate".to_string(), RoiRect { x: 891, y: 608, width: 129, height: 32 });
         result_freestyle_rois.insert("mode".to_string(), RoiRect { x: 0, y: 18, width: 340, height: 75 });
         result_freestyle_rois.insert("mode_digit".to_string(), RoiRect { x: 78, y: 28, width: 50, height: 68 });
         result_freestyle_rois.insert("diff_panel".to_string(), RoiRect { x: 709, y: 86, width: 90, height: 18 });

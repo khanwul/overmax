@@ -411,12 +411,7 @@ pub fn match_character(
 
         let match_rate = (total_pixels - diff_pixels) as f32 / total_pixels as f32;
         
-        // 8이 3으로 오독되는 현상을 방지하기 위해 8 템플릿에 미세 가중치 부여 (+0.005, 약 0.5% 기여)
-        let score = if t.char_val == '8' {
-            match_rate + 0.005
-        } else {
-            match_rate
-        };
+        let score = match_rate;
         
         if score > best_score {
             best_score = score;
