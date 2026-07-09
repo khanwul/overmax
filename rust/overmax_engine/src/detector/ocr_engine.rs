@@ -113,6 +113,12 @@ impl OcrDetector {
 
         let rate_val = parse_rate_text(&matched_str);
 
+        if rate_val.is_none() {
+            if let Some((val, txt, tel)) = self.attempt_rate_ocr(rate, true, false) {
+                return (val, txt, Some(tel));
+            }
+        }
+
         let telemetry = OcrTelemetry {
             rate_text: matched_str.clone(),
             threshold,
@@ -601,6 +607,9 @@ fn parse_score_text(text: &str) -> Option<u32> {
     let clean = text.chars()
         .filter(|c| c.is_ascii_digit())
         .collect::<String>();
+    if clean.len() != 6 && clean.len() != 7 {
+        return None;
+    }
     clean.parse::<u32>().ok()
 }
 

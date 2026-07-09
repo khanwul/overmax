@@ -30,14 +30,23 @@ fn save_crop(frame: &CapturedFrame, roi: overmax_engine::detector::roi::RoiRect,
 }
 
 fn save_binary_crop(pixels: &[u8], width: u32, height: u32, dst_path: &Path) -> bool {
-    if let Some(buf) = image::ImageBuffer::<image::Luma<u8>, _>::from_raw(
-        width,
-        height,
-        pixels.to_vec()
-    ) {
-        let dynamic_img = image::DynamicImage::ImageLuma8(buf);
-        if dynamic_img.save(dst_path).is_ok() {
-            return true;
+    let len = pixels.len();
+    let expected_luma = (width * height) as usize;
+    let expected_rgba = (width * height * 4) as usize;
+
+    if len == expected_rgba {
+        let mut rgba = pixels.to_vec();
+        for chunk in rgba.chunks_exact_mut(4) {
+            chunk.swap(0, 2);
+        }
+        if let Some(buf) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, rgba) {
+            let dynamic_img = image::DynamicImage::ImageRgba8(buf);
+            return dynamic_img.save(dst_path).is_ok();
+        }
+    } else if len == expected_luma {
+        if let Some(buf) = image::ImageBuffer::<image::Luma<u8>, _>::from_raw(width, height, pixels.to_vec()) {
+            let dynamic_img = image::DynamicImage::ImageLuma8(buf);
+            return dynamic_img.save(dst_path).is_ok();
         }
     }
     false
