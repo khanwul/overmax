@@ -1,30 +1,23 @@
-pub mod compatibility;
-pub mod image_index;
-pub mod jacket_matcher;
-pub mod recommend;
-pub mod record_db;
-pub mod record_manager;
-pub mod scene_config;
-pub mod settings;
-pub mod sheet_meta;
-pub mod sync;
-pub mod varchive;
+pub mod config;
+pub mod store;
+pub mod community;
+pub mod service;
 
-pub use compatibility::DataCompatibility;
-pub use image_index::{ImageIndexDb, ImageMatch, ImageEntry};
-pub use jacket_matcher::{JacketMatcher, JacketMatcherConfig};
-pub use recommend::{RecommendEntry, RecommendResult, Recommender};
-pub use record_db::RecordDB;
-pub use record_manager::{RecordManager, RecordSource};
-pub use scene_config::{GlobalRoiConfig, RoiRect, SceneRoiConfig};
-pub use settings::{
+pub use config::compatibility::DataCompatibility;
+pub use store::image_index::{ImageIndexDb, ImageMatch, ImageEntry};
+pub use service::jacket_matcher::{JacketMatcher, JacketMatcherConfig};
+pub use service::recommend::{RecommendEntry, RecommendResult, Recommender};
+pub use store::record_db::RecordDB;
+pub use service::record_manager::{RecordManager, RecordSource};
+pub use config::scene_config::{GlobalRoiConfig, RoiRect, SceneRoiConfig};
+pub use config::settings::{
     diff_settings, load_base_settings, load_merged_settings, merge_settings_layers,
     normalize_settings, save_user_settings, SettingsPaths, Settings, WindowTrackerSettings,
     ScreenCaptureSettings, DebugWindowSettings, OverlaySettings, JacketMatcherSettings,
     AppUpdateSettings, VArchiveSettings, OverlayPosition, VArchiveUserMap,
 };
-pub use sheet_meta::{PatternSheetMeta, PatternSheetMetaItem};
-pub use sync::{
+pub use community::sheet_meta::{PatternSheetMeta, PatternSheetMetaItem};
+pub use community::sync::{
     build_candidates, load_varchive_record_cache, upsert_varchive_cache_record, save_fetched_records_to_cache, delete_varchive_cache_record, SyncCandidate,
 };
-pub use varchive::VArchiveDB;
+pub use community::client::VArchiveDB;

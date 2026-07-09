@@ -13,8 +13,8 @@ fn main() {
     )))
     .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
     
-    let mut merged = overmax_data::settings::load_merged_settings(root, defaults);
-    overmax_data::settings::normalize_settings(&mut merged);
+    let mut merged = overmax_data::config::settings::load_merged_settings(root, defaults);
+    overmax_data::config::settings::normalize_settings(&mut merged);
     
     // Force stale by deleting the old cache file if it exists
     let path = root.join("cache/pattern_meta.json");

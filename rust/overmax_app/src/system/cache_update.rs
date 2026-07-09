@@ -30,10 +30,10 @@ pub fn refresh_startup_caches(root: &Path, settings: &overmax_data::Settings, lo
     refresh_dlcs_json(root, settings, &mut *log);
 
     // Load VArchiveDB dynamically to map CSV rows to song IDs
-    let compat = overmax_data::compatibility::DataCompatibility::current();
+    let compat = overmax_data::config::compatibility::DataCompatibility::current();
     let songs_path = root.join(compat.songs_json);
     let dlcs_path = root.join(compat.dlcs_json);
-    let mut varchive_db = overmax_data::varchive::VArchiveDB::new();
+    let mut varchive_db = overmax_data::community::client::VArchiveDB::new();
     
     // Load dlcs first if available
     let _ = varchive_db.load_dlcs_from_file(&dlcs_path);
@@ -88,12 +88,12 @@ fn refresh_dlcs_json(root: &Path, settings: &overmax_data::Settings, log: LogFn<
     }
 }
 
-fn refresh_pattern_meta(root: &Path, varchive_db: &overmax_data::varchive::VArchiveDB, log: LogFn<'_>) {
+fn refresh_pattern_meta(root: &Path, varchive_db: &overmax_data::community::client::VArchiveDB, log: LogFn<'_>) {
     let path = root.join(PATTERN_META_CACHE);
     if !is_stale(&path, DAY) {
         return;
     }
-    type Key = (String, overmax_data::varchive::Mode, overmax_data::varchive::Difficulty);
+    type Key = (String, overmax_data::community::client::Mode, overmax_data::community::client::Difficulty);
     let mut items: std::collections::HashMap<Key, overmax_data::PatternSheetMetaItem> =
         std::collections::HashMap::new();
     for (mode, gid) in SHEET_GIDS {
@@ -102,9 +102,9 @@ fn refresh_pattern_meta(root: &Path, varchive_db: &overmax_data::varchive::VArch
             Err(e) => log(format!("[Cache] pattern meta {mode} 갱신 실패: {e}")),
         }
     }
-    let entries: Vec<overmax_data::sheet_meta::PatternMetaEntry> = items
+    let entries: Vec<overmax_data::community::sheet_meta::PatternMetaEntry> = items
         .into_iter()
-        .map(|((song_id, mode, diff), meta)| overmax_data::sheet_meta::PatternMetaEntry {
+        .map(|((song_id, mode, diff), meta)| overmax_data::community::sheet_meta::PatternMetaEntry {
             song_id,
             mode,
             diff,
@@ -253,14 +253,14 @@ fn sheet_csv_url(gid: &str) -> String {
 
 fn merge_sheet_meta(
     items: &mut std::collections::HashMap<
-        (String, overmax_data::varchive::Mode, overmax_data::varchive::Difficulty),
+        (String, overmax_data::community::client::Mode, overmax_data::community::client::Difficulty),
         overmax_data::PatternSheetMetaItem,
     >,
     mode: &str,
     csv: &str,
-    varchive_db: &overmax_data::varchive::VArchiveDB,
+    varchive_db: &overmax_data::community::client::VArchiveDB,
 ) {
-    let Some(parsed_mode) = overmax_data::varchive::Mode::from_str(mode) else {
+    let Some(parsed_mode) = overmax_data::community::client::Mode::from_str(mode) else {
         return;
     };
     let rows = parse_csv(csv);
@@ -274,7 +274,7 @@ fn merge_sheet_meta(
         if title.is_empty() || diff.is_empty() {
             continue;
         }
-        let Some(parsed_diff) = overmax_data::varchive::Difficulty::from_str(&diff) else {
+        let Some(parsed_diff) = overmax_data::community::client::Difficulty::from_str(&diff) else {
             continue;
         };
         let meta = pattern_meta_value(mode, &values);
@@ -304,13 +304,13 @@ fn merge_sheet_meta(
 fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> overmax_data::PatternSheetMetaItem {
     let raw_gold = pick(values, &["황배 여부", "황배여부"]);
     let gold = if raw_gold.is_empty() {
-        overmax_data::sheet_meta::GoldMeta::None
+        overmax_data::community::sheet_meta::GoldMeta::None
     } else if raw_gold.contains("[H]") {
-        overmax_data::sheet_meta::GoldMeta::HalfRandom
+        overmax_data::community::sheet_meta::GoldMeta::HalfRandom
     } else if raw_gold.contains("[M]") {
-        overmax_data::sheet_meta::GoldMeta::MaxRandom
+        overmax_data::community::sheet_meta::GoldMeta::MaxRandom
     } else {
-        overmax_data::sheet_meta::GoldMeta::Random
+        overmax_data::community::sheet_meta::GoldMeta::Random
     };
 
     let note = pick(values, &["비고", "Note"]);
@@ -325,13 +325,13 @@ fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> overmax_d
 
     let raw_assist = pick(values, &["보조 키 여부", "보조키여부"]);
     let assist_key = if raw_assist.contains("❌") {
-        overmax_data::sheet_meta::AssistMeta::Used
+        overmax_data::community::sheet_meta::AssistMeta::Used
     } else if raw_assist.contains("⚠️") || raw_assist.starts_with("⚠") {
-        overmax_data::sheet_meta::AssistMeta::Caution
+        overmax_data::community::sheet_meta::AssistMeta::Caution
     } else if raw_assist.contains("✅") {
-        overmax_data::sheet_meta::AssistMeta::NotUsed
+        overmax_data::community::sheet_meta::AssistMeta::NotUsed
     } else {
-        overmax_data::sheet_meta::AssistMeta::None
+        overmax_data::community::sheet_meta::AssistMeta::None
     };
 
     overmax_data::PatternSheetMetaItem {
@@ -411,10 +411,10 @@ mod tests {
 
     #[test]
     fn sheet_meta_merge_matches_python_cache_shape() {
-        let mut db = overmax_data::varchive::VArchiveDB::new();
-        let mut patterns: [[Option<overmax_data::varchive::PatternInfo>; 4]; 4] = Default::default();
-        patterns[overmax_data::varchive::Mode::B5 as usize][overmax_data::varchive::Difficulty::SC as usize] = Some(
-            overmax_data::varchive::PatternInfo {
+        let mut db = overmax_data::community::client::VArchiveDB::new();
+        let mut patterns: [[Option<overmax_data::community::client::PatternInfo>; 4]; 4] = Default::default();
+        patterns[overmax_data::community::client::Mode::B5 as usize][overmax_data::community::client::Difficulty::SC as usize] = Some(
+            overmax_data::community::client::PatternInfo {
                 level: Some(12),
                 floor: None,
                 floor_name: None,
@@ -422,7 +422,7 @@ mod tests {
             }
         );
 
-        db.songs.push(overmax_data::varchive::Song {
+        db.songs.push(overmax_data::community::client::Song {
             title: "1".into(),
             name: "Love ☆ Panic".into(),
             composer: std::sync::Arc::from("ESTi"),
@@ -432,8 +432,8 @@ mod tests {
 
         type Key = (
             String,
-            overmax_data::varchive::Mode,
-            overmax_data::varchive::Difficulty,
+            overmax_data::community::client::Mode,
+            overmax_data::community::client::Difficulty,
         );
         let mut items: std::collections::HashMap<Key, overmax_data::PatternSheetMetaItem> =
             std::collections::HashMap::new();
@@ -446,15 +446,15 @@ mod tests {
 
         let key = (
             "1".to_string(),
-            overmax_data::varchive::Mode::B5,
-            overmax_data::varchive::Difficulty::SC,
+            overmax_data::community::client::Mode::B5,
+            overmax_data::community::client::Difficulty::SC,
         );
         assert_eq!(
             items.get(&key).unwrap(),
             &overmax_data::PatternSheetMetaItem {
-                gold: overmax_data::sheet_meta::GoldMeta::Random,
+                gold: overmax_data::community::sheet_meta::GoldMeta::Random,
                 note: "개인차".into(),
-                assist_key: overmax_data::sheet_meta::AssistMeta::Used,
+                assist_key: overmax_data::community::sheet_meta::AssistMeta::Used,
                 keypart: false,
             }
         );

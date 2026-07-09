@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::varchive::{Difficulty, Mode};
+use crate::community::client::{Difficulty, Mode};
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GoldMeta {
@@ -94,7 +94,7 @@ pub struct PatternSheetMeta {
 }
 
 impl PatternSheetMeta {
-    pub fn load_cache(path: impl AsRef<Path>, varchive_db: &crate::varchive::VArchiveDB) -> Self {
+    pub fn load_cache(path: impl AsRef<Path>, varchive_db: &crate::community::client::VArchiveDB) -> Self {
         let path_ref = path.as_ref();
         let Ok(text) = std::fs::read_to_string(path_ref) else {
             return Self::default();

@@ -27,7 +27,7 @@ pub fn account_path_for_steam(settings: &overmax_data::Settings, steam: &str) ->
 }
 
 pub fn button_num(mode: &str) -> i32 {
-    overmax_data::varchive::Mode::from_str(mode)
+    overmax_data::community::client::Mode::from_str(mode)
         .map(|m| m.button_count())
         .unwrap_or(4)
 }

@@ -1,7 +1,7 @@
 //! Local record vs V-Archive cached API records — mirrors `data/sync_manager.py`.
 
-use crate::record_db::RecordDB;
-use crate::varchive::VArchiveDB;
+use crate::store::record_db::RecordDB;
+use crate::community::client::VArchiveDB;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;

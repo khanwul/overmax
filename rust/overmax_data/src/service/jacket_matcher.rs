@@ -1,4 +1,4 @@
-use crate::image_index::{ImageEntry, ImageMatch};
+use crate::store::image_index::{ImageEntry, ImageMatch};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]

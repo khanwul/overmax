@@ -1,5 +1,5 @@
-use crate::record_db::RecordDB;
-use crate::sync::load_varchive_record_cache;
+use crate::store::record_db::RecordDB;
+use crate::community::sync::load_varchive_record_cache;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -81,10 +81,10 @@ impl RecordManager {
                 guard.remove(&(song_id, button_mode.to_string(), difficulty.to_string()));
             }
             if !steam_id.is_empty() && steam_id != "__unknown__" {
-                let btn = crate::varchive::Mode::from_str(button_mode)
+                let btn = crate::community::client::Mode::from_str(button_mode)
                     .map(|m| m.button_count())
                     .unwrap_or(4);
-                let _ = crate::sync::delete_varchive_cache_record(
+                let _ = crate::community::sync::delete_varchive_cache_record(
                     &self.varchive_cache_root,
                     &steam_id,
                     btn,
@@ -229,8 +229,8 @@ mod tests {
 
     #[test]
     fn test_recommendation_caching_and_stats() {
-        use crate::recommend::Recommender;
-        use crate::varchive::VArchiveDB;
+        use crate::service::recommend::Recommender;
+        use crate::community::client::VArchiveDB;
 
         let mut vdb = VArchiveDB::new();
         let song1_json = serde_json::json!({

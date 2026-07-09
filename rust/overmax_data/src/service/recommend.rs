@@ -1,5 +1,5 @@
-use crate::record_manager::{RecordManager, RecordSource};
-use crate::varchive::VArchiveDB;
+use crate::service::record_manager::{RecordManager, RecordSource};
+use crate::community::client::VArchiveDB;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -145,8 +145,8 @@ impl Recommender {
             None => return RecommendResult::empty(),
         };
 
-        let current_pattern = crate::varchive::Mode::from_str(button_mode)
-            .and_then(|m| crate::varchive::Difficulty::from_str(difficulty).map(|d| (m, d)))
+        let current_pattern = crate::community::client::Mode::from_str(button_mode)
+            .and_then(|m| crate::community::client::Difficulty::from_str(difficulty).map(|d| (m, d)))
             .and_then(|(m, d)| current_song.patterns[m as usize][d as usize].as_ref());
 
         let p = match current_pattern {
@@ -236,9 +236,9 @@ impl Recommender {
             };
 
             for mode in &modes_to_check {
-                if let (Some(m), Some(d_list)) = (crate::varchive::Mode::from_str(mode), Some(DIFFICULTIES)) {
+                if let (Some(m), Some(d_list)) = (crate::community::client::Mode::from_str(mode), Some(DIFFICULTIES)) {
                     for diff in d_list {
-                        if let Some(d) = crate::varchive::Difficulty::from_str(diff) {
+                        if let Some(d) = crate::community::client::Difficulty::from_str(diff) {
                             if let Some(p) = &song.patterns[m as usize][d as usize] {
                                 let cand_floor_val = Self::parse_floor_value(p.floor_name.as_ref());
 

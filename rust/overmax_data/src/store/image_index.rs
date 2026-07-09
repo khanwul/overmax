@@ -54,13 +54,13 @@ impl ImageIndexDb {
         &self.entries
     }
 
-    pub fn matcher(&self) -> crate::jacket_matcher::JacketMatcher {
-        let config = crate::jacket_matcher::JacketMatcherConfig {
+    pub fn matcher(&self) -> crate::service::jacket_matcher::JacketMatcher {
+        let config = crate::service::jacket_matcher::JacketMatcherConfig {
             similarity_threshold: self.similarity_threshold,
             margin_threshold: self.margin_threshold,
             disable_hog: self.disable_hog,
         };
-        crate::jacket_matcher::JacketMatcher::new(self.entries.clone(), config)
+        crate::service::jacket_matcher::JacketMatcher::new(self.entries.clone(), config)
     }
 
     pub fn load(&mut self) -> Result<usize> {
