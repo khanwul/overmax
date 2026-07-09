@@ -341,51 +341,18 @@ fn draw_lite_panel(
                 });
             });
             
-            // 2열: Rate + 콤보상태 + sheet_meta 정보 (황배 | 보조 | 메모 등) - 가운데 정렬
-            let final_meta = if props.state.scene.is_result() {
-                let mut text_str = "—".to_string();
-                if let Some(ctx) = &props.state.context {
-                    let (curr_rate, curr_mc, comp_str) = get_result_rate_comparison(ctx, props.session_initial_record);
-                    let current_str = if let Some(mc) = curr_mc {
-                        format!("{} {}", curr_rate, mc)
-                    } else {
-                        curr_rate
-                    };
-                    text_str = format!("{} {}", current_str, comp_str);
-                }
-                text_str
-            } else {
-                let mut meta_parts = Vec::new();
-                if let Some(ctx) = &props.state.context {
-                    if ctx.rate > 0.0 {
-                        let mut rate_str = format!("{:.2}%", ctx.rate);
-                        if ctx.is_max_combo {
-                            let combo_symbol = if ctx.rate >= 100.0 { "P" } else { "M" };
-                            rate_str = format!("{} {}", rate_str, combo_symbol);
-                        }
-                        meta_parts.push(rate_str);
-                    }
-                }
-                
-                let meta_text_str = meta_text(props.state, props.pattern_tabs);
-                if meta_text_str != "—" && !meta_text_str.is_empty() {
-                    meta_parts.push(meta_text_str);
-                }
-                
-                if meta_parts.is_empty() {
-                    "—".to_string()
-                } else {
-                    meta_parts.join(" | ")
-                }
-            };
-
-            ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                ui.label(
-                    RichText::new(final_meta)
-                        .color(Theme::TEXT_SECONDARY)
-                        .font(FontId::proportional(10.5 * props.scale))
-                );
-            });
+            // 2열: Rate + 콤보상태 + sheet_meta 배지 (일반 모드와 동일한 배지 렌더링)
+            let (row_rect, _) = ui.allocate_exact_size(
+                Vec2::new(ui.available_width(), 14.0 * props.scale),
+                egui::Sense::hover(),
+            );
+            let (badges, trailing, separator) = meta_badges(
+                props.state,
+                props.pattern_tabs,
+                props.state.scene.is_result(),
+                props.session_initial_record,
+            );
+            draw_meta_badge_row(ui, row_rect, &badges, &trailing, separator, props.scale);
         });
 
     let is_snap_manual = props.is_snap_manual;
@@ -445,6 +412,119 @@ fn draw_meta_badge(
         color,
     );
     current_x + badge_w
+}
+
+/// 결과창/선곡창 공통으로, rate/combo 배지 항목과 뒤따르는 meta 텍스트를 계산한다.
+/// 반환: (배지 항목 (텍스트, 색), 뒤따르는 meta 텍스트, 배지와 meta 사이 구분선 사용 여부)
+fn meta_badges(
+    state: &GameSessionState,
+    pattern_tabs: &[PatternTabInfo],
+    is_result: bool,
+    session_initial_record: Option<(f64, bool)>,
+) -> (Vec<(String, Color32)>, String, bool) {
+    let mut badges: Vec<(String, Color32)> = Vec::new();
+    let mut trailing = String::new();
+    let mut separator = false;
+
+    if is_result {
+        if let Some(ctx) = &state.context {
+            let (curr_rate, curr_mc, comp_str) = get_result_rate_comparison(ctx, session_initial_record);
+            badges.push((curr_rate, Theme::OK));
+            if let Some(mc) = curr_mc {
+                badges.push((mc.to_string(), Theme::TEXT_ACCENT));
+            }
+            trailing = comp_str;
+        } else {
+            trailing = "—".to_string();
+        }
+    } else {
+        let mut has_badge = false;
+        if let Some(ctx) = &state.context {
+            if ctx.rate > 0.0 {
+                badges.push((format!("{:.2}%", ctx.rate), Theme::OK));
+                has_badge = true;
+                if ctx.is_max_combo {
+                    let sym = if ctx.rate >= 100.0 { "P" } else { "M" };
+                    badges.push((sym.to_string(), Theme::TEXT_ACCENT));
+                }
+            }
+        }
+        let meta = meta_text(state, pattern_tabs);
+        if meta != "—" && !meta.is_empty() {
+            trailing = meta;
+            separator = has_badge;
+        }
+    }
+
+    (badges, trailing, separator)
+}
+
+/// rate/combo 배지와 meta 텍스트를 가운데 정렬로 한 행에 그린다 (일반/lite 모드 공용).
+fn draw_meta_badge_row(
+    ui: &mut egui::Ui,
+    row_rect: Rect,
+    badges: &[(String, Color32)],
+    trailing: &str,
+    use_separator: bool,
+    scale: f32,
+) {
+    let mut total_width = 0.0f32;
+    for (i, (t, _)) in badges.iter().enumerate() {
+        total_width += badge_width(t, scale);
+        if i + 1 < badges.len() {
+            total_width += 3.0 * scale;
+        }
+    }
+
+    let font_meta = FontId::proportional(9.0 * scale);
+    let galley = ui.painter().layout_no_wrap(
+        trailing.to_string(),
+        font_meta.clone(),
+        Theme::TEXT_ACCENT,
+    );
+    if !trailing.is_empty() {
+        if !badges.is_empty() {
+            total_width += if use_separator { 10.0 * scale } else { 6.0 * scale };
+        }
+        total_width += galley.size().x;
+    }
+
+    let mut current_x = row_rect.left() + (row_rect.width() - total_width) / 2.0;
+    let center_y = row_rect.center().y;
+
+    for (i, (t, c)) in badges.iter().enumerate() {
+        current_x = draw_meta_badge(ui.painter(), t, current_x, center_y, scale, *c);
+        if i + 1 < badges.len() {
+            current_x += 3.0 * scale;
+        }
+    }
+
+    if !badges.is_empty() && !trailing.is_empty() {
+        if use_separator {
+            current_x += 4.0 * scale;
+            ui.painter().text(
+                egui::pos2(current_x, center_y),
+                egui::Align2::LEFT_CENTER,
+                "|",
+                FontId::proportional(10.0 * scale),
+                Theme::TEXT_MUTED,
+            );
+            current_x += 2.0 * scale;
+            current_x += 4.0 * scale;
+        } else {
+            current_x += 6.0 * scale;
+        }
+    }
+
+    if !trailing.is_empty() {
+        ui.painter().text(
+            egui::pos2(current_x, center_y),
+            egui::Align2::LEFT_CENTER,
+            trailing,
+            font_meta,
+            Theme::TEXT_ACCENT,
+        );
+    }
 }
 
 fn draw_header(
@@ -548,149 +628,13 @@ fn draw_header(
             );
 
             if state.scene.is_result() {
-                let mut suffix_str = "—".to_string();
-                let mut rate_text = None;
-                let mut combo_text = None;
-                let mut has_rate = false;
-
-                if let Some(ctx) = &state.context {
-                    let (curr_rate, curr_mc, comp_str) = get_result_rate_comparison(ctx, session_initial_record);
-                    rate_text = Some(curr_rate);
-                    combo_text = curr_mc;
-                    suffix_str = comp_str;
-                    has_rate = true;
-                }
-
-                let mut total_width = 0.0;
-
-                let rate_badge_text = if let Some(ref r_txt) = rate_text {
-                    total_width += badge_width(r_txt, scale);
-                    Some(r_txt.clone())
-                } else {
-                    None
-                };
-
-                let combo_badge_text = if let Some(c_txt) = combo_text {
-                    if rate_badge_text.is_some() {
-                        total_width += 3.0 * scale;
-                    }
-                    total_width += badge_width(c_txt, scale);
-                    Some(c_txt.to_string())
-                } else {
-                    None
-                };
-
-                if has_rate {
-                    total_width += 6.0 * scale;
-                }
-
-                let font_meta = FontId::proportional(9.0 * scale);
-                let galley_meta = ui.painter().layout_no_wrap(suffix_str.clone(), font_meta.clone(), Theme::TEXT_ACCENT);
-                total_width += galley_meta.size().x;
-
-                let mut current_x = row_rect.left() + (row_rect.width() - total_width) / 2.0;
-                let center_y = row_rect.center().y;
-
-                if let Some(ref r_txt) = rate_badge_text {
-                    current_x = draw_meta_badge(ui.painter(), r_txt, current_x, center_y, scale, Theme::OK);
-                }
-
-                if let Some(ref c_txt) = combo_badge_text {
-                    if rate_badge_text.is_some() {
-                        current_x += 3.0 * scale;
-                    }
-                    current_x = draw_meta_badge(ui.painter(), c_txt, current_x, center_y, scale, Theme::TEXT_ACCENT);
-                }
-
-                if has_rate {
-                    current_x += 6.0 * scale;
-                }
-
-                ui.painter().text(
-                    egui::pos2(current_x, center_y),
-                    egui::Align2::LEFT_CENTER,
-                    &suffix_str,
-                    font_meta,
-                    Theme::TEXT_ACCENT,
-                );
+                let (badges, trailing, separator) =
+                    meta_badges(state, pattern_tabs, true, session_initial_record);
+                draw_meta_badge_row(ui, row_rect, &badges, &trailing, separator, scale);
             } else {
-                let mut rate = 0.0;
-                let mut is_perfect = false;
-                let mut is_max_combo = false;
-                let mut has_badge = false;
-                if let Some(ctx) = &state.context {
-                    rate = ctx.rate;
-                    is_perfect = rate >= 100.0;
-                    is_max_combo = ctx.is_max_combo;
-                    has_badge = rate > 0.0;
-                }
-
-                let text_str = meta_text(state, pattern_tabs);
-
-                let mut total_width = 0.0;
-                let mut has_rate = false;
-                let rate_text = if has_badge && rate > 0.0 {
-                    let s = format!("{:.2}%", rate);
-                    total_width += badge_width(&s, scale);
-                    has_rate = true;
-                    Some(s)
-                } else {
-                    None
-                };
-
-                let combo_text = if has_badge && is_max_combo {
-                    let s = if is_perfect { "P" } else { "M" };
-                    if has_rate {
-                        total_width += 3.0 * scale;
-                    }
-                    total_width += badge_width(s, scale);
-                    Some(s)
-                } else {
-                    None
-                };
-
-                if has_badge {
-                    total_width += 10.0 * scale; // 구분선 `|` 가로폭 (여백 포함)
-                }
-
-                let font_meta = FontId::proportional(9.0 * scale);
-                let galley_meta = ui.painter().layout_no_wrap(text_str.clone(), font_meta.clone(), Theme::TEXT_ACCENT);
-                total_width += galley_meta.size().x;
-
-                let mut current_x = row_rect.left() + (row_rect.width() - total_width) / 2.0;
-                let center_y = row_rect.center().y;
-
-                if let Some(r_txt) = &rate_text {
-                    current_x = draw_meta_badge(ui.painter(), r_txt, current_x, center_y, scale, Theme::OK);
-                }
-
-                if let Some(c_txt) = &combo_text {
-                    if has_rate {
-                        current_x += 3.0 * scale;
-                    }
-                    current_x = draw_meta_badge(ui.painter(), c_txt, current_x, center_y, scale, Theme::TEXT_ACCENT);
-                }
-
-                if has_badge {
-                    current_x += 4.0 * scale;
-                    ui.painter().text(
-                        egui::pos2(current_x, center_y),
-                        egui::Align2::LEFT_CENTER,
-                        "|",
-                        FontId::proportional(10.0 * scale),
-                        Theme::TEXT_MUTED,
-                    );
-                    current_x += 2.0 * scale;
-                    current_x += 4.0 * scale;
-                }
-
-                ui.painter().text(
-                    egui::pos2(current_x, center_y),
-                    egui::Align2::LEFT_CENTER,
-                    &text_str,
-                    font_meta,
-                    Theme::TEXT_ACCENT,
-                );
+                let (badges, trailing, separator) =
+                    meta_badges(state, pattern_tabs, false, session_initial_record);
+                draw_meta_badge_row(ui, row_rect, &badges, &trailing, separator, scale);
             }
         });
 
