@@ -109,9 +109,12 @@ impl OcrDetector {
 
         // 만약 수집이 안 된 문자(예: 5)가 들어오거나 일부 오독 시 Windows OCR(하이브리드 예외 처리)로 자동 폴백하여 안정성 100% 보장
         if matched_str.is_empty() || matched_str.contains('?') {
+            debug_println!("    [ocr_engine::detect_rate] fallback: matched_str='{}' (empty or unresolved char)", matched_str);
             if let Some((val, txt, tel)) = self.attempt_rate_ocr(rate, true, false) {
+                debug_println!("    [ocr_engine::detect_rate] source=ocr_fallback val={:?} text='{}'", val, txt);
                 return (val, txt, Some(tel));
             } else {
+                debug_println!("    [ocr_engine::detect_rate] source=ocr_fallback FAILED");
                 return (None, String::new(), None);
             }
         }
@@ -119,9 +122,13 @@ impl OcrDetector {
         let rate_val = parse_rate_text(&matched_str);
 
         if rate_val.is_none() {
+            debug_println!("    [ocr_engine::detect_rate] fallback: matched_str='{}' but parse failed", matched_str);
             if let Some((val, txt, tel)) = self.attempt_rate_ocr(rate, true, false) {
+                debug_println!("    [ocr_engine::detect_rate] source=ocr_fallback(parse) val={:?} text='{}'", val, txt);
                 return (val, txt, Some(tel));
             }
+        } else {
+            debug_println!("    [ocr_engine::detect_rate] source=template matched_str='{}' val={:?}", matched_str, rate_val);
         }
 
         let telemetry = OcrTelemetry {
@@ -148,14 +155,20 @@ impl OcrDetector {
 
         // 실패나 오독이 포함되면 Windows OCR로 즉각 안전 폴백
         if matched_str.is_empty() || matched_str.contains('?') {
-            if let Ok(text) = self.engine.recognize_logo_color(score) {
-                return parse_score_text(&text);
+            debug_println!("    [ocr_engine::detect_score] fallback: matched_str='{}' (empty or unresolved char)", matched_str);
+            return if let Ok(text) = self.engine.recognize_logo_color(score) {
+                let val = parse_score_text(&text);
+                debug_println!("    [ocr_engine::detect_score] source=ocr_fallback val={:?} text='{}'", val, text);
+                val
             } else {
-                return None;
-            }
+                debug_println!("    [ocr_engine::detect_score] source=ocr_fallback FAILED");
+                None
+            };
         }
 
-        parse_score_text(&matched_str)
+        let val = parse_score_text(&matched_str);
+        debug_println!("    [ocr_engine::detect_score] source=template matched_str='{}' val={:?}", matched_str, val);
+        val
     }
 
     /// 결과창 뱃지 이미지로부터 모드(4B~8B)와 난이도(NM~SC)를 감지합니다.
