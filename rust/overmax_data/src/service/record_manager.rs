@@ -119,14 +119,12 @@ impl RecordManager {
     }
 
     pub fn get_varchive_cache_record(&self, song_id: i32, button_mode: &str, difficulty: &str) -> Option<(f64, bool)> {
-        let guard = self.varchive_cache.lock().ok()?;
+        let guard = overmax_core::lock_or_recover(&self.varchive_cache);
         guard.get(&(song_id, button_mode.to_string(), difficulty.to_string())).copied()
     }
 
     fn merge_varchive_cache(&self, result: &mut HashMap<RecordKey, RecordValue>, song_ids: &[i32]) {
-        let Ok(cache) = self.varchive_cache.lock() else {
-            return;
-        };
+        let cache = overmax_core::lock_or_recover(&self.varchive_cache);
         let song_ids_set: HashSet<i32> = song_ids.iter().copied().collect();
         for (key, &(v_rate, v_mc)) in cache.iter() {
             if !song_ids_set.contains(&key.0) {

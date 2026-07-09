@@ -362,10 +362,10 @@ impl Recommender {
             }
         }
 
-        let mut cache_guard = self.floor_rate_cache.lock().unwrap_or_else(|e| e.into_inner());
-        let mut dirty_guard = self.floor_rate_dirty.lock().unwrap_or_else(|e| e.into_inner());
-        let mut patterns_guard = self.floor_patterns.lock().unwrap_or_else(|e| e.into_inner());
-        let mut record_to_key_guard = self.record_to_floor_key.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache_guard = overmax_core::lock_or_recover(&self.floor_rate_cache);
+        let mut dirty_guard = overmax_core::lock_or_recover(&self.floor_rate_dirty);
+        let mut patterns_guard = overmax_core::lock_or_recover(&self.floor_patterns);
+        let mut record_to_key_guard = overmax_core::lock_or_recover(&self.record_to_floor_key);
 
         *patterns_guard = floor_patterns;
         *record_to_key_guard = record_to_floor_key;
@@ -387,9 +387,9 @@ impl Recommender {
 
         let (full_dirty, dirty_keys) = self.rdb.consume_dirty_info();
         {
-            let mut dirty_guard = self.floor_rate_dirty.lock().unwrap_or_else(|e| e.into_inner());
-            let patterns_guard = self.floor_patterns.lock().unwrap_or_else(|e| e.into_inner());
-            let record_to_key_guard = self.record_to_floor_key.lock().unwrap_or_else(|e| e.into_inner());
+            let mut dirty_guard = overmax_core::lock_or_recover(&self.floor_rate_dirty);
+            let patterns_guard = overmax_core::lock_or_recover(&self.floor_patterns);
+            let record_to_key_guard = overmax_core::lock_or_recover(&self.record_to_floor_key);
 
             if full_dirty {
                 for key in patterns_guard.keys() {
@@ -405,7 +405,7 @@ impl Recommender {
         }
 
         let dirty_floor_keys: Vec<FloorCacheKey> = {
-            let dirty_guard = self.floor_rate_dirty.lock().unwrap_or_else(|e| e.into_inner());
+            let dirty_guard = overmax_core::lock_or_recover(&self.floor_rate_dirty);
             dirty_guard
                 .iter()
                 .filter(|(_, &is_dirty)| is_dirty)
@@ -428,9 +428,9 @@ impl Recommender {
 
         let rate_map = self.rdb.get_rate_map(&all_song_ids);
 
-        let mut cache_guard = self.floor_rate_cache.lock().unwrap_or_else(|e| e.into_inner());
-        let mut dirty_guard = self.floor_rate_dirty.lock().unwrap_or_else(|e| e.into_inner());
-        let patterns_guard = self.floor_patterns.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache_guard = overmax_core::lock_or_recover(&self.floor_rate_cache);
+        let mut dirty_guard = overmax_core::lock_or_recover(&self.floor_rate_dirty);
+        let patterns_guard = overmax_core::lock_or_recover(&self.floor_patterns);
 
         for key in &dirty_floor_keys {
             let entries = patterns_guard.get(key).cloned().unwrap_or_default();
@@ -479,7 +479,7 @@ impl Recommender {
         let mut has_record = 0;
         let mut rate_sum = 0.0;
 
-        let cache_guard = self.floor_rate_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let cache_guard = overmax_core::lock_or_recover(&self.floor_rate_cache);
         for (key, summary) in cache_guard.iter() {
             if !modes.contains(&key.button_mode.as_str()) {
                 continue;

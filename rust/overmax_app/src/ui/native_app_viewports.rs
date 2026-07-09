@@ -161,7 +161,7 @@ impl NativeApp {
                     s.debug.show_unaligned = false;
                     s.debug.debug_on_hover = false;
                 });
-                let mut local_draft = draft.lock().map(|g| g.clone()).unwrap_or_default();
+                let mut local_draft = overmax_core::lock_clone_or_default(&draft);
                 egui::TopBottomPanel::bottom("sett_actions")
                     .frame(egui::Frame::new().fill(Theme::PANEL_BG).inner_margin(egui::Margin::symmetric(24, 16)))
                     .show(ctx, |ui| {
@@ -183,8 +183,8 @@ impl NativeApp {
                                     .fill(Theme::PRIMARY)
                                     .corner_radius(egui::CornerRadius::same(Theme::R_SM));
                                 if ui.add(save_btn).clicked() {
-                                    let base_g = base.lock().map(|g| g.clone()).unwrap_or_default();
-                                    let mut merged_g = merged.lock().map(|g| g.clone()).unwrap_or_default();
+                                    let base_g = overmax_core::lock_clone_or_default(&base);
+                                    let mut merged_g = overmax_core::lock_clone_or_default(&merged);
                                     let _ = settings_ui::save_settings_to_disk(
                                         root.as_ref(),
                                         defaults.as_ref(),
@@ -236,10 +236,10 @@ impl NativeApp {
                     s.debug.show_unaligned = false;
                     s.debug.debug_on_hover = false;
                 });
-                let list = sync_state.candidates.lock().map(|g| g.clone()).unwrap_or_default();
-                let users = sync_state.steam_users.lock().unwrap_or_else(|e| e.into_inner());
-                let mut steam_g = sync_state.steam_id.lock().unwrap_or_else(|e| e.into_inner());
-                let status_s = sync_state.status.lock().map(|g| g.clone()).unwrap_or_default();
+                let list = overmax_core::lock_clone_or_default(&sync_state.candidates);
+                let users = overmax_core::lock_or_recover(&sync_state.steam_users);
+                let mut steam_g = overmax_core::lock_or_recover(&sync_state.steam_id);
+                let status_s = overmax_core::lock_clone_or_default(&sync_state.status);
                 sync_ui::render_sync(
                     ctx,
                     class,
@@ -341,7 +341,7 @@ impl eframe::App for NativeApp {
         };
 
         // game_rect 락 단 1회 획득으로 통합하여 경합 방지
-        let game_rect_val = self.game_rect.lock().map(|r| *r).unwrap_or(None);
+        let game_rect_val = *overmax_core::lock_or_recover(&self.game_rect);
         let game_found = game_rect_val.is_some();
         let overlay_on = game_found && self.confidence > 0.1;
 
@@ -655,7 +655,7 @@ impl NativeApp {
                                 merged_lock["overlay"] = overlay.clone();
                                 draft["overlay"] = overlay;
 
-                                let base_g = self.settings.base.lock().map(|g| g.clone()).unwrap_or_default();
+                                let base_g = overmax_core::lock_clone_or_default(&self.settings.base);
                                 let _ = settings_ui::save_settings_to_disk(
                                     self.root.as_ref(),
                                     self.settings.defaults.as_ref(),

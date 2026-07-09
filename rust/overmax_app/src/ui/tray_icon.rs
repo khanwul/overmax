@@ -277,7 +277,7 @@ unsafe fn show_context_menu(hwnd: HWND) {
     append_item(menu, CMD_SETTINGS, "설정");
     append_item(menu, CMD_SYNC, "V-Archive 동기화");
     let debug_enabled = ACTIONS.get()
-        .and_then(|a| a.settings.lock().ok())
+        .and_then(|a| Some(overmax_core::lock_or_recover(&a.settings)))
         .and_then(|s| s.get("debug").and_then(|v| v.as_bool()))
         .unwrap_or(false);
     if debug_enabled {
