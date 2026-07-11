@@ -470,9 +470,7 @@ fn match_best_template(
         for dy in 0..target_h {
             for dx in 0..target_w {
                 let i = dy * target_w + dx;
-                if dx < safe_x {
-                    matches += 1;
-                } else if resized_binary[i] == t.mask[i] {
+                if dx < safe_x || resized_binary[i] == t.mask[i] {
                     matches += 1;
                 }
             }

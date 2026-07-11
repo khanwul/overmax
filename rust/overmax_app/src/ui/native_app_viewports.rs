@@ -23,9 +23,7 @@ fn game_window_title(settings: &overmax_data::Settings) -> &str {
 fn get_local_mouse_pos(ctx: &egui::Context, hwnd_opt: Option<isize>) -> Option<egui::Pos2> {
     #[cfg(target_os = "windows")]
     {
-        let Some(hwnd_val) = hwnd_opt else {
-            return None;
-        };
+        let hwnd_val = hwnd_opt?;
         use windows_sys::Win32::Foundation::HWND;
         use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
         use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;

@@ -76,8 +76,8 @@ fn segment_characters(binary: &[u8], width: usize, height: usize) -> Vec<(usize,
     // 켜진 픽셀 임계값 (노이즈 방지를 위해 1열당 최소 1픽셀 초과하여 켜져 있어야 문자로 인정)
     let col_threshold = 1;
 
-    for x in 0..width {
-        let active = col_proj[x] >= col_threshold;
+    for (x, &col_sum) in col_proj.iter().enumerate().take(width) {
+        let active = col_sum >= col_threshold;
         if active && !in_char {
             start_x = x;
             in_char = true;

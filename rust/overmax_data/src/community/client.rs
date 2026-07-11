@@ -469,7 +469,7 @@ where
     S: serde::Serializer,
 {
     let mut raw_patterns = HashMap::new();
-    for m_idx in 0..4 {
+    for (m_idx, patterns_by_mode) in patterns.iter().enumerate().take(4) {
         let mode = match m_idx {
             0 => "4B",
             1 => "5B",
@@ -478,7 +478,7 @@ where
             _ => unreachable!(),
         };
         let mut diffs = HashMap::new();
-        for d_idx in 0..4 {
+        for (d_idx, pattern) in patterns_by_mode.iter().enumerate().take(4) {
             let diff = match d_idx {
                 0 => "NM",
                 1 => "HD",
@@ -486,7 +486,7 @@ where
                 3 => "SC",
                 _ => unreachable!(),
             };
-            if let Some(info) = &patterns[m_idx][d_idx] {
+            if let Some(info) = &pattern {
                 diffs.insert(diff.to_string(), info.clone());
             }
         }
