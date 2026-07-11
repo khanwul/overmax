@@ -1,14 +1,12 @@
+use crate::capture::frame::CapturedFrame;
 use crate::capture::frame_utils::crop_roi;
 use crate::capture::frame_utils::region_mean_bgr;
 use crate::detector::ocr_engine::{OcrDetector, OcrTelemetry};
 use crate::detector::roi::RoiManager;
-use crate::capture::frame::CapturedFrame;
-use overmax_core::{GameSessionState, PlayContext, Changed};
+use overmax_core::{Changed, GameSessionState, PlayContext};
 use std::collections::VecDeque;
 
 pub const MIN_VALID_RATE: f32 = 80.0;
-
-
 
 const BTN_MODE_MAX_DIST: f32 = 60.0;
 const DIFF_MIN_BRIGHTNESS: f32 = 45.0;
@@ -89,16 +87,15 @@ impl PlayStateDetector {
                 self.last_rate_ocr_ts = now;
 
                 rate_res.0 = Self::cross_validate_rate_with_score(
-                    ocr,
-                    frame,
-                    rois,
-                    scene,
-                    is_result,
-                    rate_res.0,
+                    ocr, frame, rois, scene, is_result, rate_res.0,
                 );
 
-                debug_println!("    [detect] rate OCR run. rate={:?}, text='{}'", rate_res.0, rate_res.1);
-                
+                debug_println!(
+                    "    [detect] rate OCR run. rate={:?}, text='{}'",
+                    rate_res.0,
+                    rate_res.1
+                );
+
                 self.apply_rate_ocr_result(is_result, rate_res);
             }
         }
@@ -108,7 +105,11 @@ impl PlayStateDetector {
         (rate, telemetry)
     }
 
-    fn apply_rate_ocr_result(&mut self, is_result: bool, mut res: (Option<f32>, String, Option<OcrTelemetry>)) {
+    fn apply_rate_ocr_result(
+        &mut self,
+        is_result: bool,
+        mut res: (Option<f32>, String, Option<OcrTelemetry>),
+    ) {
         if is_result {
             if let Some(new_r) = res.0 {
                 self.push_result_rate_sample(new_r);
@@ -210,10 +211,14 @@ impl PlayStateDetector {
             }
 
             if self.cache.result_mode.is_none() {
-                self.cache.result_mode.update(self.cache.song_select_mode.get().clone());
+                self.cache
+                    .result_mode
+                    .update(self.cache.song_select_mode.get().clone());
             }
             if self.cache.result_diff.is_none() {
-                self.cache.result_diff.update(self.cache.song_select_diff.get().clone());
+                self.cache
+                    .result_diff
+                    .update(self.cache.song_select_diff.get().clone());
             }
 
             if mode.is_none() {
@@ -240,7 +245,10 @@ impl PlayStateDetector {
         is_result: bool,
         detected_rate: Option<f32>,
     ) -> Option<f32> {
-        let is_song_select = matches!(scene, overmax_core::SceneType::Freestyle | overmax_core::SceneType::OpenMatch);
+        let is_song_select = matches!(
+            scene,
+            overmax_core::SceneType::Freestyle | overmax_core::SceneType::OpenMatch
+        );
         if !(is_result || is_song_select) {
             return detected_rate;
         }
@@ -289,7 +297,9 @@ impl PlayStateDetector {
         let scene = rois.current_scene();
         let is_result = matches!(
             scene,
-            overmax_core::SceneType::ResultFreestyle | overmax_core::SceneType::ResultOpen3 | overmax_core::SceneType::ResultOpen2
+            overmax_core::SceneType::ResultFreestyle
+                | overmax_core::SceneType::ResultOpen3
+                | overmax_core::SceneType::ResultOpen2
         );
 
         let mode;
@@ -318,7 +328,13 @@ impl PlayStateDetector {
         self.cache.song_select_diff.update(diff.clone());
 
         let mut telemetry = None;
-        debug_println!("    [detect] song_id={:?}, mode={:?}, diff={:?}, confident={}", song_id, mode, diff, confident);
+        debug_println!(
+            "    [detect] song_id={:?}, mode={:?}, diff={:?}, confident={}",
+            song_id,
+            mode,
+            diff,
+            confident
+        );
         let context = if let (Some(sid), Some(m), Some(d)) = (song_id, mode, diff) {
             if confident {
                 let (rate, tel) = self.process_rate_ocr(frame, rois, ocr, scene, is_result, now);
@@ -340,7 +356,11 @@ impl PlayStateDetector {
                     mode: m,
                     diff: d,
                     rate: if rate_valid { rate } else { 0.0 },
-                    is_max_combo: if rate_valid && rate > 0.0 { is_max_combo } else { false },
+                    is_max_combo: if rate_valid && rate > 0.0 {
+                        is_max_combo
+                    } else {
+                        false
+                    },
                 })
             } else {
                 None
@@ -365,12 +385,15 @@ impl PlayStateDetector {
             return (state, telemetry);
         }
 
-        (GameSessionState {
-            scene,
-            context,
-            is_stable: false,
-            is_fullscreen: false,
-        }, telemetry)
+        (
+            GameSessionState {
+                scene,
+                context,
+                is_stable: false,
+                is_fullscreen: false,
+            },
+            telemetry,
+        )
     }
 
     fn push_raw(&mut self, raw: RawPlayState) {
@@ -392,11 +415,15 @@ impl PlayStateDetector {
     }
 }
 
-pub fn detect_button_mode_from_roi(frame: &CapturedFrame, rois: &RoiManager, roi_name: &str) -> Option<String> {
+pub fn detect_button_mode_from_roi(
+    frame: &CapturedFrame,
+    rois: &RoiManager,
+    roi_name: &str,
+) -> Option<String> {
     let roi = rois.get_roi(roi_name)?;
     let mean = region_mean_bgr(frame, roi);
     let mut best = (None, f32::INFINITY);
-    
+
     let colors_table = if roi_name == "openmatch_mode" {
         openmatch_button_colors()
     } else {
@@ -411,9 +438,7 @@ pub fn detect_button_mode_from_roi(frame: &CapturedFrame, rois: &RoiManager, roi
             }
         }
     }
-    (best.1 <= BTN_MODE_MAX_DIST)
-        .then_some(best.0)
-        .flatten()
+    (best.1 <= BTN_MODE_MAX_DIST).then_some(best.0).flatten()
 }
 
 pub fn detect_button_mode(frame: &CapturedFrame, rois: &RoiManager) -> Option<String> {
@@ -463,7 +488,14 @@ const TEMPLATE_RESULT_MC_PHASH: u64 = 0xda5a52d2123b2fe8;
 const TEMPLATE_RESULT_MC_DHASH: u64 = 0x2929137dd4ef210f;
 const TEMPLATE_RESULT_MC_AHASH: u64 = 0xd4fce007fffffc00;
 
-fn calculate_hash_score(phash: u64, dhash: u64, ahash: u64, t_phash: u64, t_dhash: u64, t_ahash: u64) -> f32 {
+fn calculate_hash_score(
+    phash: u64,
+    dhash: u64,
+    ahash: u64,
+    t_phash: u64,
+    t_dhash: u64,
+    t_ahash: u64,
+) -> f32 {
     let p_dist = (phash ^ t_phash).count_ones() as f32;
     let d_dist = (dhash ^ t_dhash).count_ones() as f32;
     let a_dist = (ahash ^ t_ahash).count_ones() as f32;
@@ -481,12 +513,26 @@ pub fn detect_max_combo(frame: &CapturedFrame, rois: &RoiManager) -> bool {
         &badge_img.bgra,
         badge_img.width as usize,
         badge_img.height as usize,
-        4
+        4,
     ) else {
         return false;
     };
-    let score_perfect = calculate_hash_score(phash, dhash, ahash, TEMPLATE_SELECT_PERFECT_PHASH, TEMPLATE_SELECT_PERFECT_DHASH, TEMPLATE_SELECT_PERFECT_AHASH);
-    let score_mc = calculate_hash_score(phash, dhash, ahash, TEMPLATE_SELECT_MC_PHASH, TEMPLATE_SELECT_MC_DHASH, TEMPLATE_SELECT_MC_AHASH);
+    let score_perfect = calculate_hash_score(
+        phash,
+        dhash,
+        ahash,
+        TEMPLATE_SELECT_PERFECT_PHASH,
+        TEMPLATE_SELECT_PERFECT_DHASH,
+        TEMPLATE_SELECT_PERFECT_AHASH,
+    );
+    let score_mc = calculate_hash_score(
+        phash,
+        dhash,
+        ahash,
+        TEMPLATE_SELECT_MC_PHASH,
+        TEMPLATE_SELECT_MC_DHASH,
+        TEMPLATE_SELECT_MC_AHASH,
+    );
     score_perfect <= 10.0 || score_mc <= 10.0
 }
 
@@ -501,12 +547,26 @@ pub fn detect_max_combo_result(frame: &CapturedFrame, rois: &RoiManager) -> bool
         &badge_img.bgra,
         badge_img.width as usize,
         badge_img.height as usize,
-        4
+        4,
     ) else {
         return false;
     };
-    let score_perfect = calculate_hash_score(phash, dhash, ahash, TEMPLATE_RESULT_PERFECT_PHASH, TEMPLATE_RESULT_PERFECT_DHASH, TEMPLATE_RESULT_PERFECT_AHASH);
-    let score_mc = calculate_hash_score(phash, dhash, ahash, TEMPLATE_RESULT_MC_PHASH, TEMPLATE_RESULT_MC_DHASH, TEMPLATE_RESULT_MC_AHASH);
+    let score_perfect = calculate_hash_score(
+        phash,
+        dhash,
+        ahash,
+        TEMPLATE_RESULT_PERFECT_PHASH,
+        TEMPLATE_RESULT_PERFECT_DHASH,
+        TEMPLATE_RESULT_PERFECT_AHASH,
+    );
+    let score_mc = calculate_hash_score(
+        phash,
+        dhash,
+        ahash,
+        TEMPLATE_RESULT_MC_PHASH,
+        TEMPLATE_RESULT_MC_DHASH,
+        TEMPLATE_RESULT_MC_AHASH,
+    );
     score_perfect <= 20.0 || score_mc <= 20.0
 }
 
@@ -535,7 +595,11 @@ fn color_dist(left: (u8, u8, u8), right: (u8, u8, u8)) -> f32 {
     (db * db + dg * dg + dr * dr).sqrt()
 }
 
-pub fn resolve_most_plausible_rate(rate_ocr: f32, score_rate: f32, is_song_select: bool) -> Option<f32> {
+pub fn resolve_most_plausible_rate(
+    rate_ocr: f32,
+    score_rate: f32,
+    is_song_select: bool,
+) -> Option<f32> {
     if (rate_ocr - score_rate).abs() < 0.1 {
         return Some((score_rate * 100.0).floor() / 100.0);
     }
@@ -545,17 +609,28 @@ pub fn resolve_most_plausible_rate(rate_ocr: f32, score_rate: f32, is_song_selec
 
     if score_plaus != ocr_plaus {
         if score_plaus > ocr_plaus {
-            debug_println!("    [detect] Plausibility: Trusting Score Rate ({:.2}%) over Rate OCR ({:.2}%)", score_rate, rate_ocr);
+            debug_println!(
+                "    [detect] Plausibility: Trusting Score Rate ({:.2}%) over Rate OCR ({:.2}%)",
+                score_rate,
+                rate_ocr
+            );
             return Some((score_rate * 100.0).floor() / 100.0);
         } else {
-            debug_println!("    [detect] Plausibility: Trusting Rate OCR ({:.2}%) over Score Rate ({:.2}%)", rate_ocr, score_rate);
+            debug_println!(
+                "    [detect] Plausibility: Trusting Rate OCR ({:.2}%) over Score Rate ({:.2}%)",
+                rate_ocr,
+                score_rate
+            );
             return Some(rate_ocr);
         }
     }
 
     if is_song_select {
         // 신뢰 레벨이 같고 오차가 큰 선곡창은 보수적으로 원래 Rate OCR 유지
-        debug_println!("    [detect] Plausibility tie in song select. Keeping Rate OCR: {:.2}%", rate_ocr);
+        debug_println!(
+            "    [detect] Plausibility tie in song select. Keeping Rate OCR: {:.2}%",
+            rate_ocr
+        );
         Some(rate_ocr)
     } else {
         // 결과창은 스코어 역산 값을 우선 신뢰
@@ -578,8 +653,8 @@ pub fn get_rate_plausibility(rate: f32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{detect_button_mode, PlayStateDetector};
-    use crate::detector::roi::RoiManager;
     use crate::capture::frame::CapturedFrame;
+    use crate::detector::roi::RoiManager;
     use overmax_core::SceneType;
 
     #[test]
@@ -601,9 +676,24 @@ mod tests {
         rois.set_scene(SceneType::Freestyle);
 
         let ocr = crate::detector::ocr_engine::OcrDetector::new();
-        assert!(!detector.detect(&frame, &rois, Some(7), &ocr, 1.0).0.is_stable);
-        assert!(!detector.detect(&frame, &rois, Some(7), &ocr, 2.0).0.is_stable);
-        assert!(detector.detect(&frame, &rois, Some(7), &ocr, 3.0).0.is_stable);
+        assert!(
+            !detector
+                .detect(&frame, &rois, Some(7), &ocr, 1.0)
+                .0
+                .is_stable
+        );
+        assert!(
+            !detector
+                .detect(&frame, &rois, Some(7), &ocr, 2.0)
+                .0
+                .is_stable
+        );
+        assert!(
+            detector
+                .detect(&frame, &rois, Some(7), &ocr, 3.0)
+                .0
+                .is_stable
+        );
     }
 
     #[test]
@@ -630,14 +720,8 @@ mod tests {
         // 결과창에서 mode_digit/diff_panel ROI 가 없어 인식에 실패하면
         // 선곡창 캐시(song_select) 값으로 복구되어야 한다.
         let (state, _) = detector.detect(&frame, &rois, Some(7), &ocr, 1.0);
-        assert_eq!(
-            state.context.as_ref().map(|c| c.mode.as_str()),
-            Some("4B")
-        );
-        assert_eq!(
-            state.context.as_ref().map(|c| c.diff.as_str()),
-            Some("MX")
-        );
+        assert_eq!(state.context.as_ref().map(|c| c.mode.as_str()), Some("4B"));
+        assert_eq!(state.context.as_ref().map(|c| c.diff.as_str()), Some("MX"));
     }
 
     fn blank_frame() -> CapturedFrame {

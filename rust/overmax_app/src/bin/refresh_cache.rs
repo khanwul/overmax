@@ -1,5 +1,5 @@
-use std::path::Path;
 use serde_json::Value;
+use std::path::Path;
 
 use overmax_app::system::cache_update;
 
@@ -12,17 +12,17 @@ fn main() {
         "/../../settings.json"
     )))
     .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
-    
+
     let mut merged = overmax_data::config::settings::load_merged_settings(root, defaults);
     overmax_data::config::settings::normalize_settings(&mut merged);
-    
+
     // Force stale by deleting the old cache file if it exists
     let path = root.join("cache/pattern_meta.json");
     if path.exists() {
         println!("Deleting old cache/pattern_meta.json to force refresh...");
         let _ = std::fs::remove_file(&path);
     }
-    
+
     println!("Refreshing startup caches...");
     let settings: overmax_data::Settings = serde_json::from_value(merged).unwrap_or_default();
     cache_update::refresh_startup_caches(root, &settings, &mut |msg| {

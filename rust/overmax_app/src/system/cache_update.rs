@@ -34,12 +34,14 @@ pub fn refresh_startup_caches(root: &Path, settings: &overmax_data::Settings, lo
     let songs_path = root.join(compat.songs_json);
     let dlcs_path = root.join(compat.dlcs_json);
     let mut varchive_db = overmax_data::community::client::VArchiveDB::new();
-    
+
     // Load dlcs first if available
     let _ = varchive_db.load_dlcs_from_file(&dlcs_path);
 
     if let Err(e) = varchive_db.load_from_file(&songs_path) {
-        log(format!("[Cache] songs.json 로드 실패 (패턴 메타 매칭용): {e}"));
+        log(format!(
+            "[Cache] songs.json 로드 실패 (패턴 메타 매칭용): {e}"
+        ));
     }
 
     refresh_pattern_meta(root, &varchive_db, &mut *log);
@@ -88,12 +90,20 @@ fn refresh_dlcs_json(root: &Path, settings: &overmax_data::Settings, log: LogFn<
     }
 }
 
-fn refresh_pattern_meta(root: &Path, varchive_db: &overmax_data::community::client::VArchiveDB, log: LogFn<'_>) {
+fn refresh_pattern_meta(
+    root: &Path,
+    varchive_db: &overmax_data::community::client::VArchiveDB,
+    log: LogFn<'_>,
+) {
     let path = root.join(PATTERN_META_CACHE);
     if !is_stale(&path, DAY) {
         return;
     }
-    type Key = (String, overmax_data::community::client::Mode, overmax_data::community::client::Difficulty);
+    type Key = (
+        String,
+        overmax_data::community::client::Mode,
+        overmax_data::community::client::Difficulty,
+    );
     let mut items: std::collections::HashMap<Key, overmax_data::PatternSheetMetaItem> =
         std::collections::HashMap::new();
     for (mode, gid) in SHEET_GIDS {
@@ -104,11 +114,13 @@ fn refresh_pattern_meta(root: &Path, varchive_db: &overmax_data::community::clie
     }
     let entries: Vec<overmax_data::community::sheet_meta::PatternMetaEntry> = items
         .into_iter()
-        .map(|((song_id, mode, diff), meta)| overmax_data::community::sheet_meta::PatternMetaEntry {
-            song_id,
-            mode,
-            diff,
-            meta,
+        .map(|((song_id, mode, diff), meta)| {
+            overmax_data::community::sheet_meta::PatternMetaEntry {
+                song_id,
+                mode,
+                diff,
+                meta,
+            }
         })
         .collect();
     let Ok(text) = serde_json::to_vec_pretty(&entries) else {
@@ -231,8 +243,6 @@ fn is_stale(path: &Path, ttl: Duration) -> bool {
     SystemTime::now().duration_since(modified).unwrap_or(ttl) >= ttl
 }
 
-
-
 fn local_version(db_path: &Path) -> Option<String> {
     std::fs::read_to_string(version_path(db_path))
         .ok()
@@ -253,7 +263,11 @@ fn sheet_csv_url(gid: &str) -> String {
 
 fn merge_sheet_meta(
     items: &mut std::collections::HashMap<
-        (String, overmax_data::community::client::Mode, overmax_data::community::client::Difficulty),
+        (
+            String,
+            overmax_data::community::client::Mode,
+            overmax_data::community::client::Difficulty,
+        ),
         overmax_data::PatternSheetMetaItem,
     >,
     mode: &str,
@@ -301,7 +315,10 @@ fn merge_sheet_meta(
     }
 }
 
-fn pattern_meta_value(mode: &str, values: &HashMap<String, String>) -> overmax_data::PatternSheetMetaItem {
+fn pattern_meta_value(
+    mode: &str,
+    values: &HashMap<String, String>,
+) -> overmax_data::PatternSheetMetaItem {
     let raw_gold = pick(values, &["황배 여부", "황배여부"]);
     let gold = if raw_gold.is_empty() {
         overmax_data::community::sheet_meta::GoldMeta::None
@@ -412,15 +429,16 @@ mod tests {
     #[test]
     fn sheet_meta_merge_matches_python_cache_shape() {
         let mut db = overmax_data::community::client::VArchiveDB::new();
-        let mut patterns: [[Option<overmax_data::community::client::PatternInfo>; 4]; 4] = Default::default();
-        patterns[overmax_data::community::client::Mode::B5 as usize][overmax_data::community::client::Difficulty::SC as usize] = Some(
-            overmax_data::community::client::PatternInfo {
+        let mut patterns: [[Option<overmax_data::community::client::PatternInfo>; 4]; 4] =
+            Default::default();
+        patterns[overmax_data::community::client::Mode::B5 as usize]
+            [overmax_data::community::client::Difficulty::SC as usize] =
+            Some(overmax_data::community::client::PatternInfo {
                 level: Some(12),
                 floor: None,
                 floor_name: None,
                 rating: None,
-            }
-        );
+            });
 
         db.songs.push(overmax_data::community::client::Song {
             title: "1".into(),

@@ -6,12 +6,11 @@ use windows::core::Interface;
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-    D3D11_CPU_ACCESS_READ, D3D11_MAP_READ,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11_CREATE_DEVICE_FLAG
+    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
+    D3D11_CREATE_DEVICE_FLAG, D3D11_MAP_READ, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
 };
 use windows::Win32::Graphics::Dxgi::{
-    IDXGIDevice, IDXGIOutput1, IDXGIOutputDuplication, DXGI_OUTDUPL_FRAME_INFO
+    IDXGIDevice, IDXGIOutput1, IDXGIOutputDuplication, DXGI_OUTDUPL_FRAME_INFO,
 };
 
 pub struct DxgiCaptureEngine {
@@ -49,12 +48,22 @@ impl DxgiCaptureEngine {
             let device = device.ok_or("D3D11 device not created")?;
             let context = context.ok_or("D3D11 context not created")?;
 
-            let dxgi_device: IDXGIDevice = device.cast().map_err(|e| format!("Query IDXGIDevice failed: {e}"))?;
-            let adapter = dxgi_device.GetAdapter().map_err(|e| format!("GetAdapter failed: {e}"))?;
-            let output = adapter.EnumOutputs(0).map_err(|e| format!("EnumOutputs failed: {e}"))?;
-            let output1: IDXGIOutput1 = output.cast().map_err(|e| format!("Query IDXGIOutput1 failed: {e}"))?;
+            let dxgi_device: IDXGIDevice = device
+                .cast()
+                .map_err(|e| format!("Query IDXGIDevice failed: {e}"))?;
+            let adapter = dxgi_device
+                .GetAdapter()
+                .map_err(|e| format!("GetAdapter failed: {e}"))?;
+            let output = adapter
+                .EnumOutputs(0)
+                .map_err(|e| format!("EnumOutputs failed: {e}"))?;
+            let output1: IDXGIOutput1 = output
+                .cast()
+                .map_err(|e| format!("Query IDXGIOutput1 failed: {e}"))?;
 
-            let duplication = output1.DuplicateOutput(&device).map_err(|e| format!("DuplicateOutput failed: {e}"))?;
+            let duplication = output1
+                .DuplicateOutput(&device)
+                .map_err(|e| format!("DuplicateOutput failed: {e}"))?;
             let desc = duplication.GetDesc();
 
             Ok(Self {
@@ -77,7 +86,10 @@ impl DxgiCaptureEngine {
                     MipLevels: 1,
                     ArraySize: 1,
                     Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
-                    SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                    SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
                     Usage: D3D11_USAGE_STAGING,
                     BindFlags: 0,
                     CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
@@ -120,34 +132,57 @@ impl CaptureEngine for DxgiCaptureEngine {
             let mut resource = None;
             let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
 
-            let acquire_res = self.duplication.AcquireNextFrame(0, &mut frame_info, &mut resource);
+            let acquire_res = self
+                .duplication
+                .AcquireNextFrame(0, &mut frame_info, &mut resource);
 
-            let staging = self.staging_texture.as_ref().ok_or("Staging texture missing")?;
+            let staging = self
+                .staging_texture
+                .as_ref()
+                .ok_or("Staging texture missing")?;
 
             match acquire_res {
                 Ok(_) => {
                     if let Some(res) = resource {
-                        let texture: ID3D11Texture2D = res.cast().map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
+                        let texture: ID3D11Texture2D = res
+                            .cast()
+                            .map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
                         self.context.CopyResource(staging, &texture);
                         let _ = self.duplication.ReleaseFrame();
-                        
-                        return crop_texture_to_buffer(&self.context, staging, self.width, self.height, rect, out_frame);
+
+                        return crop_texture_to_buffer(
+                            &self.context,
+                            staging,
+                            self.width,
+                            self.height,
+                            rect,
+                            out_frame,
+                        );
                     }
                     let _ = self.duplication.ReleaseFrame();
                 }
                 Err(err) => {
                     let code = err.code().0 as u32;
                     if code != 0x887A0027 {
-                        return Err(format!("DXGI AcquireNextFrame failed with HRESULT 0x{:X}: {}", code, err));
+                        return Err(format!(
+                            "DXGI AcquireNextFrame failed with HRESULT 0x{:X}: {}",
+                            code, err
+                        ));
                     }
                 }
             }
 
-            crop_texture_to_buffer(&self.context, staging, self.width, self.height, rect, out_frame)
+            crop_texture_to_buffer(
+                &self.context,
+                staging,
+                self.width,
+                self.height,
+                rect,
+                out_frame,
+            )
         }
     }
 }
-
 
 unsafe fn crop_texture_to_buffer(
     context: &ID3D11DeviceContext,

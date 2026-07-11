@@ -1,5 +1,5 @@
-use std::fmt;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SceneType {
@@ -66,8 +66,12 @@ impl Default for GameSessionState {
 
 impl fmt::Display for GameSessionState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let status = if self.is_stable { "STABLE" } else { "DETECTING" };
-        
+        let status = if self.is_stable {
+            "STABLE"
+        } else {
+            "DETECTING"
+        };
+
         match &self.context {
             Some(ctx) => {
                 let mc_status = if ctx.is_max_combo { " (MAX COMBO)" } else { "" };
@@ -84,7 +88,7 @@ impl fmt::Display for GameSessionState {
                         ctx.song_id, ctx.mode, ctx.diff
                     )
                 }
-            },
+            }
             None => write!(f, "[{status}] None | None | None"),
         }
     }

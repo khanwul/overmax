@@ -1,12 +1,19 @@
+use overmax_app::bin_utils::load_frame;
+use overmax_core::SceneType;
+use overmax_engine::capture::frame_utils::crop_roi;
+use overmax_engine::detector::roi::RoiManager;
 use std::fs;
 use std::path::{Path, PathBuf};
-use overmax_engine::detector::roi::RoiManager;
-use overmax_engine::capture::frame_utils::crop_roi;
-use overmax_core::SceneType;
-use overmax_app::bin_utils::load_frame;
 
 // Hash score distance calculator
-fn calculate_hash_score(phash: u64, dhash: u64, ahash: u64, t_phash: u64, t_dhash: u64, t_ahash: u64) -> f32 {
+fn calculate_hash_score(
+    phash: u64,
+    dhash: u64,
+    ahash: u64,
+    t_phash: u64,
+    t_dhash: u64,
+    t_ahash: u64,
+) -> f32 {
     let p_dist = (phash ^ t_phash).count_ones() as f32;
     let d_dist = (dhash ^ t_dhash).count_ones() as f32;
     let a_dist = (ahash ^ t_ahash).count_ones() as f32;
@@ -42,7 +49,11 @@ fn analyze_folder(dir_path: &Path, default_scene: SceneType, threshold: f32) -> 
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
             if path.is_file() {
-                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                let ext = path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
                 if ext == "png" || ext == "jpg" || ext == "jpeg" {
                     paths.push(path);
                 }
@@ -75,7 +86,7 @@ fn analyze_folder(dir_path: &Path, default_scene: SceneType, threshold: f32) -> 
             &badge_img.bgra,
             badge_img.width as usize,
             badge_img.height as usize,
-            4
+            4,
         ) else {
             println!("  - {}: Hash calculation failed", filename);
             continue;
@@ -98,8 +109,22 @@ fn analyze_folder(dir_path: &Path, default_scene: SceneType, threshold: f32) -> 
         let avg_b = b_sum / total_pixels;
         let brightness = 0.299 * avg_r + 0.587 * avg_g + 0.114 * avg_b;
 
-        let score_perfect = calculate_hash_score(phash, dhash, ahash, TEMPLATE_RESULT_PERFECT_PHASH, TEMPLATE_RESULT_PERFECT_DHASH, TEMPLATE_RESULT_PERFECT_AHASH);
-        let score_mc = calculate_hash_score(phash, dhash, ahash, TEMPLATE_RESULT_MC_PHASH, TEMPLATE_RESULT_MC_DHASH, TEMPLATE_RESULT_MC_AHASH);
+        let score_perfect = calculate_hash_score(
+            phash,
+            dhash,
+            ahash,
+            TEMPLATE_RESULT_PERFECT_PHASH,
+            TEMPLATE_RESULT_PERFECT_DHASH,
+            TEMPLATE_RESULT_PERFECT_AHASH,
+        );
+        let score_mc = calculate_hash_score(
+            phash,
+            dhash,
+            ahash,
+            TEMPLATE_RESULT_MC_PHASH,
+            TEMPLATE_RESULT_MC_DHASH,
+            TEMPLATE_RESULT_MC_AHASH,
+        );
 
         let is_perfect = score_perfect <= threshold;
         let is_mc = score_mc <= threshold;

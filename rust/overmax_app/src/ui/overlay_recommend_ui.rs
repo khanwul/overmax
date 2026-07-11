@@ -90,7 +90,12 @@ fn draw_diff_tab(
                 let space = (TAB_HEIGHT * scale - 28.0 * scale) / 2.0;
                 ui.add_space(space.max(0.0));
                 ui.add(diff_label(diff, scale));
-                ui.add(pattern_floor_label(pattern, active == Some(diff), exists, scale));
+                ui.add(pattern_floor_label(
+                    pattern,
+                    active == Some(diff),
+                    exists,
+                    scale,
+                ));
             });
         });
 }
@@ -218,7 +223,8 @@ fn draw_rate(ui: &mut egui::Ui, entry: &RecommendEntry, scale: f32) {
 
 fn draw_status_badge(ui: &mut egui::Ui, text: &str, color: Color32, scale: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0 * scale), egui::Sense::hover());
-    ui.painter().circle_filled(rect.center(), 8.0 * scale, color);
+    ui.painter()
+        .circle_filled(rect.center(), 8.0 * scale, color);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,

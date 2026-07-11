@@ -28,7 +28,10 @@ impl NativeApp {
         if self.ui_state.settings_open.load(Ordering::Relaxed) {
             if let Ok(guard) = self.ctx_holder.lock() {
                 if let Some(ctx) = guard.as_ref() {
-                    ctx.send_viewport_cmd_to(crate::system::native_helpers::vp_settings(), eframe::egui::ViewportCommand::Focus);
+                    ctx.send_viewport_cmd_to(
+                        crate::system::native_helpers::vp_settings(),
+                        eframe::egui::ViewportCommand::Focus,
+                    );
                 }
             }
             return;
@@ -45,7 +48,10 @@ impl NativeApp {
         if self.ui_state.debug_open.load(Ordering::Relaxed) {
             if let Ok(guard) = self.ctx_holder.lock() {
                 if let Some(ctx) = guard.as_ref() {
-                    ctx.send_viewport_cmd_to(crate::system::native_helpers::vp_debug(), eframe::egui::ViewportCommand::Focus);
+                    ctx.send_viewport_cmd_to(
+                        crate::system::native_helpers::vp_debug(),
+                        eframe::egui::ViewportCommand::Focus,
+                    );
                 }
             }
             return;
@@ -62,7 +68,10 @@ impl NativeApp {
         if self.ui_state.sync_open.load(Ordering::Relaxed) {
             if let Ok(guard) = self.ctx_holder.lock() {
                 if let Some(ctx) = guard.as_ref() {
-                    ctx.send_viewport_cmd_to(crate::system::native_helpers::vp_sync(), eframe::egui::ViewportCommand::Focus);
+                    ctx.send_viewport_cmd_to(
+                        crate::system::native_helpers::vp_sync(),
+                        eframe::egui::ViewportCommand::Focus,
+                    );
                 }
             }
             return;

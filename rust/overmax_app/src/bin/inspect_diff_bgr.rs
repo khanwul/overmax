@@ -1,5 +1,5 @@
-use std::path::Path;
 use image::GenericImageView;
+use std::path::Path;
 
 /// 결과 화면 전용 난이도 패널 템플릿 생성기 (유저 Ground Truth 기준 + 동적 임계값 이진화)
 /// ROI: (709, 86, 90, 18) - x_start, y_start, width, height (FHD 1920x1080 기준)
@@ -47,8 +47,12 @@ fn main() {
         for y in 0..roi_h {
             for x in 0..roi_w {
                 let v = gray.get_pixel(x, y)[0];
-                if v > max_y { max_y = v; }
-                if v < min_y { min_y = v; }
+                if v > max_y {
+                    max_y = v;
+                }
+                if v < min_y {
+                    min_y = v;
+                }
             }
         }
 
@@ -56,7 +60,10 @@ fn main() {
         // NORMAL, HARD, MAXIMUM, SC 의 글자 색상이 배경색 대비 밝으므로, 적정 지점을 찾음
         let threshold = overmax_cv::diff_panel_threshold(max_y, min_y);
 
-        println!("[{}] Path: {}, Min Luma: {}, Max Luma: {}, Auto Threshold: {}", label, path, min_y, max_y, threshold);
+        println!(
+            "[{}] Path: {}, Min Luma: {}, Max Luma: {}, Auto Threshold: {}",
+            label, path, min_y, max_y, threshold
+        );
 
         // 이진화 저장
         let mut binary = image::GrayImage::new(roi_w, roi_h);
@@ -71,11 +78,19 @@ fn main() {
 
         // 마스크 배열 출력
         println!("[{}] Mask ({}x{}):", label, roi_w, roi_h);
-        println!("const RESULT_DIFF_MASK_{}: [u8; {}] = [", label, roi_w as usize * roi_h as usize);
+        println!(
+            "const RESULT_DIFF_MASK_{}: [u8; {}] = [",
+            label,
+            roi_w as usize * roi_h as usize
+        );
         for y in 0..roi_h {
             print!("    ");
             for x in 0..roi_w {
-                let v = if gray.get_pixel(x, y)[0] >= threshold { 1 } else { 0 };
+                let v = if gray.get_pixel(x, y)[0] >= threshold {
+                    1
+                } else {
+                    0
+                };
                 print!("{}, ", v);
             }
             println!();

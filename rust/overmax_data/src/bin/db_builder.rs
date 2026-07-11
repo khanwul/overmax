@@ -124,9 +124,8 @@ fn process_image(path: &Path) -> Result<(u64, u64, u64, Vec<f32>), String> {
     }
 
     // 3. Compute Features via overmax_cv (guarantees identical logic to overlay runtime)
-    let (phash, dhash, ahash, hog) =
-        overmax_cv::compute_image_features(&bgra, width, height, 4)
-            .map_err(|e| format!("{:?}", e))?;
+    let (phash, dhash, ahash, hog) = overmax_cv::compute_image_features(&bgra, width, height, 4)
+        .map_err(|e| format!("{:?}", e))?;
 
     Ok((phash, dhash, ahash, hog))
 }

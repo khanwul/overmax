@@ -7,13 +7,19 @@ fn autocontrast_gray(data: &mut [u8]) {
     let mut min = 255u8;
     let mut max = 0u8;
     for &p in data.iter() {
-        if p < min { min = p; }
-        if p > max { max = p; }
+        if p < min {
+            min = p;
+        }
+        if p > max {
+            max = p;
+        }
     }
     if max > min {
         let range = (max - min) as f32;
         for p in data.iter_mut() {
-            *p = ((*p - min) as f32 * 255.0 / range).round().clamp(0.0, 255.0) as u8;
+            *p = ((*p - min) as f32 * 255.0 / range)
+                .round()
+                .clamp(0.0, 255.0) as u8;
         }
     }
 }
@@ -27,18 +33,22 @@ pub fn preprocess_logo_bgra(
 ) -> Vec<u8> {
     let mut gray = to_gray_ocr(data, 4);
     autocontrast_gray(&mut gray);
-    
+
     // Dynamic scaling: target height ~120px, minimum 5x scale
     let scale = (120.0 / height as f64).ceil().max(5.0) as usize;
     let upscaled_w = width * scale;
     let upscaled_h = height * scale;
     let upscaled = resize_bilinear_u8(&gray, width, height, upscaled_w, upscaled_h);
-    
+
     let pixels = if binarize {
         let threshold = otsu_threshold(&upscaled);
         let bg_mean = mean_u8(&upscaled);
         let normal_is_dark = bg_mean < 128.0;
-        let use_invert = if force_invert { normal_is_dark } else { !normal_is_dark };
+        let use_invert = if force_invert {
+            normal_is_dark
+        } else {
+            !normal_is_dark
+        };
         threshold_image(&upscaled, threshold, use_invert)
     } else {
         upscaled
@@ -58,7 +68,13 @@ pub struct OcrPreprocessResult {
     pub padded_height: usize,
 }
 
-pub fn preprocess_bgra(data: &[u8], width: usize, height: usize, force_invert: bool, binarize: bool) -> Vec<u8> {
+pub fn preprocess_bgra(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    force_invert: bool,
+    binarize: bool,
+) -> Vec<u8> {
     preprocess_bgra_with_telemetry(data, width, height, force_invert, binarize).bmp
 }
 
@@ -71,22 +87,26 @@ pub fn preprocess_bgra_with_telemetry(
 ) -> OcrPreprocessResult {
     let mut gray = to_gray_ocr(data, 4);
     autocontrast_gray(&mut gray);
-    
+
     // Dynamic scaling: target height ~120px, minimum 5x scale
     let scale = (120.0 / height as f64).ceil().max(5.0) as usize;
     let upscaled_w = width * scale;
     let upscaled_h = height * scale;
     let upscaled = resize_bilinear_u8(&gray, width, height, upscaled_w, upscaled_h);
-    
+
     let blurred = box_blur_3x3(&upscaled, upscaled_w, upscaled_h);
     let threshold = otsu_threshold(&blurred);
     let bg_mean = calculate_border_mean(&blurred, upscaled_w, upscaled_h);
-    
+
     // 배경(테두리) 밝기가 오츠 임계값 이하면 (어두운 배경 + 밝은 글씨),
     // "흰 배경에 검은 글씨"로 만들기 위해 반전(invert)을 수행합니다.
     let normal_is_dark = bg_mean <= threshold as f32;
-    let use_invert = if force_invert { !normal_is_dark } else { normal_is_dark };
-    
+    let use_invert = if force_invert {
+        !normal_is_dark
+    } else {
+        normal_is_dark
+    };
+
     let pixels = if binarize {
         threshold_image(&blurred, threshold, use_invert)
     } else {
@@ -96,12 +116,12 @@ pub fn preprocess_bgra_with_telemetry(
             blurred
         }
     };
-    
+
     let padded = pad_gray(&pixels, upscaled_w, upscaled_h, 10);
     let bmp = encode_bmp_gray(&padded, upscaled_w + 20, upscaled_h + 20);
     let padded_width = upscaled_w + 20;
     let padded_height = upscaled_h + 20;
-    
+
     OcrPreprocessResult {
         bmp,
         threshold,
@@ -129,7 +149,7 @@ pub fn preprocess_color_bgra_with_telemetry(
     let upscaled = resize_bilinear_bgra(data, width, height, upscaled_w, upscaled_h);
     let padded = pad_bgra(&upscaled, upscaled_w, upscaled_h, 10);
     let bmp = encode_bmp_bgra(&padded, upscaled_w + 20, upscaled_h + 20);
-    
+
     OcrPreprocessResult {
         bmp,
         threshold: 0,
@@ -148,7 +168,11 @@ fn to_gray_ocr(data: &[u8], channels: usize) -> Vec<u8> {
     // 표준 ITU-R BT.601 가중치를 적용한 휘도(Luminance) 기반 그레이스케일 변환
     data.chunks_exact(channels)
         .map(|pixel| {
-            ((77 * u16::from(pixel[2]) + 150 * u16::from(pixel[1]) + 29 * u16::from(pixel[0]) + 128) >> 8) as u8
+            ((77 * u16::from(pixel[2])
+                + 150 * u16::from(pixel[1])
+                + 29 * u16::from(pixel[0])
+                + 128)
+                >> 8) as u8
         })
         .collect()
 }
@@ -158,12 +182,12 @@ fn box_blur_3x3(data: &[u8], width: usize, height: usize) -> Vec<u8> {
         return data.to_vec();
     }
     let mut out = vec![0u8; data.len()];
-    
+
     for y in 1..(height - 1) {
         let prev_row = (y - 1) * width;
         let curr_row = y * width;
         let next_row = (y + 1) * width;
-        
+
         for x in 1..(width - 1) {
             let sum = data[prev_row + x - 1] as u32
                 + data[prev_row + x] as u32
@@ -177,7 +201,7 @@ fn box_blur_3x3(data: &[u8], width: usize, height: usize) -> Vec<u8> {
             out[curr_row + x] = (sum / 9) as u8;
         }
     }
-    
+
     for x in 0..width {
         out[x] = data[x];
         out[(height - 1) * width + x] = data[(height - 1) * width + x];
@@ -186,7 +210,7 @@ fn box_blur_3x3(data: &[u8], width: usize, height: usize) -> Vec<u8> {
         out[y * width] = data[y * width];
         out[y * width + (width - 1)] = data[y * width + (width - 1)];
     }
-    
+
     out
 }
 
@@ -196,7 +220,7 @@ fn calculate_border_mean(data: &[u8], width: usize, height: usize) -> f32 {
     }
     let mut sum = 0u64;
     let mut count = 0u64;
-    
+
     for x in 0..width {
         sum += data[x] as u64;
         sum += data[(height - 1) * width + x] as u64;
@@ -207,7 +231,7 @@ fn calculate_border_mean(data: &[u8], width: usize, height: usize) -> f32 {
         sum += data[y * width + (width - 1)] as u64;
         count += 2;
     }
-    
+
     if count > 0 {
         sum as f32 / count as f32
     } else {
@@ -222,7 +246,11 @@ fn mean_u8(data: &[u8]) -> f32 {
 fn otsu_threshold(data: &[u8]) -> u8 {
     let hist = histogram(data);
     let total = data.len() as f32;
-    let sum = hist.iter().enumerate().map(|(i, c)| i as f32 * *c as f32).sum::<f32>();
+    let sum = hist
+        .iter()
+        .enumerate()
+        .map(|(i, c)| i as f32 * *c as f32)
+        .sum::<f32>();
     best_otsu_threshold(&hist, total, sum)
 }
 
@@ -261,7 +289,13 @@ fn otsu_score(sum_b: f32, weight_b: f32, sum: f32, total: f32) -> f32 {
 
 fn threshold_image(data: &[u8], threshold: u8, invert: bool) -> Vec<u8> {
     data.iter()
-        .map(|value| if (*value > threshold) ^ invert { 255 } else { 0 })
+        .map(|value| {
+            if (*value > threshold) ^ invert {
+                255
+            } else {
+                0
+            }
+        })
         .collect()
 }
 
@@ -287,7 +321,13 @@ fn encode_bmp_gray(data: &[u8], width: usize, height: usize) -> Vec<u8> {
     out
 }
 
-fn write_bmp_headers(out: &mut Vec<u8>, width: usize, height: usize, image_size: usize, offset: usize) {
+fn write_bmp_headers(
+    out: &mut Vec<u8>,
+    width: usize,
+    height: usize,
+    image_size: usize,
+    offset: usize,
+) {
     out.extend_from_slice(b"BM");
     out.extend_from_slice(&((offset + image_size) as u32).to_le_bytes());
     out.extend_from_slice(&[0; 4]);
@@ -373,13 +413,13 @@ fn encode_bmp_bgra(data: &[u8], width: usize, height: usize) -> Vec<u8> {
     let image_size = width * height * 4;
     let pixel_offset = 14 + 40; // No palette
     let mut out = Vec::with_capacity(pixel_offset + image_size);
-    
+
     // BMP File Header
     out.extend_from_slice(b"BM");
     out.extend_from_slice(&((pixel_offset + image_size) as u32).to_le_bytes());
     out.extend_from_slice(&[0; 4]);
     out.extend_from_slice(&(pixel_offset as u32).to_le_bytes());
-    
+
     // DIB Header (BITMAPINFOHEADER)
     out.extend_from_slice(&40u32.to_le_bytes());
     out.extend_from_slice(&(width as i32).to_le_bytes());
@@ -389,12 +429,12 @@ fn encode_bmp_bgra(data: &[u8], width: usize, height: usize) -> Vec<u8> {
     out.extend_from_slice(&0u32.to_le_bytes());
     out.extend_from_slice(&(image_size as u32).to_le_bytes());
     out.extend_from_slice(&[0; 16]);
-    
+
     // Pixel data (bottom-up row order)
     for y in (0..height).rev() {
         let start = y * width * 4;
         out.extend_from_slice(&data[start..start + width * 4]);
     }
-    
+
     out
 }

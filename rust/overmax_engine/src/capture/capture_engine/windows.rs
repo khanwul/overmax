@@ -61,7 +61,11 @@ impl CaptureEngine for AdaptiveCaptureEngine {
                     match DxgiCaptureEngine::new() {
                         Ok(dxgi) => self.dxgi_backend = Some(dxgi),
                         Err(e) => {
-                            return self.fallback_to_gdi(rect, out_frame, &format!("DXGI init failed ({e})"));
+                            return self.fallback_to_gdi(
+                                rect,
+                                out_frame,
+                                &format!("DXGI init failed ({e})"),
+                            );
                         }
                     }
                 } else {
@@ -93,4 +97,3 @@ impl CaptureEngine for AdaptiveCaptureEngine {
         }
     }
 }
-

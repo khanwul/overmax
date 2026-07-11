@@ -1,6 +1,6 @@
-use crate::capture::window_tracker::WindowRect;
 use crate::capture::capture_engine::CaptureEngine;
 use crate::capture::frame::CapturedFrame;
+use crate::capture::window_tracker::WindowRect;
 use std::ptr::null_mut;
 use windows_sys::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
@@ -50,7 +50,8 @@ impl GdiCaptureEngine {
 
             let mut bits = null_mut();
             let info = bitmap_info(width, height);
-            let hbitmap = CreateDIBSection(memory_dc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+            let hbitmap =
+                CreateDIBSection(memory_dc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
             if hbitmap.is_null() || bits.is_null() {
                 DeleteDC(memory_dc);
                 ReleaseDC(null_mut(), screen_dc);

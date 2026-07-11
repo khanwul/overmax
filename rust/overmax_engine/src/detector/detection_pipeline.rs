@@ -1,13 +1,11 @@
+use crate::capture::frame::CapturedFrame;
 use crate::capture::frame_utils::{crop_roi, make_thumbnail, thumbnail_changed};
 use crate::detector::hysteresis::HysteresisBuffer;
 use crate::detector::ocr_engine::{OcrDetector, OcrTelemetry};
 use crate::detector::play_state::PlayStateDetector;
 use crate::detector::roi::RoiManager;
-use crate::capture::frame::CapturedFrame;
 use overmax_core::{GameSessionState, SceneType};
 use overmax_data::ImageIndexDb;
-
-
 
 const JACKET_MATCH_INTERVAL: f64 = 0.25;
 const JACKET_CHANGE_THRESHOLD: f32 = 2.5;
@@ -104,7 +102,7 @@ impl DetectionPipeline {
         now: f64,
     ) -> DetectionOutput {
         self.rois.update_window_size(frame.width, frame.height);
-        
+
         let logo_detected = scene != SceneType::Unknown && scene != SceneType::Online;
         if logo_detected {
             self.rois.set_scene(scene);
@@ -114,14 +112,11 @@ impl DetectionPipeline {
         self.process_frame_shared(frame, logo_detected, now)
     }
 
-    pub fn process_frame_cached(
-        &mut self,
-        frame: &CapturedFrame,
-        now: f64,
-    ) -> DetectionOutput {
+    pub fn process_frame_cached(&mut self, frame: &CapturedFrame, now: f64) -> DetectionOutput {
         self.rois.update_window_size(frame.width, frame.height);
-        
-        let logo_detected = self.last_logo_scene != SceneType::Unknown && self.last_logo_scene != SceneType::Online;
+
+        let logo_detected =
+            self.last_logo_scene != SceneType::Unknown && self.last_logo_scene != SceneType::Online;
         self.hysteresis.update(logo_detected);
         self.process_frame_shared(frame, logo_detected, now)
     }
@@ -137,14 +132,21 @@ impl DetectionPipeline {
             SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
         );
         let is_song_select = self.hysteresis.is_active || is_result;
-        let is_leaving = if is_result { false } else { self.hysteresis.is_leaving };
+        let is_leaving = if is_result {
+            false
+        } else {
+            self.hysteresis.is_leaving
+        };
         let confidence = self.hysteresis.confidence;
 
         if !is_song_select {
             // 선곡 화면에서 플레이 진입(이탈) 시, 직전의 곡 ID를 플레이 이력으로 기록
             if self.hysteresis.is_active && self.current_song_id.is_some() {
                 self.last_played_song_id = self.current_song_id;
-                debug_println!("    [process_frame_shared] Saved last_played_song_id={:?} upon gameplay entry", self.last_played_song_id);
+                debug_println!(
+                    "    [process_frame_shared] Saved last_played_song_id={:?} upon gameplay entry",
+                    self.last_played_song_id
+                );
             }
             // 결과창 상태를 완전히 빠져나가는 경우에도 플레이 이력 소멸
             if !is_result {
@@ -167,7 +169,10 @@ impl DetectionPipeline {
             // 선곡 화면에서 나갈 때도 플레이 이력 확보
             if self.current_song_id.is_some() {
                 self.last_played_song_id = self.current_song_id;
-                debug_println!("    [process_frame_shared] Saved last_played_song_id={:?} upon leaving", self.last_played_song_id);
+                debug_println!(
+                    "    [process_frame_shared] Saved last_played_song_id={:?} upon leaving",
+                    self.last_played_song_id
+                );
             }
             return self.output(
                 logo_detected,
@@ -188,11 +193,20 @@ impl DetectionPipeline {
         }
 
         let jacket_status = self.update_song_id_from_jacket(frame, now);
-        let (state, telemetry) = self
-            .play_state
-            .detect(frame, &self.rois, self.current_song_id, &self.ocr, now);
-        
-        self.output(logo_detected, true, is_result, false, confidence, state, jacket_status, telemetry)
+        let (state, telemetry) =
+            self.play_state
+                .detect(frame, &self.rois, self.current_song_id, &self.ocr, now);
+
+        self.output(
+            logo_detected,
+            true,
+            is_result,
+            false,
+            confidence,
+            state,
+            jacket_status,
+            telemetry,
+        )
     }
 
     fn detect_logo_if_due(&mut self, frame: &CapturedFrame, now: f64) -> Option<SceneType> {
@@ -216,7 +230,7 @@ impl DetectionPipeline {
         } else {
             2.0
         };
-        
+
         if now - self.last_logo_ocr_ts < cooldown {
             return None;
         }
@@ -229,13 +243,19 @@ impl DetectionPipeline {
             self.last_logo_ocr_ts = now;
             return Some(SceneType::Unknown);
         };
-        
+
         let (scene, raw_text, _label) = self.ocr.detect_logo(&logo);
-        debug_println!("    [detect_logo_if_due] now={}, crop_size={}x{}, OCR raw='{}', scene={:?}",
-                 now, logo.width, logo.height, raw_text, scene);
+        debug_println!(
+            "    [detect_logo_if_due] now={}, crop_size={}x{}, OCR raw='{}', scene={:?}",
+            now,
+            logo.width,
+            logo.height,
+            raw_text,
+            scene
+        );
 
         let scene_candidate = self.resolve_scene_candidate(frame, &raw_text, scene);
-        
+
         if scene_candidate != SceneType::Unknown && scene_candidate != SceneType::Online {
             self.rois.set_scene(scene_candidate);
         }
@@ -268,9 +288,14 @@ impl DetectionPipeline {
     }
 
     fn try_result_edge_detection(&self, frame: &CapturedFrame) -> Option<SceneType> {
-        let jacket_roi = self.rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle)?;
+        let jacket_roi = self
+            .rois
+            .get_roi_for_scene("jacket", SceneType::ResultFreestyle)?;
         if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
-            debug_println!("    [detect_logo_if_due] Result screen jacket edge strength: {}", edge_strength);
+            debug_println!(
+                "    [detect_logo_if_due] Result screen jacket edge strength: {}",
+                edge_strength
+            );
             if edge_strength >= 15.0 {
                 debug_println!("    [detect_logo_if_due] Bypassed logo OCR: Result screen detected via jacket edge strength!");
                 return Some(SceneType::ResultFreestyle);
@@ -280,7 +305,9 @@ impl DetectionPipeline {
     }
 
     fn try_openmatch_edge_similarity(&self, frame: &CapturedFrame) -> Option<SceneType> {
-        let jacket_roi = self.rois.get_roi_for_scene("jacket", SceneType::OpenMatch)?;
+        let jacket_roi = self
+            .rois
+            .get_roi_for_scene("jacket", SceneType::OpenMatch)?;
         if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
             if edge_strength >= 25.0 {
                 if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
@@ -322,7 +349,12 @@ impl DetectionPipeline {
         }
     }
 
-    fn commit_result_scene(&mut self, frame: &CapturedFrame, candidate: SceneType, raw_text: &str) -> SceneType {
+    fn commit_result_scene(
+        &mut self,
+        frame: &CapturedFrame,
+        candidate: SceneType,
+        raw_text: &str,
+    ) -> SceneType {
         let is_detected_result = matches!(
             candidate,
             SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
@@ -371,7 +403,11 @@ impl DetectionPipeline {
                     // (결과 화면 폰트가 선곡 화면과 달라 템플릿 매칭이 실패하므로)
                     if candidate == SceneType::ResultFreestyle {
                         if let Some(mode) = self.ocr.parse_mode_from_text(raw_text) {
-                            debug_println!("    [detect_logo_if_due] Parsed mode '{}' from logo text '{}'", mode, raw_text.trim());
+                            debug_println!(
+                                "    [detect_logo_if_due] Parsed mode '{}' from logo text '{}'",
+                                mode,
+                                raw_text.trim()
+                            );
                             self.play_state.set_logo_mode(mode);
                         }
                     }
@@ -390,8 +426,6 @@ impl DetectionPipeline {
 
         self.last_logo_scene
     }
-
-
 
     fn update_song_id_from_jacket(&mut self, frame: &CapturedFrame, now: f64) -> JacketMatchStatus {
         if !self.image_db.is_ready() {
@@ -502,10 +536,10 @@ impl DetectionPipeline {
 
 pub fn detect_openmatch_color_match(mean: (u8, u8, u8)) -> bool {
     let openmatch_colors = [
-        (102u8, 118u8, 46u8),  // 4B
-        (147u8, 136u8, 95u8),  // 5B
-        (61u8, 137u8, 192u8),  // 6B
-        (153u8, 90u8, 88u8),   // 8B
+        (102u8, 118u8, 46u8), // 4B
+        (147u8, 136u8, 95u8), // 5B
+        (61u8, 137u8, 192u8), // 6B
+        (153u8, 90u8, 88u8),  // 8B
     ];
     let max_dist = 60.0f32;
     for color in &openmatch_colors {
@@ -645,19 +679,25 @@ mod tests {
     #[test]
     #[ignore]
     fn test_scratch_images() {
+        use crate::capture::frame_utils::crop_roi;
         use image::GenericImageView;
         use overmax_core::SceneType;
-        use crate::capture::frame_utils::crop_roi;
 
         let scratch_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
         let images = [
-            "hd_test_1.png", "hd_test_2.png", "hd_test_3.png", "hd_test_4.png", "hd_test_5.png",
-            "hd_test_2p_1.png", "hd_test_2p_2.png"
+            "hd_test_1.png",
+            "hd_test_2.png",
+            "hd_test_3.png",
+            "hd_test_4.png",
+            "hd_test_5.png",
+            "hd_test_2p_1.png",
+            "hd_test_2p_2.png",
         ];
 
-        let db_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../cache/image_index.db");
+        let db_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../cache/image_index.db");
         let db_path_str = db_path.to_str().unwrap();
-        
+
         let roi_dir = scratch_dir.join("roi");
         std::fs::create_dir_all(&roi_dir).unwrap();
 
@@ -672,15 +712,18 @@ mod tests {
             let mut pipeline = DetectionPipeline::new(ImageIndexDb::new(db_path_str, 0.6));
             let _ = pipeline.image_db.load();
 
-            let img = image::ImageReader::open(&path).expect("Failed to open file")
-                .with_guessed_format().expect("Failed to guess format")
-                .decode().expect("Failed to decode image");
+            let img = image::ImageReader::open(&path)
+                .expect("Failed to open file")
+                .with_guessed_format()
+                .expect("Failed to guess format")
+                .decode()
+                .expect("Failed to decode image");
             let (w, h) = img.dimensions();
             let mut bgra = vec![0u8; (w * h * 4) as usize];
-            
+
             for (x, y, pixel) in img.pixels() {
                 let idx = ((y * w + x) * 4) as usize;
-                bgra[idx] = pixel[2];     // B
+                bgra[idx] = pixel[2]; // B
                 bgra[idx + 1] = pixel[1]; // G
                 bgra[idx + 2] = pixel[0]; // R
                 bgra[idx + 3] = pixel[3]; // A
@@ -711,7 +754,10 @@ mod tests {
                     roi_names.push(name.clone());
                 }
             }
-            if final_scene == SceneType::Freestyle || final_scene == SceneType::OpenMatch || final_scene == SceneType::LadderMatch {
+            if final_scene == SceneType::Freestyle
+                || final_scene == SceneType::OpenMatch
+                || final_scene == SceneType::LadderMatch
+            {
                 for diff in ["NM", "HD", "MX", "SC"] {
                     roi_names.push(format!("diff_panel_{}", diff));
                 }
@@ -721,36 +767,50 @@ mod tests {
             for roi_name in roi_names {
                 let roi_rect = if roi_name.starts_with("diff_panel_") {
                     let diff_name = roi_name.strip_prefix("diff_panel_").unwrap();
-                    pipeline.rois.get_diff_panel_roi_for_scene(diff_name, final_scene)
+                    pipeline
+                        .rois
+                        .get_diff_panel_roi_for_scene(diff_name, final_scene)
                 } else {
                     pipeline.rois.get_roi_for_scene(&roi_name, final_scene)
                 };
 
-                let Some(roi) = roi_rect else { continue; };
+                let Some(roi) = roi_rect else {
+                    continue;
+                };
 
-                let Some(cropped) = crop_roi(&frame, roi) else { continue; };
+                let Some(cropped) = crop_roi(&frame, roi) else {
+                    continue;
+                };
 
                 let mut rgba = cropped.bgra.clone();
                 for chunk in rgba.chunks_exact_mut(4) {
                     chunk.swap(0, 2); // BGR -> RGB
                 }
 
-                let out_filename = format!("{}_{}.png", img_name.strip_suffix(".png").unwrap_or(img_name), roi_name);
+                let out_filename = format!(
+                    "{}_{}.png",
+                    img_name.strip_suffix(".png").unwrap_or(img_name),
+                    roi_name
+                );
                 let out_path = roi_dir.join(out_filename);
                 image::save_buffer(
                     &out_path,
                     &rgba,
                     cropped.width as u32,
                     cropped.height as u32,
-                    image::ColorType::Rgba8
-                ).expect("Failed to save cropped image");
+                    image::ColorType::Rgba8,
+                )
+                .expect("Failed to save cropped image");
                 println!("    Saved ROI '{}' to {:?}", roi_name, out_path);
             }
         }
     }
 }
 
-fn detect_jacket_edges(frame: &CapturedFrame, jacket_roi: crate::detector::roi::RoiRect) -> Option<f32> {
+fn detect_jacket_edges(
+    frame: &CapturedFrame,
+    jacket_roi: crate::detector::roi::RoiRect,
+) -> Option<f32> {
     let margin = 8;
     let ext_roi = crate::detector::roi::RoiRect {
         x1: jacket_roi.x1 - margin,
@@ -764,5 +824,6 @@ fn detect_jacket_edges(frame: &CapturedFrame, jacket_roi: crate::detector::roi::
         ext_img.width as usize,
         ext_img.height as usize,
         margin as usize,
-    ).ok()
+    )
+    .ok()
 }

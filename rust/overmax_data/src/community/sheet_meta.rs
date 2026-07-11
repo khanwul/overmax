@@ -94,7 +94,10 @@ pub struct PatternSheetMeta {
 }
 
 impl PatternSheetMeta {
-    pub fn load_cache(path: impl AsRef<Path>, varchive_db: &crate::community::client::VArchiveDB) -> Self {
+    pub fn load_cache(
+        path: impl AsRef<Path>,
+        varchive_db: &crate::community::client::VArchiveDB,
+    ) -> Self {
         let path_ref = path.as_ref();
         let Ok(text) = std::fs::read_to_string(path_ref) else {
             return Self::default();
@@ -128,8 +131,12 @@ impl PatternSheetMeta {
             let mode_str = parts[0].to_uppercase();
             let title = parts[1];
             let diff_str = parts[2].to_uppercase();
-            let Some(mode) = Mode::from_str(&mode_str) else { continue };
-            let Some(diff) = Difficulty::from_str(&diff_str) else { continue };
+            let Some(mode) = Mode::from_str(&mode_str) else {
+                continue;
+            };
+            let Some(diff) = Difficulty::from_str(&diff_str) else {
+                continue;
+            };
             if let Some(song) =
                 varchive_db.find_best_match(title, &mode_str, &diff_str, None, "", &item.note)
             {

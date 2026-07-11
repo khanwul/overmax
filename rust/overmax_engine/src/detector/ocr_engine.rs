@@ -91,7 +91,8 @@ impl OcrDetector {
         let res = if color {
             self.engine.recognize_color_with_telemetry(rate)
         } else {
-            self.engine.recognize_with_telemetry(rate, force_invert, false)
+            self.engine
+                .recognize_with_telemetry(rate, force_invert, false)
         };
         let (txt, preprocess_res) = res.ok()?;
         let val = parse_rate_text(&txt);
@@ -187,15 +188,16 @@ impl OcrDetector {
         let (target_w, target_h) = (50usize, 68usize);
         let resized_binary = resize_binary(&binary, w, h, target_w, target_h);
 
-        let t_infos: Vec<MatchTemplateInfo> = crate::detector::templates::result_mode::RESULT_MODE_TEMPLATES
-            .iter()
-            .map(|t| MatchTemplateInfo {
-                width: t.width,
-                height: t.height,
-                mask: t.mask,
-                label: t.mode_label,
-            })
-            .collect();
+        let t_infos: Vec<MatchTemplateInfo> =
+            crate::detector::templates::result_mode::RESULT_MODE_TEMPLATES
+                .iter()
+                .map(|t| MatchTemplateInfo {
+                    width: t.width,
+                    height: t.height,
+                    mask: t.mask,
+                    label: t.mode_label,
+                })
+                .collect();
 
         match_best_template(&resized_binary, target_w, target_h, &t_infos, 0.80, |_| 0)
     }
@@ -220,15 +222,16 @@ impl OcrDetector {
         let (target_w, target_h) = (90usize, 18usize);
         let resized_binary = resize_binary(&binary, w, h, target_w, target_h);
 
-        let t_infos: Vec<MatchTemplateInfo> = crate::detector::templates::result_diff::RESULT_DIFF_TEMPLATES
-            .iter()
-            .map(|t| MatchTemplateInfo {
-                width: t.width,
-                height: t.height,
-                mask: t.mask,
-                label: t.name,
-            })
-            .collect();
+        let t_infos: Vec<MatchTemplateInfo> =
+            crate::detector::templates::result_diff::RESULT_DIFF_TEMPLATES
+                .iter()
+                .map(|t| MatchTemplateInfo {
+                    width: t.width,
+                    height: t.height,
+                    mask: t.mask,
+                    label: t.name,
+                })
+                .collect();
 
         match_best_template(&resized_binary, target_w, target_h, &t_infos, 0.80, |_| 0)
     }
@@ -253,32 +256,42 @@ impl OcrDetector {
         let (target_w, target_h) = (106usize, 18usize);
         let resized_binary = resize_binary(&binary, w, h, target_w, target_h);
 
-        let t_infos: Vec<MatchTemplateInfo> = crate::detector::templates::result_diff::RESULT_DIFF_OPEN_TEMPLATES
-            .iter()
-            .map(|t| MatchTemplateInfo {
-                width: t.width,
-                height: t.height,
-                mask: t.mask,
-                label: t.name,
-            })
-            .collect();
+        let t_infos: Vec<MatchTemplateInfo> =
+            crate::detector::templates::result_diff::RESULT_DIFF_OPEN_TEMPLATES
+                .iter()
+                .map(|t| MatchTemplateInfo {
+                    width: t.width,
+                    height: t.height,
+                    mask: t.mask,
+                    label: t.name,
+                })
+                .collect();
 
-        match_best_template(&resized_binary, target_w, target_h, &t_infos, 0.80, |label| {
-            match label {
+        match_best_template(
+            &resized_binary,
+            target_w,
+            target_h,
+            &t_infos,
+            0.80,
+            |label| match label {
                 "NM" => 15,
                 "HD" => 35,
                 "MX" => 0,
                 "SC" => 55,
                 _ => 0,
-            }
-        })
+            },
+        )
     }
 
     pub fn recognize_text_color(&self, region: &ImageRegion) -> Option<String> {
         self.engine.recognize_logo_color(region).ok()
     }
 
-    pub fn recognize_text_binarized(&self, region: &ImageRegion, force_invert: bool) -> Option<String> {
+    pub fn recognize_text_binarized(
+        &self,
+        region: &ImageRegion,
+        force_invert: bool,
+    ) -> Option<String> {
         self.engine.recognize_logo(region, force_invert, true).ok()
     }
 
@@ -291,11 +304,17 @@ impl OcrDetector {
     /// 텍스트에서 매칭되는 버튼 모드를 문자열로 파싱합니다.
     pub fn parse_mode_from_text(&self, text: &str) -> Option<String> {
         let norm = text.to_lowercase();
-        if norm.contains("4b") || norm.contains('4') { Some("4B".to_string()) }
-        else if norm.contains("5b") || norm.contains('5') { Some("5B".to_string()) }
-        else if norm.contains("6b") || norm.contains('6') { Some("6B".to_string()) }
-        else if norm.contains("8b") || norm.contains('8') { Some("8B".to_string()) }
-        else { None }
+        if norm.contains("4b") || norm.contains('4') {
+            Some("4B".to_string())
+        } else if norm.contains("5b") || norm.contains('5') {
+            Some("5B".to_string())
+        } else if norm.contains("6b") || norm.contains('6') {
+            Some("6B".to_string())
+        } else if norm.contains("8b") || norm.contains('8') {
+            Some("8B".to_string())
+        } else {
+            None
+        }
     }
 
     pub fn recognize_text_all_passes(&self, region: &ImageRegion) -> Option<String> {
@@ -307,8 +326,6 @@ impl OcrDetector {
         }
         None
     }
-
-
 }
 
 fn match_logo_scene(text: &str) -> Option<(SceneType, String)> {
@@ -364,11 +381,11 @@ fn match_digits_template(
         h,
         overmax_cv::LumaMethod::Average,
         255,
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     // 2. 수직 투영 분할
-    let segments = overmax_cv::segment_characters(&binary, w, h)
-        .map_err(|e| e.to_string())?;
+    let segments = overmax_cv::segment_characters(&binary, w, h).map_err(|e| e.to_string())?;
 
     // 3. 템플릿 매칭 판독
     let mut matched_str = String::new();
@@ -382,7 +399,9 @@ fn match_digits_template(
             }
         }
 
-        if let Ok(Some((ch, _score))) = overmax_cv::match_character(&char_bin, char_w, char_h, cv_templates) {
+        if let Ok(Some((ch, _score))) =
+            overmax_cv::match_character(&char_bin, char_w, char_h, cv_templates)
+        {
             if ch.is_ascii_digit() || ch == '.' || ch == '%' {
                 matched_str.push(ch);
             }
@@ -394,13 +413,7 @@ fn match_digits_template(
     Ok((matched_str, binary, threshold, max_y))
 }
 
-fn resize_binary(
-    binary: &[u8],
-    w: usize,
-    h: usize,
-    target_w: usize,
-    target_h: usize,
-) -> Vec<u8> {
+fn resize_binary(binary: &[u8], w: usize, h: usize, target_w: usize, target_h: usize) -> Vec<u8> {
     if w == target_w && h == target_h {
         return binary.to_vec();
     }
@@ -474,7 +487,8 @@ fn match_best_template(
 }
 
 fn parse_score_text(text: &str) -> Option<u32> {
-    let clean = text.chars()
+    let clean = text
+        .chars()
         .filter(|c| c.is_ascii_digit())
         .collect::<String>();
     if clean.len() != 6 && clean.len() != 7 {
@@ -498,7 +512,7 @@ fn parse_rate_text(text: &str) -> Option<f32> {
 
     // Windows OCR 오인식 대응:
     // "94.12%"를 "9412%"와 같이 소수점(.)을 누락하여 인식하는 경우가 존재합니다.
-    // DJMAX RESPECT V의 Rate는 항상 소수점 둘째 자리까지 표기되므로, 
+    // DJMAX RESPECT V의 Rate는 항상 소수점 둘째 자리까지 표기되므로,
     // 문자열에 소수점이 감지되지 않았고 파싱 결과가 MIN_VALID_RATE(80.0%) 이상인 경우
     // 소수점 이하 2자리가 정수로 취급되었다고 가정하고 100.0으로 나누어 보정합니다.
     // 이를 통해 0.00%가 900% 노이즈로 튈 때 9.00% 등으로 오보정되어 통과하는 부작용을 예방합니다.
@@ -511,7 +525,9 @@ fn parse_rate_text(text: &str) -> Option<f32> {
 
     // 유효한 실시간 기록으로 처리할 수 있는 최소 범위(MIN_VALID_RATE = 80.0%) 이상인 경우만 유효값으로 반환하고,
     // 0.00%가 4.00% 또는 9.00% 노이즈로 완벽하게 잘못 오인식되는 수치 등은 스캔 시점에 원천 배제합니다.
-    (crate::detector::play_state::MIN_VALID_RATE..=100.0).contains(&value).then_some(value)
+    (crate::detector::play_state::MIN_VALID_RATE..=100.0)
+        .contains(&value)
+        .then_some(value)
 }
 
 fn normalize_alnum(text: &str) -> String {
@@ -574,9 +590,9 @@ mod tests {
     #[test]
     #[ignore]
     fn test_color_vs_grayscale_ocr() {
-        use image::GenericImageView;
         use crate::capture::frame_utils::crop_roi;
         use crate::detector::roi::RoiManager;
+        use image::GenericImageView;
         use overmax_core::SceneType;
 
         let scratch_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
@@ -598,14 +614,17 @@ mod tests {
             if !path.exists() {
                 continue;
             }
-            let img = image::ImageReader::open(&path).expect("Failed to open file")
-                .with_guessed_format().expect("Failed to guess format")
-                .decode().expect("Failed to decode image");
+            let img = image::ImageReader::open(&path)
+                .expect("Failed to open file")
+                .with_guessed_format()
+                .expect("Failed to guess format")
+                .decode()
+                .expect("Failed to decode image");
             let (w, h) = img.dimensions();
             let mut bgra = vec![0u8; (w * h * 4) as usize];
             for (x, y, pixel) in img.pixels() {
                 let idx = ((y * w + x) * 4) as usize;
-                bgra[idx] = pixel[2];     // B
+                bgra[idx] = pixel[2]; // B
                 bgra[idx + 1] = pixel[1]; // G
                 bgra[idx + 2] = pixel[0]; // R
                 bgra[idx + 3] = pixel[3]; // A
@@ -626,12 +645,14 @@ mod tests {
                 if let Some(rate_img) = crop_roi(&frame, rate_roi) {
                     let color_res = detector.attempt_rate_ocr(&rate_img, true, false);
                     let gray_res = detector.attempt_rate_ocr(&rate_img, false, false);
-                    
-                    println!("  [Rate-Color]     Parsed: {:?}, Text: '{}'", 
+
+                    println!(
+                        "  [Rate-Color]     Parsed: {:?}, Text: '{}'",
                         color_res.as_ref().and_then(|r| r.0),
                         color_res.as_ref().map(|r| r.1.trim()).unwrap_or("FAILED")
                     );
-                    println!("  [Rate-Grayscale] Parsed: {:?}, Text: '{}'", 
+                    println!(
+                        "  [Rate-Grayscale] Parsed: {:?}, Text: '{}'",
                         gray_res.as_ref().and_then(|r| r.0),
                         gray_res.as_ref().map(|r| r.1.trim()).unwrap_or("FAILED")
                     );
@@ -641,14 +662,28 @@ mod tests {
             // Score OCR 비교
             if let Some(score_roi) = rois.get_roi("score") {
                 if let Some(score_img) = crop_roi(&frame, score_roi) {
-                    let color_txt = detector.engine.recognize_logo_color(&score_img).unwrap_or_default();
-                    let gray_txt = detector.engine.recognize_logo(&score_img, false, false).unwrap_or_default();
-                    
+                    let color_txt = detector
+                        .engine
+                        .recognize_logo_color(&score_img)
+                        .unwrap_or_default();
+                    let gray_txt = detector
+                        .engine
+                        .recognize_logo(&score_img, false, false)
+                        .unwrap_or_default();
+
                     let color_score = super::parse_score_text(&color_txt);
                     let gray_score = super::parse_score_text(&gray_txt);
 
-                    println!("  [Score-Color]    Parsed: {:?}, Text: '{}'", color_score, color_txt.trim());
-                    println!("  [Score-Gray]     Parsed: {:?}, Text: '{}'", gray_score, gray_txt.trim());
+                    println!(
+                        "  [Score-Color]    Parsed: {:?}, Text: '{}'",
+                        color_score,
+                        color_txt.trim()
+                    );
+                    println!(
+                        "  [Score-Gray]     Parsed: {:?}, Text: '{}'",
+                        gray_score,
+                        gray_txt.trim()
+                    );
                 }
             }
         }

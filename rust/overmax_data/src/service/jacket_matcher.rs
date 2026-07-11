@@ -164,7 +164,7 @@ mod tests {
 
         // 8x8 그레이스케일 이미지 모킹 (전부 0)
         let query_data = vec![0u8; 64];
-        
+
         let matched = matcher.match_jacket(&query_data, 8, 8, 1).unwrap();
         assert_eq!(matched.image_id, "song-a");
         assert!(matched.similarity >= 0.9);

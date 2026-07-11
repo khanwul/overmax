@@ -1,10 +1,10 @@
 //! Runtime detection worker: window tracking -> capture -> pipeline -> UI state.
 
-use crate::detector::detection_pipeline::{DetectionOutput, DetectionPipeline, JacketMatchStatus};
-use crate::capture::capture_engine::{CaptureEngine, AdaptiveCaptureEngine};
+use crate::capture::capture_engine::{AdaptiveCaptureEngine, CaptureEngine};
 use crate::capture::frame::CapturedFrame;
 use crate::capture::window_tracker::WindowTracker;
-use overmax_core::{GameSessionState, Changed};
+use crate::detector::detection_pipeline::{DetectionOutput, DetectionPipeline, JacketMatchStatus};
+use overmax_core::{Changed, GameSessionState};
 use overmax_data::{DataCompatibility, ImageIndexDb, Settings};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -24,7 +24,14 @@ pub fn spawn(
 ) {
     std::thread::spawn(move || {
         initialize_winrt(&log_tx);
-        let mut worker = DetectionWorker::new(root, settings, log_tx, game_found_tx, detection_tx, repaint_callback);
+        let mut worker = DetectionWorker::new(
+            root,
+            settings,
+            log_tx,
+            game_found_tx,
+            detection_tx,
+            repaint_callback,
+        );
         worker.run();
     });
 }
@@ -147,7 +154,10 @@ impl DetectionWorker {
             self.window_scheduler.update(r, f);
             (r, f)
         } else {
-            (self.window_scheduler.cached_rect, self.window_scheduler.cached_foreground)
+            (
+                self.window_scheduler.cached_rect,
+                self.window_scheduler.cached_foreground,
+            )
         };
 
         let Some(rect) = rect else {
@@ -159,11 +169,12 @@ impl DetectionWorker {
         }
         match capturer.capture_bgra_inplace(rect, &mut self.frame_buffer) {
             Ok(_) => {
-                let mut out = pipeline.detect(&self.frame_buffer, self.start.elapsed().as_secs_f64());
+                let mut out =
+                    pipeline.detect(&self.frame_buffer, self.start.elapsed().as_secs_f64());
                 out.game_rect = Some(rect);
                 out.state.is_fullscreen = tracker.is_fullscreen();
                 self.log_detection_summary(&out);
-                
+
                 // IMPORTANT: `.update()` has side effects (mutates cached state).
                 // All five calls must execute before combining — do NOT inline into `||` or allow short-circuit.
                 let jacket_changed = self.last_jacket_status.update(out.jacket_status.clone());
@@ -378,7 +389,9 @@ struct WindowQueryScheduler {
 impl WindowQueryScheduler {
     fn new(enabled: bool) -> Self {
         Self {
-            last_query_ts: Instant::now().checked_sub(Duration::from_secs(5)).unwrap_or_else(Instant::now),
+            last_query_ts: Instant::now()
+                .checked_sub(Duration::from_secs(5))
+                .unwrap_or_else(Instant::now),
             cached_rect: None,
             cached_foreground: false,
             is_window_moving: false,
@@ -403,7 +416,11 @@ impl WindowQueryScheduler {
         self.last_query_ts.elapsed() >= self.get_query_interval()
     }
 
-    fn update(&mut self, rect: Option<crate::capture::window_tracker::WindowRect>, foreground: bool) {
+    fn update(
+        &mut self,
+        rect: Option<crate::capture::window_tracker::WindowRect>,
+        foreground: bool,
+    ) {
         if !self.enabled {
             self.cached_rect = rect;
             self.cached_foreground = foreground;

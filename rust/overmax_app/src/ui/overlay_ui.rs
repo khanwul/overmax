@@ -33,26 +33,53 @@ impl Px {
     fn new(scale: f32) -> Self {
         Self { scale }
     }
-    fn panel_margin(&self) -> f32 { 8.0 * self.scale }
-    fn panel_gap(&self) -> f32 { 1.5 * self.scale }
-    fn header_radius(&self) -> f32 { 10.0 * self.scale }
-    fn header_margin_x(&self) -> f32 { 12.0 * self.scale }
-    fn header_margin_y(&self) -> f32 { 8.0 * self.scale }
-    fn header_row_gap(&self) -> f32 { 8.0 * self.scale }
-    fn header_meta_gap(&self) -> f32 { 4.0 * self.scale }
-    fn status_dot(&self) -> f32 { 7.0 * self.scale }
-    fn mode_badge_w(&self) -> f32 { 28.0 * self.scale }
-    fn mode_badge_h(&self) -> f32 { 22.0 * self.scale }
-    fn settings_btn(&self) -> f32 { 24.0 * self.scale }
-    fn body_gap(&self) -> f32 { 6.0 * self.scale }
-    fn footer_margin_x(&self) -> f32 { 10.0 * self.scale }
-    fn footer_margin_y(&self) -> f32 { 5.0 * self.scale }
+    fn panel_margin(&self) -> f32 {
+        8.0 * self.scale
+    }
+    fn panel_gap(&self) -> f32 {
+        1.5 * self.scale
+    }
+    fn header_radius(&self) -> f32 {
+        10.0 * self.scale
+    }
+    fn header_margin_x(&self) -> f32 {
+        12.0 * self.scale
+    }
+    fn header_margin_y(&self) -> f32 {
+        8.0 * self.scale
+    }
+    fn header_row_gap(&self) -> f32 {
+        8.0 * self.scale
+    }
+    fn header_meta_gap(&self) -> f32 {
+        4.0 * self.scale
+    }
+    fn status_dot(&self) -> f32 {
+        7.0 * self.scale
+    }
+    fn mode_badge_w(&self) -> f32 {
+        28.0 * self.scale
+    }
+    fn mode_badge_h(&self) -> f32 {
+        22.0 * self.scale
+    }
+    fn settings_btn(&self) -> f32 {
+        24.0 * self.scale
+    }
+    fn body_gap(&self) -> f32 {
+        6.0 * self.scale
+    }
+    fn footer_margin_x(&self) -> f32 {
+        10.0 * self.scale
+    }
+    fn footer_margin_y(&self) -> f32 {
+        5.0 * self.scale
+    }
 }
-
 
 pub fn install_cjk_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
-    
+
     let font_names = [
         ("malgun", "malgun.ttf"),
         ("msgothic", "msgothic.ttc"),
@@ -72,10 +99,9 @@ pub fn install_cjk_fonts(ctx: &egui::Context) {
                 if filename.ends_with(".ttc") {
                     font_data.index = 0;
                 }
-                fonts.font_data.insert(
-                    name.to_string(),
-                    std::sync::Arc::new(font_data),
-                );
+                fonts
+                    .font_data
+                    .insert(name.to_string(), std::sync::Arc::new(font_data));
                 loaded_fonts.push(name.to_string());
                 break; // Found this font, move to the next name
             }
@@ -153,10 +179,7 @@ pub struct OverlayProps<'a> {
     pub session_initial_record: Option<(f64, bool)>,
 }
 
-pub fn draw_overlay_panel(
-    ui: &mut egui::Ui,
-    props: &OverlayProps,
-) -> OverlayActions {
+pub fn draw_overlay_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayActions {
     // 레이아웃 경고(노란 선) 강제 비활성화
     #[cfg(debug_assertions)]
     {
@@ -195,7 +218,13 @@ pub fn draw_overlay_panel(
                 props.session_initial_record,
             );
             ui.add_space(px.panel_gap());
-            draw_body(ui, props.state, props.pattern_tabs, props.recommendations, &px);
+            draw_body(
+                ui,
+                props.state,
+                props.pattern_tabs,
+                props.recommendations,
+                &px,
+            );
             ui.add_space(px.panel_gap());
             draw_footer(
                 ui,
@@ -210,18 +239,15 @@ pub fn draw_overlay_panel(
     actions
 }
 
-fn draw_lite_panel(
-    ui: &mut egui::Ui,
-    props: &OverlayProps,
-) -> OverlayActions {
+fn draw_lite_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayActions {
     let px = Px::new(props.scale);
     let mut actions = OverlayActions::default();
-    
+
     // 라이트모드 2열 켜짐/꺼짐 시 콘텐츠 크기 변동에 의해 창 높이가 출렁이는 현상을 방지하기 위해 높이를 강제 고정
     let target_height = LITE_BASE_HEIGHT * props.scale;
     ui.set_min_height(target_height);
     ui.set_max_height(target_height);
-    
+
     let response = Frame::new()
         .fill(Theme::PANEL_BG)
         .corner_radius(CornerRadius::same((8.0 * props.scale) as u8))
@@ -229,17 +255,17 @@ fn draw_lite_panel(
         .stroke(egui::Stroke::new(1.0, Theme::PANEL_STROKE))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 3.0 * props.scale;
-            
+
             // 1열: 상태 표시등 + [버튼모드] [난이도] [비공식 난이도] + 곡명 + 업로드 버튼 + 설정 버튼
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0 * props.scale;
-                
+
                 draw_status_lamp(ui, props.state.is_stable, &px);
-                
+
                 if let Some(ctx) = &props.state.context {
                     // 1. Mode 뱃지
                     draw_mode_badge(ui, Some(&ctx.mode), &px);
-                    
+
                     // 2. Diff 뱃지
                     let color = diff_color(&ctx.diff);
                     let (d_rect, _) = ui.allocate_exact_size(
@@ -254,7 +280,7 @@ fn draw_lite_panel(
                         FontId::proportional(11.0 * props.scale),
                         Theme::TEXT_PRIMARY,
                     );
-                    
+
                     // 3. 비공식 난이도 (또는 공식 레벨)
                     if let Some(pattern) = props.pattern_tabs.iter().find(|p| p.diff == ctx.diff) {
                         if let Some(floor) = &pattern.floor_name {
@@ -273,11 +299,11 @@ fn draw_lite_panel(
                         }
                     }
                 }
-                
+
                 // 우측 배치: 설정/업로드 버튼만 우측 정렬로 묶음
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().button_padding = Vec2::ZERO;
-                    
+
                     // 설정 버튼: 투명도 없이 불투명 fill을 적용해 버튼 영역 전체가 클릭 이벤트를 정확하게 받게 함
                     let text = RichText::new("⚙")
                         .color(Theme::TEXT_PRIMARY)
@@ -291,19 +317,19 @@ fn draw_lite_panel(
                         props.settings_open.store(true, Ordering::Relaxed);
                         actions.command = Some(UiCommand::OpenSettings);
                     }
-                    
+
                     // 업로드 버튼: 마찬가지로 불투명 fill 적용
                     if props.varchive_upload_needed {
                         ui.add_space(4.0 * props.scale);
                         let upload_text = RichText::new("⬆")
                             .color(if props.varchive_account_configured { Theme::TEXT_PRIMARY } else { Theme::TEXT_MUTED })
                             .font(FontId::proportional(11.0 * props.scale));
-                        
+
                         let upload_btn = Button::new(upload_text)
                             .fill(if props.varchive_account_configured { Theme::PRIMARY } else { Theme::SECTION_BG })
                             .corner_radius(CornerRadius::same((4.0 * props.scale) as u8))
                             .wrap();
-                            
+
                         let btn_size = Vec2::splat(18.0 * props.scale);
                         let response_upload = ui.add_sized(btn_size, upload_btn.sense(Sense::click()));
                         let response_upload = if props.varchive_account_configured {
@@ -311,13 +337,13 @@ fn draw_lite_panel(
                         } else {
                             response_upload.on_hover_text("V-Archive 계정 연동 필요 (설정에서 account.txt 경로를 지정해주세요)")
                         };
-                        
+
                         if response_upload.clicked()
                             && props.varchive_account_configured {
                                 actions.command = Some(UiCommand::UploadCurrentPattern);
                             }
                     }
-                    
+
                     // [CRITICAL LAYOUT NOTE]
                     // 1. right_to_left 스코프 내부에서는 남은 available_width() 전체를 라벨 크기(title_w)로
                     //    명시적으로 할당해주어야 라벨 너비가 0으로 찌그러져 텍스트가 소멸되는 현상을 방지합니다.
@@ -339,7 +365,7 @@ fn draw_lite_panel(
                     });
                 });
             });
-            
+
             // 2열: Rate + 콤보상태 + sheet_meta 배지 (일반 모드와 동일한 배지 렌더링)
             let (row_rect, _) = ui.allocate_exact_size(
                 Vec2::new(ui.available_width(), 14.0 * props.scale),
@@ -360,12 +386,9 @@ fn draw_lite_panel(
         // Exclude the right settings/upload buttons area (approx 45px * scale) from the drag target
         let mut drag_rect = response.response.rect;
         drag_rect.max.x -= 45.0 * props.scale;
-        
-        let drag_response = ui.interact(
-            drag_rect,
-            ui.id().with("lite_overlay_drag"),
-            Sense::drag(),
-        );
+
+        let drag_response =
+            ui.interact(drag_rect, ui.id().with("lite_overlay_drag"), Sense::drag());
         if drag_response.drag_started() {
             actions.start_drag = true;
         }
@@ -427,7 +450,8 @@ fn meta_badges(
 
     if is_result {
         if let Some(ctx) = &state.context {
-            let (curr_rate, curr_mc, comp_str) = get_result_rate_comparison(ctx, session_initial_record);
+            let (curr_rate, curr_mc, comp_str) =
+                get_result_rate_comparison(ctx, session_initial_record);
             badges.push((curr_rate, Theme::OK));
             if let Some(mc) = curr_mc {
                 badges.push((mc.to_string(), Theme::TEXT_ACCENT));
@@ -476,14 +500,16 @@ fn draw_meta_badge_row(
     }
 
     let font_meta = FontId::proportional(9.0 * scale);
-    let galley = ui.painter().layout_no_wrap(
-        trailing.to_string(),
-        font_meta.clone(),
-        Theme::TEXT_ACCENT,
-    );
+    let galley =
+        ui.painter()
+            .layout_no_wrap(trailing.to_string(), font_meta.clone(), Theme::TEXT_ACCENT);
     if !trailing.is_empty() {
         if !badges.is_empty() {
-            total_width += if use_separator { 10.0 * scale } else { 6.0 * scale };
+            total_width += if use_separator {
+                10.0 * scale
+            } else {
+                6.0 * scale
+            };
         }
         total_width += galley.size().x;
     }
@@ -589,12 +615,12 @@ fn draw_header(
                         let upload_text = RichText::new("⬆")
                             .color(if varchive_account_configured { Theme::TEXT_PRIMARY } else { Theme::TEXT_MUTED })
                             .font(FontId::proportional(11.0 * px.scale));
-                        
+
                         let upload_btn = Button::new(upload_text)
                             .fill(if varchive_account_configured { Theme::PRIMARY } else { Theme::SECTION_BG })
                             .corner_radius(CornerRadius::same((4.0 * px.scale) as u8))
                             .wrap();
-                            
+
                         let btn_size = Vec2::splat(18.0 * px.scale);
                         let response = ui.add_sized(btn_size, upload_btn.sense(Sense::click()));
                         let response = if varchive_account_configured {
@@ -607,7 +633,7 @@ fn draw_header(
                                 .map(|x| x.min(response.rect.min.x))
                                 .unwrap_or(response.rect.min.x),
                         );
-                        
+
                         if response.clicked()
                             && varchive_account_configured {
                                 actions.command = Some(UiCommand::UploadCurrentPattern);
@@ -690,11 +716,7 @@ fn draw_fade_title(
 
     if title_w <= max_w {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(title_w, height), egui::Sense::hover());
-        ui.painter().galley(
-            rect.min,
-            galley,
-            color,
-        );
+        ui.painter().galley(rect.min, galley, color);
     } else {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(max_w, height), egui::Sense::hover());
 
@@ -702,26 +724,35 @@ fn draw_fade_title(
         let clip_rect = rect.intersect(old_clip_rect);
 
         let clipped_painter = ui.painter().with_clip_rect(clip_rect);
-        clipped_painter.galley(
-            rect.min,
-            galley,
-            color,
-        );
+        clipped_painter.galley(rect.min, galley, color);
 
         let fade_w = 28.0 * scale;
-        let fade_rect = Rect::from_min_max(
-            egui::pos2(rect.max.x - fade_w, rect.min.y),
-            rect.max,
-        );
+        let fade_rect = Rect::from_min_max(egui::pos2(rect.max.x - fade_w, rect.min.y), rect.max);
 
         let mut mesh = egui::Mesh::default();
         let c_start = Color32::TRANSPARENT;
         let c_end = bg_color;
 
-        mesh.vertices.push(egui::epaint::Vertex { pos: fade_rect.left_top(), color: c_start, uv: egui::pos2(0.0, 0.0) });
-        mesh.vertices.push(egui::epaint::Vertex { pos: fade_rect.right_top(), color: c_end, uv: egui::pos2(1.0, 0.0) });
-        mesh.vertices.push(egui::epaint::Vertex { pos: fade_rect.right_bottom(), color: c_end, uv: egui::pos2(1.0, 1.0) });
-        mesh.vertices.push(egui::epaint::Vertex { pos: fade_rect.left_bottom(), color: c_start, uv: egui::pos2(0.0, 1.0) });
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: fade_rect.left_top(),
+            color: c_start,
+            uv: egui::pos2(0.0, 0.0),
+        });
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: fade_rect.right_top(),
+            color: c_end,
+            uv: egui::pos2(1.0, 0.0),
+        });
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: fade_rect.right_bottom(),
+            color: c_end,
+            uv: egui::pos2(1.0, 1.0),
+        });
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: fade_rect.left_bottom(),
+            color: c_start,
+            uv: egui::pos2(0.0, 1.0),
+        });
 
         mesh.indices.push(0);
         mesh.indices.push(1);
@@ -740,7 +771,8 @@ fn draw_status_lamp(ui: &mut egui::Ui, stable: bool, px: &Px) {
         Vec2::new(px.status_dot(), px.mode_badge_h()),
         egui::Sense::hover(),
     );
-    ui.painter().circle_filled(rect.center(), 3.5 * px.scale, color);
+    ui.painter()
+        .circle_filled(rect.center(), 3.5 * px.scale, color);
 }
 
 pub(crate) fn mode_color(mode: &str) -> Color32 {
@@ -761,7 +793,8 @@ fn draw_mode_badge(ui: &mut egui::Ui, mode: Option<&str>, px: &Px) {
         Vec2::new(px.mode_badge_w(), px.mode_badge_h()),
         egui::Sense::hover(),
     );
-    ui.painter().rect_filled(rect, CornerRadius::same((3.0 * px.scale) as u8), color);
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same((3.0 * px.scale) as u8), color);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -780,7 +813,12 @@ fn draw_body(
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = px.body_gap();
-        draw_diff_tabs(ui, state.context.as_ref().map(|ctx| ctx.diff.as_str()), pattern_tabs, px.scale);
+        draw_diff_tabs(
+            ui,
+            state.context.as_ref().map(|ctx| ctx.diff.as_str()),
+            pattern_tabs,
+            px.scale,
+        );
         draw_recommendations(ui, state, recommendations, px.scale);
     });
 }
@@ -795,18 +833,29 @@ fn draw_footer(
     Frame::new()
         .fill(Theme::SECTION_BG)
         .corner_radius(CornerRadius::same((8.0 * px.scale) as u8))
-        .inner_margin(Margin::symmetric(px.footer_margin_x() as i8, px.footer_margin_y() as i8))
+        .inner_margin(Margin::symmetric(
+            px.footer_margin_x() as i8,
+            px.footer_margin_y() as i8,
+        ))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().button_padding = egui::vec2(2.0 * px.scale, 1.0 * px.scale);
-                
-                let sync_btn = Button::new(RichText::new("sync").font(FontId::proportional(11.0 * px.scale)))
-                    .wrap();
-                if ui.add_sized(Vec2::new(42.0 * px.scale, 18.0 * px.scale), sync_btn).clicked() {
+
+                let sync_btn =
+                    Button::new(RichText::new("sync").font(FontId::proportional(11.0 * px.scale)))
+                        .wrap();
+                if ui
+                    .add_sized(Vec2::new(42.0 * px.scale, 18.0 * px.scale), sync_btn)
+                    .clicked()
+                {
                     sync_open.store(true, Ordering::Relaxed);
                     actions.command = Some(UiCommand::OpenSync);
                 }
-                ui.label(RichText::new("유사 구간 평균").color(Theme::TEXT_SECONDARY).font(FontId::proportional(11.0 * px.scale)));
+                ui.label(
+                    RichText::new("유사 구간 평균")
+                        .color(Theme::TEXT_SECONDARY)
+                        .font(FontId::proportional(11.0 * px.scale)),
+                );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
                         RichText::new(pattern_count_text(recommendations))
@@ -831,7 +880,11 @@ fn get_result_rate_comparison(
     let current_rate = ctx.rate as f64;
     let current_rate_str = format!("{:.2}%", current_rate);
     let current_mc = if ctx.is_max_combo {
-        if current_rate >= 100.0 { Some("P") } else { Some("M") }
+        if current_rate >= 100.0 {
+            Some("P")
+        } else {
+            Some("M")
+        }
     } else {
         None
     };
@@ -848,7 +901,11 @@ fn get_result_rate_comparison(
 
     let format_prev = |rate: f64, is_mc: bool| -> String {
         let mc_symbol = if is_mc {
-            if rate >= 100.0 { " P" } else { " M" }
+            if rate >= 100.0 {
+                " P"
+            } else {
+                " M"
+            }
         } else {
             ""
         };
@@ -1027,11 +1084,25 @@ mod tests {
             let _ = ctx.run(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let px = super::Px::new(scale);
-                    let settings_open = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let settings_open =
+                        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_detecting, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None, None);
+                    super::draw_header(
+                        ui,
+                        &state_detecting,
+                        "Test Song Name",
+                        &pattern_tabs,
+                        &settings_open,
+                        &mut actions,
+                        &px,
+                        false,
+                        false,
+                        true,
+                        None,
+                        None,
+                    );
                     h_detecting = ui.cursor().top() - start_y;
                 });
             });
@@ -1039,11 +1110,25 @@ mod tests {
             let _ = ctx.run(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let px = super::Px::new(scale);
-                    let settings_open = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let settings_open =
+                        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_no_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None, None);
+                    super::draw_header(
+                        ui,
+                        &state_no_badge,
+                        "Test Song Name",
+                        &pattern_tabs,
+                        &settings_open,
+                        &mut actions,
+                        &px,
+                        false,
+                        false,
+                        true,
+                        None,
+                        None,
+                    );
                     h_no_badge = ui.cursor().top() - start_y;
                 });
             });
@@ -1051,11 +1136,25 @@ mod tests {
             let _ = ctx.run(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let px = super::Px::new(scale);
-                    let settings_open = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let settings_open =
+                        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_normal_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None, None);
+                    super::draw_header(
+                        ui,
+                        &state_normal_badge,
+                        "Test Song Name",
+                        &pattern_tabs,
+                        &settings_open,
+                        &mut actions,
+                        &px,
+                        false,
+                        false,
+                        true,
+                        None,
+                        None,
+                    );
                     h_normal = ui.cursor().top() - start_y;
                 });
             });
@@ -1063,11 +1162,25 @@ mod tests {
             let _ = ctx.run(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let px = super::Px::new(scale);
-                    let settings_open = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let settings_open =
+                        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(ui, &state_perfect_badge, "Test Song Name", &pattern_tabs, &settings_open, &mut actions, &px, false, false, true, None, None);
+                    super::draw_header(
+                        ui,
+                        &state_perfect_badge,
+                        "Test Song Name",
+                        &pattern_tabs,
+                        &settings_open,
+                        &mut actions,
+                        &px,
+                        false,
+                        false,
+                        true,
+                        None,
+                        None,
+                    );
                     h_perfect = ui.cursor().top() - start_y;
                 });
             });
@@ -1077,9 +1190,21 @@ mod tests {
                 scale, h_detecting, h_no_badge, h_normal, h_perfect
             );
 
-            assert_eq!(h_detecting, h_no_badge, "Height mismatch at scale {:.2} between detecting and no_badge", scale);
-            assert_eq!(h_no_badge, h_normal, "Height mismatch at scale {:.2} between no_badge and normal", scale);
-            assert_eq!(h_normal, h_perfect, "Height mismatch at scale {:.2} between normal and perfect", scale);
+            assert_eq!(
+                h_detecting, h_no_badge,
+                "Height mismatch at scale {:.2} between detecting and no_badge",
+                scale
+            );
+            assert_eq!(
+                h_no_badge, h_normal,
+                "Height mismatch at scale {:.2} between no_badge and normal",
+                scale
+            );
+            assert_eq!(
+                h_normal, h_perfect,
+                "Height mismatch at scale {:.2} between normal and perfect",
+                scale
+            );
         }
     }
 }

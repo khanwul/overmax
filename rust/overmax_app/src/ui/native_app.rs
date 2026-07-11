@@ -1,11 +1,11 @@
 //! Single `eframe` app: overlay + deferred debug / settings / sync viewports.
 
 use eframe::egui::ViewportBuilder;
-use overmax_core::{GameSessionState, Changed};
+use overmax_core::{Changed, GameSessionState};
 use overmax_data::{
     build_candidates, load_base_settings, load_merged_settings, normalize_settings,
-    upsert_varchive_cache_record, DataCompatibility, PatternSheetMeta, RecommendResult, RecordDB,
-    RecordManager, Recommender, SyncCandidate, VArchiveDB,
+    upsert_varchive_cache_record, DataCompatibility, PatternSheetMeta, RecommendResult,
+    Recommender, RecordDB, RecordManager, SyncCandidate, VArchiveDB,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -15,22 +15,22 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use crate::system::cache_update;
-use crate::ui::debug_ui;
-use overmax_engine::detector::ocr_engine::OcrTelemetry;
-use overmax_engine::detector::detection_pipeline::DetectionOutput;
-use eframe::egui;
-use overmax_engine::detector::detection_worker;
 use crate::system::native_helpers::{
     account_path_for_steam, button_num, first_steam_from_settings,
 };
-use crate::ui::overlay_ui;
 use crate::system::single_instance::SingleInstanceGuard;
 use crate::system::steam_session;
+use crate::system::updater::{self, AppUpdateConfig};
+use crate::system::varchive_upload;
+use crate::ui::debug_ui;
+use crate::ui::overlay_ui;
 #[cfg(target_os = "windows")]
 use crate::ui::tray_icon::TrayIcon;
 use crate::ui::ui_command::UiCommand;
-use crate::system::updater::{self, AppUpdateConfig};
-use crate::system::varchive_upload;
+use eframe::egui;
+use overmax_engine::detector::detection_pipeline::DetectionOutput;
+use overmax_engine::detector::detection_worker;
+use overmax_engine::detector::ocr_engine::OcrTelemetry;
 
 fn load_icon() -> Option<eframe::egui::IconData> {
     let icon_bytes = include_bytes!("../../../../assets/overmax.ico");
@@ -73,7 +73,8 @@ pub fn run_native_app() -> eframe::Result<()> {
     .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
     let mut merged = load_merged_settings(root.as_path(), defaults);
     normalize_settings(&mut merged);
-    let app_settings: overmax_data::Settings = serde_json::from_value(merged.clone()).unwrap_or_default();
+    let app_settings: overmax_data::Settings =
+        serde_json::from_value(merged.clone()).unwrap_or_default();
     let upd_cfg = AppUpdateConfig::from_settings(&app_settings);
     let ok_notify = updater::notify_previous_update(root.as_path()).unwrap_or_else(|e| {
         eprintln!("[AppUpdater] notify: {e}");
@@ -332,7 +333,8 @@ impl NativeApp {
         let (game_found_tx, game_found_rx) = mpsc::channel();
         let (detection_tx, detection_rx) = mpsc::channel();
 
-        let app_settings: overmax_data::Settings = serde_json::from_value(merged.clone()).unwrap_or_default();
+        let app_settings: overmax_data::Settings =
+            serde_json::from_value(merged.clone()).unwrap_or_default();
         cache_update::refresh_startup_caches(root.as_ref(), &app_settings, &mut |msg| {
             let _ = log_tx.send(msg);
         });
@@ -508,7 +510,11 @@ impl NativeApp {
             ctx_holder: ctx_holder.clone(),
             session_initial_record: None,
             #[cfg(target_os = "windows")]
-            _tray: Some(TrayIcon::spawn(ui_cmd_tx, merged_settings.clone(), ctx_holder)),
+            _tray: Some(TrayIcon::spawn(
+                ui_cmd_tx,
+                merged_settings.clone(),
+                ctx_holder,
+            )),
             #[cfg(target_os = "windows")]
             win_cache: WindowsWindowCache::default(),
             last_painted_rect: None,
@@ -520,15 +526,24 @@ impl NativeApp {
 
     pub(crate) fn poll_delete_requests(&mut self, ctx: &egui::Context) {
         while let Ok(idx) = self.sync_channels.delete_req_rx.try_recv() {
-            let cand = self.sync_state.candidates.lock()
+            let cand = self
+                .sync_state
+                .candidates
+                .lock()
                 .ok()
                 .and_then(|g| g.get(idx).cloned());
             if let Some(c) = cand {
-                if self.record_manager.delete(c.song_id, &c.button_mode, &c.difficulty) {
+                if self
+                    .record_manager
+                    .delete(c.song_id, &c.button_mode, &c.difficulty)
+                {
                     debug_ui::push_log(
                         &self.debug_state.log_lines,
                         self.max_log_lines(),
-                        format!("[Sync] 로컬 기록 삭제 완료: {} ({} {})", c.song_name, c.button_mode, c.difficulty),
+                        format!(
+                            "[Sync] 로컬 기록 삭제 완료: {} ({} {})",
+                            c.song_name, c.button_mode, c.difficulty
+                        ),
                     );
                     self.spawn_scan(ctx.clone());
                     self.refresh_overlay_data();
@@ -536,7 +551,10 @@ impl NativeApp {
                     debug_ui::push_log(
                         &self.debug_state.log_lines,
                         self.max_log_lines(),
-                        format!("[Sync] 로컬 기록 삭제 실패: {} ({} {})", c.song_name, c.button_mode, c.difficulty),
+                        format!(
+                            "[Sync] 로컬 기록 삭제 실패: {} ({} {})",
+                            c.song_name, c.button_mode, c.difficulty
+                        ),
                     );
                 }
             }
@@ -575,7 +593,10 @@ impl NativeApp {
 
     pub(crate) fn poll_upload_requests(&mut self, ctx: &egui::Context) {
         while let Ok(idx) = self.sync_channels.upload_req_rx.try_recv() {
-            let cand = self.sync_state.candidates.lock()
+            let cand = self
+                .sync_state
+                .candidates
+                .lock()
                 .ok()
                 .and_then(|g| g.get(idx).cloned());
             if let Some(c) = cand {
@@ -628,7 +649,7 @@ impl NativeApp {
     pub(crate) fn refresh_steam_session(&mut self, context: &str) {
         let sid = steam_session::most_recent_steam_id();
         let (changed, before, after) = self.record_manager.set_steam_id(sid.as_deref());
-        
+
         if let Ok(mut steam_id_lock) = self.sync_state.steam_id.lock() {
             *steam_id_lock = sid.clone().unwrap_or_default();
         }
@@ -663,7 +684,10 @@ impl NativeApp {
     }
 
     fn spawn_scan(&self, ctx: egui::Context) {
-        let steam = self.sync_state.steam_id.lock()
+        let steam = self
+            .sync_state
+            .steam_id
+            .lock()
             .map(|g| g.clone())
             .unwrap_or_default();
         let tx = self.sync_channels.sync_tx.clone();
@@ -687,7 +711,10 @@ impl NativeApp {
 
     fn spawn_upload(&self, index: usize, candidate: SyncCandidate, ctx: egui::Context) {
         let settings = self.settings.get_merged();
-        let steam = self.sync_state.steam_id.lock()
+        let steam = self
+            .sync_state
+            .steam_id
+            .lock()
             .map(|g| g.clone())
             .unwrap_or_default();
         let account_path = account_path_for_steam(&settings, &steam);
@@ -749,7 +776,10 @@ impl NativeApp {
 
     pub(crate) fn is_varchive_account_configured(&self) -> bool {
         let settings = self.settings.get_merged();
-        let steam = self.sync_state.steam_id.lock()
+        let steam = self
+            .sync_state
+            .steam_id
+            .lock()
             .map(|g| g.clone())
             .unwrap_or_default();
         let account_path = account_path_for_steam(&settings, &steam);
@@ -768,15 +798,15 @@ impl NativeApp {
         let diff = &ctx.diff;
 
         let local = self.record_manager.get_local_record(song_id, mode, diff);
-        let varchive = self.record_manager.get_varchive_cache_record(song_id, mode, diff);
+        let varchive = self
+            .record_manager
+            .get_varchive_cache_record(song_id, mode, diff);
 
         match (local, varchive) {
             (Some((l_rate, l_mc)), Some((v_rate, v_mc))) => {
                 (l_rate - v_rate) >= 0.01 || (l_mc && !v_mc)
             }
-            (Some((l_rate, _)), None) => {
-                l_rate > 0.0
-            }
+            (Some((l_rate, _)), None) => l_rate > 0.0,
             _ => false,
         }
     }
@@ -793,7 +823,9 @@ impl NativeApp {
             return;
         };
         let local = self.record_manager.get_local_record(song_id, mode, diff);
-        let varchive = self.record_manager.get_varchive_cache_record(song_id, mode, diff);
+        let varchive = self
+            .record_manager
+            .get_varchive_cache_record(song_id, mode, diff);
 
         let (overmax_rate, overmax_mc) = local.unwrap_or((0.0, false));
         let (v_rate, v_mc) = match varchive {
@@ -841,9 +873,15 @@ impl NativeApp {
             debug_ui::push_log(
                 &self.debug_state.log_lines,
                 self.max_log_lines(),
-                format!("[VArchive] 자동 갱신 시작 (SteamID: {}, V-ID: {})", sid, v_id),
+                format!(
+                    "[VArchive] 자동 갱신 시작 (SteamID: {}, V-ID: {})",
+                    sid, v_id
+                ),
             );
-            let _ = self.sync_channels.fetch_req_tx.send((sid, v_id.to_string(), 0));
+            let _ = self
+                .sync_channels
+                .fetch_req_tx
+                .send((sid, v_id.to_string(), 0));
         }
     }
 
@@ -880,19 +918,29 @@ impl NativeApp {
         let cache_root = self.root.join("cache").join("varchive");
         let log_lines = self.debug_state.log_lines.clone();
         let max_lines = self.max_log_lines();
-        
+
         std::thread::spawn(move || {
-            let buttons = if button == 0 { vec![4, 5, 6, 8] } else { vec![button] };
+            let buttons = if button == 0 {
+                vec![4, 5, 6, 8]
+            } else {
+                vec![button]
+            };
             for b in buttons {
                 debug_ui::push_log(
                     &log_lines,
                     max_lines,
                     format!("[VArchiveClient] 기록 요청 중: {} ({}B)", v_id, b),
                 );
-                
+
                 match varchive_upload::fetch_records_blocking(&v_id, b) {
                     Ok(data) => {
-                        if let Err(e) = overmax_data::save_fetched_records_to_cache(&cache_root, &steam_id, &v_id, b, &data) {
+                        if let Err(e) = overmax_data::save_fetched_records_to_cache(
+                            &cache_root,
+                            &steam_id,
+                            &v_id,
+                            b,
+                            &data,
+                        ) {
                             debug_ui::push_log(
                                 &log_lines,
                                 max_lines,
@@ -907,7 +955,7 @@ impl NativeApp {
                             );
                             let _ = tx.send((v_id.clone(), b, Ok(1)));
                         }
-                    },
+                    }
                     Err(e) => {
                         let _ = tx.send((v_id.clone(), b, Err(e)));
                     }

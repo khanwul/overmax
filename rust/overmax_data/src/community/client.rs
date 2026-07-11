@@ -281,14 +281,17 @@ impl VArchiveDB {
         }
 
         // Try matching full title first
-        if let Some(song) = self.find_best_match_internal(title, mode, diff, level, category, note) {
+        if let Some(song) = self.find_best_match_internal(title, mode, diff, level, category, note)
+        {
             return Some(song);
         }
 
         // For DPC patterns or composite titles, try matching the part before '/'
         if title.contains('/') {
             if let Some(first_part) = title.split('/').next() {
-                if let Some(song) = self.find_best_match_internal(first_part, mode, diff, level, category, note) {
+                if let Some(song) =
+                    self.find_best_match_internal(first_part, mode, diff, level, category, note)
+                {
                     return Some(song);
                 }
             }
@@ -321,7 +324,9 @@ impl VArchiveDB {
             // 1. Title match
             if query_norm == song_name_norm {
                 score += match_score::EXACT_TITLE;
-            } else if query_norm.starts_with(&song_name_norm) || song_name_norm.starts_with(&query_norm) {
+            } else if query_norm.starts_with(&song_name_norm)
+                || song_name_norm.starts_with(&query_norm)
+            {
                 if query_norm.len() >= 5 && song_name_norm.len() >= 5 {
                     score += match_score::PREFIX_TITLE;
                 } else {
@@ -358,10 +363,12 @@ impl VArchiveDB {
             // 4. Composer in note check
             let note_lower = note.to_lowercase();
             let comp_lower = song.composer.to_lowercase();
-            if !note_lower.is_empty() && !comp_lower.is_empty()
-                && (note_lower.contains(&comp_lower) || comp_lower.contains(&note_lower)) {
-                    score += match_score::COMPOSER_IN_NOTE;
-                }
+            if !note_lower.is_empty()
+                && !comp_lower.is_empty()
+                && (note_lower.contains(&comp_lower) || comp_lower.contains(&note_lower))
+            {
+                score += match_score::COMPOSER_IN_NOTE;
+            }
 
             if score > best_score {
                 best_score = score;
@@ -435,7 +442,8 @@ fn deserialize_patterns<'de, D>(deserializer: D) -> Result<[[Option<PatternInfo>
 where
     D: serde::Deserializer<'de>,
 {
-    let raw_patterns: HashMap<String, HashMap<String, PatternInfo>> = Deserialize::deserialize(deserializer)?;
+    let raw_patterns: HashMap<String, HashMap<String, PatternInfo>> =
+        Deserialize::deserialize(deserializer)?;
     let mut patterns: [[Option<PatternInfo>; 4]; 4] = Default::default();
 
     for (mode_str, diffs) in raw_patterns {
@@ -453,7 +461,10 @@ where
     Ok(patterns)
 }
 
-fn serialize_patterns<S>(patterns: &[[Option<PatternInfo>; 4]; 4], serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_patterns<S>(
+    patterns: &[[Option<PatternInfo>; 4]; 4],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
@@ -561,22 +572,33 @@ mod tests {
     #[test]
     fn test_find_best_match_disambiguation() {
         let mut db = VArchiveDB::new();
-        
+
         // Setup mock songs for Alone duplicates
         let mut s1 = create_mock_song("2", "Alone", "Marshmello");
         s1.dlc_code = Arc::from("RV");
-        s1.patterns[Mode::B5 as usize][Difficulty::SC as usize] = Some(PatternInfo { level: Some(5), floor: None, floor_name: None, rating: None });
-        
+        s1.patterns[Mode::B5 as usize][Difficulty::SC as usize] = Some(PatternInfo {
+            level: Some(5),
+            floor: None,
+            floor_name: None,
+            rating: None,
+        });
+
         let mut s2 = create_mock_song("441", "Alone", "Nauts");
         s2.dlc_code = Arc::from("RV");
-        s2.patterns[Mode::B5 as usize][Difficulty::SC as usize] = Some(PatternInfo { level: Some(6), floor: None, floor_name: None, rating: None });
-        
+        s2.patterns[Mode::B5 as usize][Difficulty::SC as usize] = Some(PatternInfo {
+            level: Some(6),
+            floor: None,
+            floor_name: None,
+            rating: None,
+        });
+
         db.songs.push(s1);
         db.songs.push(s2);
         db.build_index();
 
         // 1. Marshmello (SC level 5, note has Marshmello)
-        let match1 = db.find_best_match("Alone", "5B", "SC", Some(5), "RESPECT/V", "Marshmello 작곡");
+        let match1 =
+            db.find_best_match("Alone", "5B", "SC", Some(5), "RESPECT/V", "Marshmello 작곡");
         assert!(match1.is_some());
         assert_eq!(match1.unwrap().title, "2");
 

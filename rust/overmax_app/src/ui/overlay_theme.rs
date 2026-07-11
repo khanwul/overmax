@@ -16,12 +16,12 @@ impl Theme {
     pub const TAB_DIM_BG: Color32 = Color32::from_rgb(20, 26, 40);
 
     // Text Colors
-    pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(240, 244, 255);      // #F0F4FF
-    pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(136, 145, 167);   // #8891A7
-    pub const TEXT_MUTED: Color32 = Color32::from_rgb(80, 88, 112);         // #505870
-    pub const TEXT_ACCENT: Color32 = Color32::from_rgb(255, 209, 102);      // #FFD166
-    pub const TEXT_BRIGHT: Color32 = Color32::from_rgb(232, 238, 255);      // #E8EEFF
-    pub const TEXT_HINT: Color32 = Color32::from_rgb(180, 203, 255);        // #B4CBFF
+    pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(240, 244, 255); // #F0F4FF
+    pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(136, 145, 167); // #8891A7
+    pub const TEXT_MUTED: Color32 = Color32::from_rgb(80, 88, 112); // #505870
+    pub const TEXT_ACCENT: Color32 = Color32::from_rgb(255, 209, 102); // #FFD166
+    pub const TEXT_BRIGHT: Color32 = Color32::from_rgb(232, 238, 255); // #E8EEFF
+    pub const TEXT_HINT: Color32 = Color32::from_rgb(180, 203, 255); // #B4CBFF
 
     // Status Colors
     pub const OK: Color32 = Color32::from_rgb(0, 212, 255);
@@ -40,7 +40,7 @@ impl Theme {
 
     pub const CARD: Color32 = Color32::from_rgb(22, 30, 48); // SECTION_BG
     pub const STROKE: Color32 = Color32::from_rgb(28, 36, 54); // TAB_INACTIVE_BG
-    
+
     // Unified Rounding (8-bit CornerRadius)
     pub const R_SM: u8 = 6;
     pub const R_MD: u8 = 10;
@@ -69,21 +69,36 @@ pub fn apply_secondary_window_style(ctx: &egui::Context) {
     ctx.style_mut(|s| {
         // Typography
         let mut families = std::collections::BTreeMap::new();
-        families.insert(egui::TextStyle::Body, egui::FontId::new(Theme::FONT_BODY, egui::FontFamily::Proportional));
-        families.insert(egui::TextStyle::Button, egui::FontId::new(Theme::FONT_BODY, egui::FontFamily::Proportional));
-        families.insert(egui::TextStyle::Heading, egui::FontId::new(Theme::FONT_HEADING, egui::FontFamily::Proportional));
-        families.insert(egui::TextStyle::Monospace, egui::FontId::new(Theme::FONT_BODY, egui::FontFamily::Monospace));
-        families.insert(egui::TextStyle::Small, egui::FontId::new(Theme::FONT_SMALL, egui::FontFamily::Proportional));
+        families.insert(
+            egui::TextStyle::Body,
+            egui::FontId::new(Theme::FONT_BODY, egui::FontFamily::Proportional),
+        );
+        families.insert(
+            egui::TextStyle::Button,
+            egui::FontId::new(Theme::FONT_BODY, egui::FontFamily::Proportional),
+        );
+        families.insert(
+            egui::TextStyle::Heading,
+            egui::FontId::new(Theme::FONT_HEADING, egui::FontFamily::Proportional),
+        );
+        families.insert(
+            egui::TextStyle::Monospace,
+            egui::FontId::new(Theme::FONT_BODY, egui::FontFamily::Monospace),
+        );
+        families.insert(
+            egui::TextStyle::Small,
+            egui::FontId::new(Theme::FONT_SMALL, egui::FontFamily::Proportional),
+        );
         s.text_styles = families;
 
         s.visuals.widgets.inactive.bg_fill = Theme::TAB_INACTIVE_BG;
         s.visuals.widgets.hovered.bg_fill = Theme::TAB_ACTIVE_BG;
         s.visuals.widgets.active.bg_fill = Theme::PRIMARY;
         s.visuals.selection.bg_fill = Theme::SECONDARY;
-        
+
         s.visuals.window_corner_radius = Theme::R_LG.into();
         s.visuals.window_shadow = egui::Shadow::NONE;
-        
+
         s.spacing.item_spacing = egui::vec2(12.0, 12.0);
         s.spacing.button_padding = egui::vec2(12.0, 8.0);
         s.spacing.scroll.bar_width = 6.0;
@@ -95,7 +110,7 @@ pub fn apply_secondary_window_style(ctx: &egui::Context) {
 pub fn render_pill_tabs(ui: &mut egui::Ui, _id_source: &str, labels: &[&str], active: &mut usize) {
     ui.horizontal(|ui| {
         ui.style_mut().spacing.item_spacing.x = 4.0;
-        
+
         egui::Frame::new()
             .fill(Theme::TAB_INACTIVE_BG)
             .corner_radius(egui::CornerRadius::same(Theme::R_SM))
@@ -103,21 +118,29 @@ pub fn render_pill_tabs(ui: &mut egui::Ui, _id_source: &str, labels: &[&str], ac
             .show(ui, |ui| {
                 for (idx, label) in labels.iter().enumerate() {
                     let is_active = *active == idx;
-                    let text_color = if is_active { Theme::TEXT_ACCENT } else { Theme::TEXT_SECONDARY };
-                    let bg_fill = if is_active { Theme::TAB_ACTIVE_BG } else { egui::Color32::TRANSPARENT };
-                    
+                    let text_color = if is_active {
+                        Theme::TEXT_ACCENT
+                    } else {
+                        Theme::TEXT_SECONDARY
+                    };
+                    let bg_fill = if is_active {
+                        Theme::TAB_ACTIVE_BG
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+
                     let response = ui.add(
                         egui::Button::new(
                             egui::RichText::new(*label)
                                 .size(Theme::FONT_BODY)
                                 .color(text_color)
-                                .strong()
+                                .strong(),
                         )
                         .fill(bg_fill)
                         .corner_radius(egui::CornerRadius::same(Theme::R_SM))
-                        .stroke(egui::Stroke::NONE)
+                        .stroke(egui::Stroke::NONE),
                     );
-                    
+
                     if response.clicked() {
                         *active = idx;
                     }

@@ -1,15 +1,19 @@
+use overmax_app::bin_utils::load_frame;
+use overmax_core::SceneType;
+use overmax_engine::capture::frame::CapturedFrame;
+use overmax_engine::capture::frame_utils::crop_roi;
+use overmax_engine::detector::ocr_engine::OcrDetector;
+use overmax_engine::detector::roi::RoiManager;
 use std::fs;
 use std::path::Path;
-use overmax_engine::capture::frame::CapturedFrame;
-use overmax_engine::detector::roi::RoiManager;
-use overmax_engine::detector::ocr_engine::OcrDetector;
-use overmax_engine::capture::frame_utils::crop_roi;
-use overmax_core::SceneType;
-use overmax_app::bin_utils::load_frame;
 
-
-
-fn crop_roi_direct(frame: &CapturedFrame, x: usize, y: usize, width: usize, height: usize) -> overmax_engine::capture::frame_utils::ImageRegion {
+fn crop_roi_direct(
+    frame: &CapturedFrame,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) -> overmax_engine::capture::frame_utils::ImageRegion {
     let mut bgra = vec![0u8; width * height * 4];
     for dy in 0..height {
         for dx in 0..width {
@@ -43,8 +47,11 @@ fn threshold_luminance(bgra: &[u8], width: usize, height: usize) -> Vec<u8> {
         },
         255,
     );
-    
-    println!("      [Luminance Debug] max_y={}, calculated threshold={}", max_y, threshold);
+
+    println!(
+        "      [Luminance Debug] max_y={}, calculated threshold={}",
+        max_y, threshold
+    );
     binary
 }
 
@@ -65,7 +72,7 @@ fn segment_characters(binary: &[u8], width: usize, height: usize) -> Vec<(usize,
     let mut segments = Vec::new();
     let mut in_char = false;
     let mut start_x = 0;
-    
+
     // 켜진 픽셀 임계값 (노이즈 방지를 위해 1열당 최소 1픽셀 초과하여 켜져 있어야 문자로 인정)
     let col_threshold = 1;
 
@@ -84,14 +91,14 @@ fn segment_characters(binary: &[u8], width: usize, height: usize) -> Vec<(usize,
             in_char = false;
         }
     }
-    
+
     if in_char {
         let end_x = width;
         if end_x - start_x >= 2 {
             segments.push((start_x, end_x));
         }
     }
-    
+
     segments
 }
 
@@ -106,24 +113,24 @@ fn save_segment_as_png(
     let width = x2 - x1;
     let height = full_height;
     let mut bgra = vec![0u8; width * height * 4];
-    
+
     for y in 0..height {
         for x in 0..width {
             let src_x = x1 + x;
             let val = binary[y * full_width + src_x];
             let idx = (y * width + x) * 4;
-            bgra[idx] = val;     // B
+            bgra[idx] = val; // B
             bgra[idx + 1] = val; // G
             bgra[idx + 2] = val; // R
             bgra[idx + 3] = 255; // A
         }
     }
-    
+
     let mut rgba = bgra;
     for chunk in rgba.chunks_exact_mut(4) {
         chunk.swap(0, 2); // BGR -> RGB
     }
-    
+
     let buf = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width as u32, height as u32, rgba)
         .ok_or_else(|| "failed to create image buffer".to_string())?;
     let dynamic_img = image::DynamicImage::ImageRgba8(buf);
@@ -134,7 +141,7 @@ fn save_segment_as_png(
 fn main() {
     let output_dir = Path::new("scratch/screenshots/digits");
     fs::create_dir_all(output_dir).ok();
-    
+
     // 테스트용 1080p 스크린샷 탐색
     let mut paths = Vec::new();
     let screenshots_dir = Path::new("scratch/screenshots");
@@ -143,30 +150,39 @@ fn main() {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 let fname = path.file_name().unwrap().to_string_lossy().to_string();
-                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-                if (ext == "png" || ext == "jpg" || ext == "jpeg") 
-                    && !fname.contains("_mcbadge_") 
+                let ext = path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if (ext == "png" || ext == "jpg" || ext == "jpeg")
+                    && !fname.contains("_mcbadge_")
                     && !fname.starts_with("cropped_")
-                    && !fname.starts_with("debug_") 
+                    && !fname.starts_with("debug_")
                 {
                     paths.push(path);
                 }
             }
         }
     }
-    
+
     paths.sort();
-    println!("Found {} candidate screenshots for template collection.", paths.len());
-    
+    println!(
+        "Found {} candidate screenshots for template collection.",
+        paths.len()
+    );
+
     let ocr = OcrDetector::new();
     let mut rois = RoiManager::new(1920, 1080);
-    
+
     let mut total_saved = 0;
-    
+
     for path in paths {
         let filename = path.file_name().unwrap().to_string_lossy().to_string();
-        let Some(frame) = load_frame(&path) else { continue; };
-        
+        let Some(frame) = load_frame(&path) else {
+            continue;
+        };
+
         // 씬 판별
         let logo_roi = match rois.get_roi("logo") {
             Some(roi) => roi,
@@ -177,7 +193,7 @@ fn main() {
             None => continue,
         };
         let (mut scene, logo_raw, _) = ocr.detect_logo(&logo_img);
-        
+
         // 씬 Unknown 이면 텍스트 키워드 및 파일명으로 유추
         if scene == SceneType::Unknown {
             let logo_norm = logo_raw.to_lowercase();
@@ -188,14 +204,20 @@ fn main() {
                 let temp_badge = crop_roi_direct(&frame, 212, 830, 316, 39);
                 if let Some(txt) = ocr.recognize_text_all_passes(&temp_badge) {
                     let norm = txt.to_lowercase();
-                    if norm.contains("tunes") || norm.contains("mode") || norm.contains("button") 
-                        || norm.contains("4b") || norm.contains("5b") || norm.contains("6b") || norm.contains("8b") {
+                    if norm.contains("tunes")
+                        || norm.contains("mode")
+                        || norm.contains("button")
+                        || norm.contains("4b")
+                        || norm.contains("5b")
+                        || norm.contains("6b")
+                        || norm.contains("8b")
+                    {
                         scene = SceneType::ResultOpen3;
                     }
                 }
             }
         }
-        
+
         if scene == SceneType::Unknown {
             let fname = filename.to_lowercase();
             if fname.contains("freestyle") {
@@ -210,54 +232,69 @@ fn main() {
                 scene = SceneType::ResultFreestyle;
             }
         }
-        
+
         if scene == SceneType::Unknown {
             continue;
         }
-        
+
         rois.set_scene(scene);
-        
-        let Some(rate_roi) = rois.get_roi("rate") else { continue; };
-        let Some(rate_img) = crop_roi(&frame, rate_roi) else { continue; };
-        
+
+        let Some(rate_roi) = rois.get_roi("rate") else {
+            continue;
+        };
+        let Some(rate_img) = crop_roi(&frame, rate_roi) else {
+            continue;
+        };
+
         // 1. Windows OCR로 현재 Rate 생 텍스트 추출 (템플릿 매칭 우회하여 수집 방해 원천 방지)
         let mut raw_txt = String::new();
         if let Some(txt) = ocr.recognize_text_color(&rate_img) {
             raw_txt = txt;
         }
-        
+
         let mut rate_val = None;
-        let clean: String = raw_txt.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+        let clean: String = raw_txt
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
         if let Ok(v) = clean.parse::<f32>() {
             if (0.0..=100.0).contains(&v) {
                 rate_val = Some(v);
             }
         }
-        
+
         let Some(val) = rate_val else {
-            println!("      [DEBUG collect] detect_rate failed. raw_txt='{}', filename='{}', scene={:?}", raw_txt, filename, scene);
+            println!(
+                "      [DEBUG collect] detect_rate failed. raw_txt='{}', filename='{}', scene={:?}",
+                raw_txt, filename, scene
+            );
             continue;
         };
-        
+
         // 원본 OCR 텍스트 정규화 (예: "99.42%" -> '9', '9', '.', '4', '2', '%')
         let expected_chars: Vec<char> = raw_txt
             .chars()
             .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '%')
             .collect();
-            
+
         if expected_chars.is_empty() {
             continue;
         }
-        
+
         // 2. 고휘도 이진화 전처리 실행
-        let binary = threshold_luminance(&rate_img.bgra, rate_img.width as usize, rate_img.height as usize);
-        
+        let binary = threshold_luminance(
+            &rate_img.bgra,
+            rate_img.width as usize,
+            rate_img.height as usize,
+        );
+
         // 3. 수직 프로젝션 분할 실행
-        let segments = segment_characters(&binary, rate_img.width as usize, rate_img.height as usize);
-        
+        let segments =
+            segment_characters(&binary, rate_img.width as usize, rate_img.height as usize);
+
         println!("File: {} (Scene: {:?}) -> OCR Rate: {:.2}%, Segment count: {}, Expected Char count: {}",
                  filename, scene, val, segments.len(), expected_chars.len());
-                 
+
         // 분할된 글자 개수와 원래 OCR의 글자 개수가 완전히 일치할 때만 안전하게 라벨링 저장
         if segments.len() == expected_chars.len() {
             for (idx, &(x1, x2)) in segments.iter().enumerate() {
@@ -267,16 +304,34 @@ fn main() {
                     '%' => "percent".to_string(),
                     _ => ch.to_string(),
                 };
-                
-                let out_name = format!("{}_char_{}_{}_{}.png", label, filename.strip_suffix(".jpg").unwrap_or(&filename), idx, x1);
+
+                let out_name = format!(
+                    "{}_char_{}_{}_{}.png",
+                    label,
+                    filename.strip_suffix(".jpg").unwrap_or(&filename),
+                    idx,
+                    x1
+                );
                 let out_path = output_dir.join(out_name);
-                
-                if save_segment_as_png(&binary, rate_img.width as usize, rate_img.height as usize, x1, x2, &out_path).is_ok() {
+
+                if save_segment_as_png(
+                    &binary,
+                    rate_img.width as usize,
+                    rate_img.height as usize,
+                    x1,
+                    x2,
+                    &out_path,
+                )
+                .is_ok()
+                {
                     total_saved += 1;
                 }
             }
         }
     }
-    
-    println!("Successfully collected {} standard character masks in scratch/screenshots/digits/", total_saved);
+
+    println!(
+        "Successfully collected {} standard character masks in scratch/screenshots/digits/",
+        total_saved
+    );
 }

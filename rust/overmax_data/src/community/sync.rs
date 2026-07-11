@@ -1,7 +1,7 @@
 //! Local record vs V-Archive cached API records — mirrors `data/sync_manager.py`.
 
-use crate::store::record_db::RecordDB;
 use crate::community::client::VArchiveDB;
+use crate::store::record_db::RecordDB;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
@@ -155,7 +155,11 @@ pub fn build_candidates(
         }
 
         let (song_name, composer, dlc) = match varchive_db.search_by_id(song_id) {
-            Some(s) => (s.name.clone(), s.composer.to_string(), s.dlc_code.to_string()),
+            Some(s) => (
+                s.name.clone(),
+                s.composer.to_string(),
+                s.dlc_code.to_string(),
+            ),
             None => (song_id.to_string(), String::new(), String::new()),
         };
 
@@ -299,7 +303,8 @@ pub fn delete_varchive_cache_record(
                         Some(Value::Number(n)) => n.as_i64() == Some(song_id as i64),
                         _ => false,
                     };
-                    let pat_match = rec_obj.get("pattern").and_then(|v| v.as_str()) == Some(difficulty);
+                    let pat_match =
+                        rec_obj.get("pattern").and_then(|v| v.as_str()) == Some(difficulty);
                     !(title_match && pat_match)
                 } else {
                     true

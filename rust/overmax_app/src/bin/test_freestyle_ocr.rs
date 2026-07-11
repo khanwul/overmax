@@ -1,13 +1,17 @@
+use overmax_app::bin_utils::load_frame;
+use overmax_core::SceneType;
+use overmax_engine::capture::frame::CapturedFrame;
+use overmax_engine::capture::frame_utils::crop_roi;
+use overmax_engine::detector::ocr_engine::OcrDetector;
+use overmax_engine::detector::roi::RoiManager;
 use std::fs;
 use std::path::{Path, PathBuf};
-use overmax_engine::capture::frame::CapturedFrame;
-use overmax_engine::detector::roi::RoiManager;
-use overmax_engine::detector::ocr_engine::OcrDetector;
-use overmax_engine::capture::frame_utils::crop_roi;
-use overmax_core::SceneType;
-use overmax_app::bin_utils::load_frame;
 
-fn save_crop(frame: &CapturedFrame, roi: overmax_engine::detector::roi::RoiRect, dst_path: &Path) -> bool {
+fn save_crop(
+    frame: &CapturedFrame,
+    roi: overmax_engine::detector::roi::RoiRect,
+    dst_path: &Path,
+) -> bool {
     let Some(cropped) = crop_roi(frame, roi) else {
         return false;
     };
@@ -19,7 +23,7 @@ fn save_crop(frame: &CapturedFrame, roi: overmax_engine::detector::roi::RoiRect,
     if let Some(buf) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
         cropped.width as u32,
         cropped.height as u32,
-        rgba
+        rgba,
     ) {
         let dynamic_img = image::DynamicImage::ImageRgba8(buf);
         if dynamic_img.save(dst_path).is_ok() {
@@ -44,7 +48,9 @@ fn save_binary_crop(pixels: &[u8], width: u32, height: u32, dst_path: &Path) -> 
             return dynamic_img.save(dst_path).is_ok();
         }
     } else if len == expected_luma {
-        if let Some(buf) = image::ImageBuffer::<image::Luma<u8>, _>::from_raw(width, height, pixels.to_vec()) {
+        if let Some(buf) =
+            image::ImageBuffer::<image::Luma<u8>, _>::from_raw(width, height, pixels.to_vec())
+        {
             let dynamic_img = image::DynamicImage::ImageLuma8(buf);
             return dynamic_img.save(dst_path).is_ok();
         }
@@ -63,7 +69,11 @@ fn main() {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_file() {
-                    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                    let ext = path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
                     if ext == "png" || ext == "jpg" || ext == "jpeg" {
                         paths.push(path);
                     }
@@ -73,7 +83,10 @@ fn main() {
     }
     paths.sort_by_key(|p| p.file_name().unwrap().to_os_string());
 
-    println!("Found {} screenshots in scratch/freestyle_results", paths.len());
+    println!(
+        "Found {} screenshots in scratch/freestyle_results",
+        paths.len()
+    );
     if paths.is_empty() {
         println!("No screenshots found. Exiting.");
         return;
@@ -114,27 +127,62 @@ fn main() {
             if let Some(rate_img) = crop_roi(&frame, rate_roi) {
                 // 기존 파이프라인의 detect_rate 실행
                 let (parsed_val, matched_str, telemetry_opt) = ocr.detect_rate(&rate_img);
-                
+
                 img_report.push_str("  [Rate ROI]\n");
-                img_report.push_str(&format!("    - ROI Coord: x1={}, y1={}, x2={}, y2={}\n", rate_roi.x1, rate_roi.y1, rate_roi.x2, rate_roi.y2));
-                img_report.push_str(&format!("    - Raw Crop Saved: {} ({})\n", rate_raw_path.display(), if saved_raw { "OK" } else { "Failed" }));
-                img_report.push_str(&format!("    - detect_rate() result: parsed={:?}, matched_str='{}'\n", parsed_val, matched_str));
+                img_report.push_str(&format!(
+                    "    - ROI Coord: x1={}, y1={}, x2={}, y2={}\n",
+                    rate_roi.x1, rate_roi.y1, rate_roi.x2, rate_roi.y2
+                ));
+                img_report.push_str(&format!(
+                    "    - Raw Crop Saved: {} ({})\n",
+                    rate_raw_path.display(),
+                    if saved_raw { "OK" } else { "Failed" }
+                ));
+                img_report.push_str(&format!(
+                    "    - detect_rate() result: parsed={:?}, matched_str='{}'\n",
+                    parsed_val, matched_str
+                ));
 
                 if let Some(tel) = telemetry_opt {
-                    img_report.push_str(&format!("    - Telemetry: threshold={}, bg_mean={}, use_invert={}\n", tel.threshold, tel.bg_mean, tel.use_invert));
+                    img_report.push_str(&format!(
+                        "    - Telemetry: threshold={}, bg_mean={}, use_invert={}\n",
+                        tel.threshold, tel.bg_mean, tel.use_invert
+                    ));
                     let rate_bin_path = crops_dir.join(format!("{}_rate_bin.png", file_stem));
-                    let saved_bin = save_binary_crop(&tel.image_pixels, tel.image_width as u32, tel.image_height as u32, &rate_bin_path);
-                    img_report.push_str(&format!("    - Binary Crop Saved: {} ({})\n", rate_bin_path.display(), if saved_bin { "OK" } else { "Failed" }));
+                    let saved_bin = save_binary_crop(
+                        &tel.image_pixels,
+                        tel.image_width as u32,
+                        tel.image_height as u32,
+                        &rate_bin_path,
+                    );
+                    img_report.push_str(&format!(
+                        "    - Binary Crop Saved: {} ({})\n",
+                        rate_bin_path.display(),
+                        if saved_bin { "OK" } else { "Failed" }
+                    ));
                 }
 
                 // 추가 개별 테스트 (Windows OCR fallback 분석)
                 let color_ocr = ocr.recognize_text_color(&rate_img).unwrap_or_default();
-                let binarized_ocr = ocr.recognize_text_binarized(&rate_img, false).unwrap_or_default();
-                let binarized_invert_ocr = ocr.recognize_text_binarized(&rate_img, true).unwrap_or_default();
+                let binarized_ocr = ocr
+                    .recognize_text_binarized(&rate_img, false)
+                    .unwrap_or_default();
+                let binarized_invert_ocr = ocr
+                    .recognize_text_binarized(&rate_img, true)
+                    .unwrap_or_default();
 
-                img_report.push_str(&format!("    - Windows OCR Color: '{}'\n", color_ocr.trim()));
-                img_report.push_str(&format!("    - Windows OCR Binarized (Normal): '{}'\n", binarized_ocr.trim()));
-                img_report.push_str(&format!("    - Windows OCR Binarized (Inverted): '{}'\n", binarized_invert_ocr.trim()));
+                img_report.push_str(&format!(
+                    "    - Windows OCR Color: '{}'\n",
+                    color_ocr.trim()
+                ));
+                img_report.push_str(&format!(
+                    "    - Windows OCR Binarized (Normal): '{}'\n",
+                    binarized_ocr.trim()
+                ));
+                img_report.push_str(&format!(
+                    "    - Windows OCR Binarized (Inverted): '{}'\n",
+                    binarized_invert_ocr.trim()
+                ));
             } else {
                 img_report.push_str("  [Rate ROI] Crop failed.\n");
             }
@@ -152,9 +200,19 @@ fn main() {
                 let parsed_val = ocr.detect_score(&score_img);
 
                 img_report.push_str("  [Score ROI]\n");
-                img_report.push_str(&format!("    - ROI Coord: x1={}, y1={}, x2={}, y2={}\n", score_roi.x1, score_roi.y1, score_roi.x2, score_roi.y2));
-                img_report.push_str(&format!("    - Raw Crop Saved: {} ({})\n", score_raw_path.display(), if saved_raw { "OK" } else { "Failed" }));
-                img_report.push_str(&format!("    - detect_score() result: parsed={:?}\n", parsed_val));
+                img_report.push_str(&format!(
+                    "    - ROI Coord: x1={}, y1={}, x2={}, y2={}\n",
+                    score_roi.x1, score_roi.y1, score_roi.x2, score_roi.y2
+                ));
+                img_report.push_str(&format!(
+                    "    - Raw Crop Saved: {} ({})\n",
+                    score_raw_path.display(),
+                    if saved_raw { "OK" } else { "Failed" }
+                ));
+                img_report.push_str(&format!(
+                    "    - detect_score() result: parsed={:?}\n",
+                    parsed_val
+                ));
 
                 // score 이진화 테스트를 모사하여 binary 파일 저장
                 // ocr_engine.rs 의 match_digits_template 이진화 로직 적용
@@ -170,22 +228,47 @@ fn main() {
                             180
                         }
                     },
-                    255
+                    255,
                 );
 
                 let score_bin_path = crops_dir.join(format!("{}_score_bin.png", file_stem));
-                let saved_bin = save_binary_crop(&binary, score_img.width as u32, score_img.height as u32, &score_bin_path);
-                img_report.push_str(&format!("    - Binarization simulation: threshold={}, max_y={}\n", threshold, max_y));
-                img_report.push_str(&format!("    - Binary Crop Saved: {} ({})\n", score_bin_path.display(), if saved_bin { "OK" } else { "Failed" }));
+                let saved_bin = save_binary_crop(
+                    &binary,
+                    score_img.width as u32,
+                    score_img.height as u32,
+                    &score_bin_path,
+                );
+                img_report.push_str(&format!(
+                    "    - Binarization simulation: threshold={}, max_y={}\n",
+                    threshold, max_y
+                ));
+                img_report.push_str(&format!(
+                    "    - Binary Crop Saved: {} ({})\n",
+                    score_bin_path.display(),
+                    if saved_bin { "OK" } else { "Failed" }
+                ));
 
                 // 추가 개별 테스트
                 let color_ocr = ocr.recognize_text_color(&score_img).unwrap_or_default();
-                let binarized_ocr = ocr.recognize_text_binarized(&score_img, false).unwrap_or_default();
-                let binarized_invert_ocr = ocr.recognize_text_binarized(&score_img, true).unwrap_or_default();
+                let binarized_ocr = ocr
+                    .recognize_text_binarized(&score_img, false)
+                    .unwrap_or_default();
+                let binarized_invert_ocr = ocr
+                    .recognize_text_binarized(&score_img, true)
+                    .unwrap_or_default();
 
-                img_report.push_str(&format!("    - Windows OCR Color: '{}'\n", color_ocr.trim()));
-                img_report.push_str(&format!("    - Windows OCR Binarized (Normal): '{}'\n", binarized_ocr.trim()));
-                img_report.push_str(&format!("    - Windows OCR Binarized (Inverted): '{}'\n", binarized_invert_ocr.trim()));
+                img_report.push_str(&format!(
+                    "    - Windows OCR Color: '{}'\n",
+                    color_ocr.trim()
+                ));
+                img_report.push_str(&format!(
+                    "    - Windows OCR Binarized (Normal): '{}'\n",
+                    binarized_ocr.trim()
+                ));
+                img_report.push_str(&format!(
+                    "    - Windows OCR Binarized (Inverted): '{}'\n",
+                    binarized_invert_ocr.trim()
+                ));
             } else {
                 img_report.push_str("  [Score ROI] Crop failed.\n");
             }
@@ -195,7 +278,10 @@ fn main() {
             if let Some(mode_img) = crop_roi(&frame, mode_roi) {
                 let detected_mode = ocr.detect_freestyle_mode(&mode_img);
                 img_report.push_str("  [Mode Digit ROI]\n");
-                img_report.push_str(&format!("    - detect_freestyle_mode() result: {:?}\n", detected_mode));
+                img_report.push_str(&format!(
+                    "    - detect_freestyle_mode() result: {:?}\n",
+                    detected_mode
+                ));
             }
         }
 
@@ -204,7 +290,10 @@ fn main() {
             if let Some(diff_img) = crop_roi(&frame, diff_roi) {
                 let detected_diff = ocr.detect_result_difficulty(&diff_img);
                 img_report.push_str("  [Diff Panel ROI]\n");
-                img_report.push_str(&format!("    - detect_result_difficulty() result: {:?}\n", detected_diff));
+                img_report.push_str(&format!(
+                    "    - detect_result_difficulty() result: {:?}\n",
+                    detected_diff
+                ));
             }
         }
 

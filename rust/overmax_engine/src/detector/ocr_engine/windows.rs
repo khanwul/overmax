@@ -18,7 +18,12 @@ impl OcrEngine {
         self.engine.is_some()
     }
 
-    pub(super) fn recognize_logo(&self, image: &ImageRegion, force_invert: bool, binarize: bool) -> Result<String, String> {
+    pub(super) fn recognize_logo(
+        &self,
+        image: &ImageRegion,
+        force_invert: bool,
+        binarize: bool,
+    ) -> Result<String, String> {
         let Some(engine) = &self.engine else {
             return Ok(String::new());
         };

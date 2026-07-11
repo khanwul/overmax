@@ -45,17 +45,18 @@ fn game_state_matches_python_reference_fixture() {
 }
 
 fn build_state(input: FixtureState) -> GameSessionState {
-    let context = if let (Some(song_id), Some(mode), Some(diff)) = (input.song_id, input.mode, input.diff) {
-        Some(PlayContext {
-            song_id,
-            mode,
-            diff,
-            rate: input.rate.unwrap_or(0.0),
-            is_max_combo: input.is_max_combo,
-        })
-    } else {
-        None
-    };
+    let context =
+        if let (Some(song_id), Some(mode), Some(diff)) = (input.song_id, input.mode, input.diff) {
+            Some(PlayContext {
+                song_id,
+                mode,
+                diff,
+                rate: input.rate.unwrap_or(0.0),
+                is_max_combo: input.is_max_combo,
+            })
+        } else {
+            None
+        };
 
     GameSessionState {
         scene: overmax_core::SceneType::Unknown,

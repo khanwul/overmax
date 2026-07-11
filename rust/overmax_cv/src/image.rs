@@ -11,7 +11,9 @@ pub fn validate_image(
         return Err(CvError::new(format!("{name} received invalid image shape")));
     }
     if data.len() != width * height * channels {
-        return Err(CvError::new(format!("{name} received unexpected byte length")));
+        return Err(CvError::new(format!(
+            "{name} received unexpected byte length"
+        )));
     }
     Ok(())
 }
@@ -237,12 +239,7 @@ fn median_without_dc(values: &[f32]) -> f32 {
     sorted[sorted.len() / 2]
 }
 
-pub fn detect_rect_edges(
-    data: &[u8],
-    width: usize,
-    height: usize,
-    margin: usize,
-) -> f32 {
+pub fn detect_rect_edges(data: &[u8], width: usize, height: usize, margin: usize) -> f32 {
     if width <= margin * 2 + 4 || height <= margin * 2 + 4 {
         return 0.0;
     }
@@ -281,7 +278,8 @@ pub fn detect_rect_edges(
 
         // 하단 경계선
         let idx_bottom = y_bottom * width + x;
-        let diff_bottom = (f32::from(gray[idx_bottom + width]) - f32::from(gray[idx_bottom - width])).abs();
+        let diff_bottom =
+            (f32::from(gray[idx_bottom + width]) - f32::from(gray[idx_bottom - width])).abs();
         sum_diff += diff_bottom;
         count += 1;
     }
@@ -300,13 +298,7 @@ pub struct CvTemplate<'a> {
     pub mask: &'a [u8],
 }
 
-pub fn resize_binary_nearest(
-    src: &[u8],
-    sw: usize,
-    sh: usize,
-    dw: usize,
-    dh: usize,
-) -> Vec<u8> {
+pub fn resize_binary_nearest(src: &[u8], sw: usize, sh: usize, dw: usize, dh: usize) -> Vec<u8> {
     let mut dst = vec![0u8; dw * dh];
     if sw == 0 || sh == 0 || dw == 0 || dh == 0 {
         return dst;
@@ -338,7 +330,7 @@ pub fn segment_characters(binary: &[u8], width: usize, height: usize) -> Vec<(us
     let mut segments = Vec::new();
     let mut in_char = false;
     let mut start_x = 0;
-    
+
     // 켜진 픽셀 임계값 (노이즈 방지를 위해 1열당 높이에 비례한 최소 픽셀 활성화하여 배경 잔여 노이즈 컷)
     let col_threshold = ((height / 10).max(1)) as u32;
 
@@ -355,14 +347,14 @@ pub fn segment_characters(binary: &[u8], width: usize, height: usize) -> Vec<(us
             in_char = false;
         }
     }
-    
+
     if in_char {
         let end_x = width;
         if end_x - start_x >= 2 {
             segments.push((start_x, end_x));
         }
     }
-    
+
     segments
 }
 
@@ -410,9 +402,9 @@ pub fn match_character(
         }
 
         let match_rate = (total_pixels - diff_pixels) as f32 / total_pixels as f32;
-        
+
         let score = match_rate;
-        
+
         if score > best_score {
             best_score = score;
             best_char = Some(t.char_val);
@@ -429,9 +421,9 @@ pub fn match_character(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LumaMethod {
-    Weighted,  // BT.601: ((77 * r + 150 * g + 29 * b) >> 8)
-    Average,   // (R + G + B) / 3
-    MaxRGB,    // max(R, G, B)
+    Weighted, // BT.601: ((77 * r + 150 * g + 29 * b) >> 8)
+    Average,  // (R + G + B) / 3
+    MaxRGB,   // max(R, G, B)
 }
 
 pub fn binarize_by_luminance(
@@ -452,23 +444,33 @@ pub fn binarize_by_luminance(
             let b = bgra[idx];
             let g = bgra[idx + 1];
             let r = bgra[idx + 2];
-            
+
             let luma = match method {
-                LumaMethod::Weighted => ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8,
+                LumaMethod::Weighted => {
+                    ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8
+                }
                 LumaMethod::Average => ((r as u32 + g as u32 + b as u32) / 3) as u8,
                 LumaMethod::MaxRGB => r.max(g).max(b),
             };
-            
+
             luma_vals[y * width + x] = luma;
-            if luma > max_y { max_y = luma; }
-            if luma < min_y { min_y = luma; }
+            if luma > max_y {
+                max_y = luma;
+            }
+            if luma < min_y {
+                min_y = luma;
+            }
         }
     }
 
     let threshold = threshold_calc(max_y, min_y);
     let mut binary = vec![0u8; total];
     for i in 0..total {
-        binary[i] = if luma_vals[i] >= threshold { foreground_value } else { 0 };
+        binary[i] = if luma_vals[i] >= threshold {
+            foreground_value
+        } else {
+            0
+        };
     }
     (binary, threshold, max_y)
 }
@@ -523,9 +525,11 @@ pub fn adaptive_threshold_bradley_roth(
             let b = bgra[idx];
             let g = bgra[idx + 1];
             let r = bgra[idx + 2];
-            
+
             let luma = match method {
-                LumaMethod::Weighted => ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8,
+                LumaMethod::Weighted => {
+                    ((77 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8) as u8
+                }
                 LumaMethod::Average => ((r as u32 + g as u32 + b as u32) / 3) as u8,
                 LumaMethod::MaxRGB => r.max(g).max(b),
             };

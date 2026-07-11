@@ -25,7 +25,9 @@ impl NativeApp {
                     if self.session_initial_record.is_none() {
                         let song_id = ctx_val.song_id as i32;
                         let rate_map = self.record_manager.get_rate_map(&[song_id]);
-                        if let Some(&(r, mc)) = rate_map.get(&(song_id, ctx_val.mode.clone(), ctx_val.diff.clone())) {
+                        if let Some(&(r, mc)) =
+                            rate_map.get(&(song_id, ctx_val.mode.clone(), ctx_val.diff.clone()))
+                        {
                             self.session_initial_record = Some((r, mc));
                         } else {
                             self.session_initial_record = Some((0.0, false));
@@ -45,11 +47,7 @@ impl NativeApp {
             if output.state.is_valid() {
                 if let Some(ctx_val) = &output.state.context {
                     if ctx_val.rate >= overmax_engine::detector::play_state::MIN_VALID_RATE {
-                        let key = (
-                            ctx_val.song_id,
-                            ctx_val.mode.clone(),
-                            ctx_val.diff.clone(),
-                        );
+                        let key = (ctx_val.song_id, ctx_val.mode.clone(), ctx_val.diff.clone());
                         if !self.recorded_states.contains(&key) {
                             debug_ui::push_log(
                                 &self.debug_state.log_lines,
@@ -103,14 +101,8 @@ impl NativeApp {
         let Some(ctx) = &state.context else {
             return RecommendResult::empty();
         };
-        self.recommender.recommend(
-            ctx.song_id as i32,
-            &ctx.mode,
-            &ctx.diff,
-            0.0,
-            6,
-            true,
-        )
+        self.recommender
+            .recommend(ctx.song_id as i32, &ctx.mode, &ctx.diff, 0.0, 6, true)
     }
 
     fn pattern_tabs_for_state(&self, state: &GameSessionState) -> Vec<PatternTabInfo> {

@@ -137,7 +137,7 @@ impl RecordDB {
             if only_if_improved {
                 let mut existing_rate: Option<f64> = None;
                 let mut existing_max_combo: Option<i32> = None;
-                
+
                 let query_res = conn.query_row(
                     "SELECT rate, is_max_combo FROM records 
                      WHERE steam_id = ?1 AND song_id = ?2 AND button_mode = ?3 AND difficulty = ?4",
@@ -155,14 +155,16 @@ impl RecordDB {
                 }
 
                 let should_update_rate = existing_rate.is_none_or(|ext_r| rate > ext_r);
-                let should_update_combo = existing_max_combo.is_none_or(|ext_mc| is_max_combo_int > ext_mc);
+                let should_update_combo =
+                    existing_max_combo.is_none_or(|ext_mc| is_max_combo_int > ext_mc);
 
                 if !should_update_rate && !should_update_combo {
                     return false;
                 }
 
                 final_rate = existing_rate.map_or(rate, |ext_r| rate.max(ext_r));
-                final_max_combo = existing_max_combo.map_or(is_max_combo_int, |ext_mc| is_max_combo_int.max(ext_mc));
+                final_max_combo = existing_max_combo
+                    .map_or(is_max_combo_int, |ext_mc| is_max_combo_int.max(ext_mc));
             }
 
             let result = conn.execute(

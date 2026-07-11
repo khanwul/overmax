@@ -40,7 +40,8 @@ impl AppUpdateConfig {
         c.owner = u.owner.unwrap_or_else(|| "orphera".to_string());
         c.repo = u.repo.unwrap_or_else(|| "overmax".to_string());
         c.asset_name = u.asset_name.unwrap_or_else(|| "overmax.zip".to_string());
-        c.latest_release_url = u.latest_release_url
+        c.latest_release_url = u
+            .latest_release_url
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
         if let Ok(ov) = std::env::var("OVERMAX_UPDATE_LATEST_URL") {
@@ -60,6 +61,11 @@ pub fn app_version() -> &'static str {
 /// Main executable to restart after update (default `overmax.exe` on Windows, `overmax` on Linux).
 pub fn main_exe_name() -> String {
     std::env::var("OVERMAX_MAIN_EXE").unwrap_or_else(|_| {
-        if cfg!(target_os = "windows") { "overmax.exe" } else { "overmax" }.into()
+        if cfg!(target_os = "windows") {
+            "overmax.exe"
+        } else {
+            "overmax"
+        }
+        .into()
     })
 }

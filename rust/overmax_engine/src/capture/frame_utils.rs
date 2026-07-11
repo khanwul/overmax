@@ -1,5 +1,5 @@
-use crate::detector::roi::RoiRect;
 use crate::capture::frame::CapturedFrame;
+use crate::detector::roi::RoiRect;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImageRegion {
@@ -69,7 +69,7 @@ pub fn compute_pixel_checksum(frame: &CapturedFrame, roi: RoiRect) -> Option<u64
         for x in (x1..x2).step_by(step) {
             let idx = ((y * frame.width + x) * 4) as usize;
             if idx + 2 < frame.bgra.len() {
-                sum += frame.bgra[idx] as u64;     // B
+                sum += frame.bgra[idx] as u64; // B
                 sum += frame.bgra[idx + 1] as u64; // G
                 sum += frame.bgra[idx + 2] as u64; // R
             }
@@ -107,8 +107,8 @@ fn mean_abs_diff(current: &[u8], previous: &[u8]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{crop_roi, region_mean_bgr, thumbnail_changed};
-    use crate::detector::roi::RoiRect;
     use crate::capture::frame::CapturedFrame;
+    use crate::detector::roi::RoiRect;
 
     #[test]
     fn crops_bgra_region() {

@@ -130,7 +130,10 @@ pub fn upload_score_blocking(
 }
 
 pub fn fetch_records_blocking(v_id: &str, button: i32) -> Result<serde_json::Value, String> {
-    let url = format!("https://v-archive.net/api/v2/archive/{}/button/{}", v_id, button);
+    let url = format!(
+        "https://v-archive.net/api/v2/archive/{}/button/{}",
+        v_id, button
+    );
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -141,6 +144,9 @@ pub fn fetch_records_blocking(v_id: &str, button: i32) -> Result<serde_json::Val
     if resp.status().is_success() {
         resp.json().map_err(|e| e.to_string())
     } else {
-        Err(format!("HTTP request failed with status: {}", resp.status()))
+        Err(format!(
+            "HTTP request failed with status: {}",
+            resp.status()
+        ))
     }
 }

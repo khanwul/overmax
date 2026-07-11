@@ -118,9 +118,7 @@ pub fn normalize_settings(settings: &mut Value) {
         }
     }
 
-    for (section, key) in [
-        ("window_tracker", "poll_interval_sec"),
-    ] {
+    for (section, key) in [("window_tracker", "poll_interval_sec")] {
         if let Some(Value::Object(sec)) = map.get_mut(section) {
             if let Some(val) = sec.get(key).and_then(|v| v.as_f64()) {
                 sec.insert(key.to_string(), json!(val.max(0.05)));
@@ -356,8 +354,12 @@ pub struct WindowTrackerSettings {
     pub poll_interval_sec: f64,
 }
 
-fn default_window_title() -> String { "DJMAX RESPECT V".to_string() }
-fn default_poll_interval() -> f64 { 0.5 }
+fn default_window_title() -> String {
+    "DJMAX RESPECT V".to_string()
+}
+fn default_poll_interval() -> f64 {
+    0.5
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ScreenCaptureSettings {
@@ -367,8 +369,12 @@ pub struct ScreenCaptureSettings {
     pub idle_sleep_sec: f64,
 }
 
-fn default_logo_cooldown() -> f64 { 1.0 }
-fn default_idle_sleep() -> f64 { 0.5 }
+fn default_logo_cooldown() -> f64 {
+    1.0
+}
+fn default_idle_sleep() -> f64 {
+    0.5
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DebugWindowSettings {
@@ -378,8 +384,12 @@ pub struct DebugWindowSettings {
     pub title: String,
 }
 
-fn default_max_lines() -> usize { 500 }
-fn default_debug_title() -> String { "Overmax Debug Log".to_string() }
+fn default_max_lines() -> usize {
+    500
+}
+fn default_debug_title() -> String {
+    "Overmax Debug Log".to_string()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct OverlayPosition {
@@ -389,7 +399,9 @@ pub struct OverlayPosition {
     pub y: Option<f64>,
 }
 
-fn default_snap() -> String { "manual".to_string() }
+fn default_snap() -> String {
+    "manual".to_string()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct OverlaySettings {
@@ -403,8 +415,12 @@ pub struct OverlaySettings {
     pub position: OverlayPosition,
 }
 
-fn default_base_opacity() -> f64 { 0.8 }
-fn default_scale() -> f64 { 1.0 }
+fn default_base_opacity() -> f64 {
+    0.8
+}
+fn default_scale() -> f64 {
+    1.0
+}
 
 impl Default for OverlayPosition {
     fn default() -> Self {
@@ -428,9 +444,15 @@ pub struct JacketMatcherSettings {
     pub margin_threshold: f64,
 }
 
-fn default_db_path() -> String { "cache/image_index.db".to_string() }
-fn default_similarity() -> f64 { 0.75 }
-fn default_margin() -> f64 { 3.0 }
+fn default_db_path() -> String {
+    "cache/image_index.db".to_string()
+}
+fn default_similarity() -> f64 {
+    0.75
+}
+fn default_margin() -> f64 {
+    3.0
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AppUpdateSettings {
@@ -442,7 +464,9 @@ pub struct AppUpdateSettings {
     pub latest_release_url: Option<String>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct VArchiveUserMap {
@@ -472,12 +496,24 @@ pub struct VArchiveSettings {
     pub user_map: std::collections::HashMap<String, VArchiveUserMap>,
 }
 
-fn default_songs_url() -> String { "https://v-archive.net/db/v2/songs.json".to_string() }
-fn default_songs_cache() -> String { "cache/songs.json".to_string() }
-fn default_dlcs_url() -> String { "https://v-archive.net/db/dlcs.json".to_string() }
-fn default_dlcs_cache() -> String { "cache/dlcs.json".to_string() }
-fn default_ttl() -> u64 { 86400 }
-fn default_timeout() -> u64 { 10 }
+fn default_songs_url() -> String {
+    "https://v-archive.net/db/v2/songs.json".to_string()
+}
+fn default_songs_cache() -> String {
+    "cache/songs.json".to_string()
+}
+fn default_dlcs_url() -> String {
+    "https://v-archive.net/db/dlcs.json".to_string()
+}
+fn default_dlcs_cache() -> String {
+    "cache/dlcs.json".to_string()
+}
+fn default_ttl() -> u64 {
+    86400
+}
+fn default_timeout() -> u64 {
+    10
+}
 
 impl Default for WindowTrackerSettings {
     fn default() -> Self {

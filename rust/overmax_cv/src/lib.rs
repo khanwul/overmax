@@ -69,7 +69,13 @@ pub fn preprocess_ocr_bgra(
     binarize: bool,
 ) -> Result<Vec<u8>, error::CvError> {
     image::validate_image(data, width, height, 4, "preprocess_ocr_bgra")?;
-    Ok(ocr::preprocess_logo_bgra(data, width, height, force_invert, binarize))
+    Ok(ocr::preprocess_logo_bgra(
+        data,
+        width,
+        height,
+        force_invert,
+        binarize,
+    ))
 }
 
 pub fn preprocess_ocr_bgra_with_telemetry(
@@ -80,7 +86,13 @@ pub fn preprocess_ocr_bgra_with_telemetry(
     binarize: bool,
 ) -> Result<OcrPreprocessResult, error::CvError> {
     image::validate_image(data, width, height, 4, "preprocess_ocr_bgra_with_telemetry")?;
-    Ok(ocr::preprocess_bgra_with_telemetry(data, width, height, force_invert, binarize))
+    Ok(ocr::preprocess_bgra_with_telemetry(
+        data,
+        width,
+        height,
+        force_invert,
+        binarize,
+    ))
 }
 
 pub fn preprocess_ocr_color_bgra(
@@ -97,8 +109,16 @@ pub fn preprocess_ocr_color_bgra_with_telemetry(
     width: usize,
     height: usize,
 ) -> Result<OcrPreprocessResult, error::CvError> {
-    image::validate_image(data, width, height, 4, "preprocess_ocr_color_bgra_with_telemetry")?;
-    Ok(ocr::preprocess_color_bgra_with_telemetry(data, width, height))
+    image::validate_image(
+        data,
+        width,
+        height,
+        4,
+        "preprocess_ocr_color_bgra_with_telemetry",
+    )?;
+    Ok(ocr::preprocess_color_bgra_with_telemetry(
+        data, width, height,
+    ))
 }
 
 pub fn detect_rect_edges(
@@ -147,4 +167,6 @@ pub fn binarize_by_global_contrast(
     ))
 }
 
-pub use image::{LumaMethod, binarize_by_luminance, diff_panel_threshold, adaptive_threshold_bradley_roth};
+pub use image::{
+    adaptive_threshold_bradley_roth, binarize_by_luminance, diff_panel_threshold, LumaMethod,
+};

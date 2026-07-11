@@ -3,9 +3,9 @@
 use eframe::egui::{self, Color32, RichText, Vec2, ViewportBuilder, ViewportCommand};
 use std::sync::atomic::Ordering;
 
+use crate::system::native_helpers;
 use crate::ui::debug_ui;
 use crate::ui::native_app::NativeApp;
-use crate::system::native_helpers;
 use crate::ui::overlay_theme::Theme;
 use crate::ui::overlay_ui;
 use crate::ui::settings_ui;
@@ -27,8 +27,8 @@ fn get_local_mouse_pos(ctx: &egui::Context, hwnd_opt: Option<isize>) -> Option<e
             return None;
         };
         use windows_sys::Win32::Foundation::HWND;
-        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
         use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
         let hwnd = hwnd_val as HWND;
         let mut pos = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
@@ -67,13 +67,25 @@ fn draw_custom_cursor(painter: &egui::Painter, p: egui::Pos2) {
 
     // 1. 대비 효과용 검은색 십자 (두껍게)
     let stroke_black = Stroke::new(2.5, Color32::BLACK);
-    painter.line_segment([p - egui::vec2(len, 0.0), p + egui::vec2(len, 0.0)], stroke_black);
-    painter.line_segment([p - egui::vec2(0.0, len), p + egui::vec2(0.0, len)], stroke_black);
+    painter.line_segment(
+        [p - egui::vec2(len, 0.0), p + egui::vec2(len, 0.0)],
+        stroke_black,
+    );
+    painter.line_segment(
+        [p - egui::vec2(0.0, len), p + egui::vec2(0.0, len)],
+        stroke_black,
+    );
 
     // 2. 가시성 확보용 흰색 십자 (얇게)
     let stroke_white = Stroke::new(1.0, Color32::WHITE);
-    painter.line_segment([p - egui::vec2(len, 0.0), p + egui::vec2(len, 0.0)], stroke_white);
-    painter.line_segment([p - egui::vec2(0.0, len), p + egui::vec2(0.0, len)], stroke_white);
+    painter.line_segment(
+        [p - egui::vec2(len, 0.0), p + egui::vec2(len, 0.0)],
+        stroke_white,
+    );
+    painter.line_segment(
+        [p - egui::vec2(0.0, len), p + egui::vec2(0.0, len)],
+        stroke_white,
+    );
 }
 
 impl NativeApp {
@@ -163,40 +175,52 @@ impl NativeApp {
                 });
                 let mut local_draft = overmax_core::lock_clone_or_default(&draft);
                 egui::TopBottomPanel::bottom("sett_actions")
-                    .frame(egui::Frame::new().fill(Theme::PANEL_BG).inner_margin(egui::Margin::symmetric(24, 16)))
+                    .frame(
+                        egui::Frame::new()
+                            .fill(Theme::PANEL_BG)
+                            .inner_margin(egui::Margin::symmetric(24, 16)),
+                    )
                     .show(ctx, |ui| {
                         ui.horizontal(|ui| {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let close_btn = egui::Button::new(RichText::new("닫기").size(Theme::FONT_BODY))
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let close_btn = egui::Button::new(
+                                        RichText::new("닫기").size(Theme::FONT_BODY),
+                                    )
                                     .min_size(egui::vec2(80.0, Theme::CONTROL_HEIGHT))
                                     .fill(Theme::SECONDARY)
                                     .corner_radius(egui::CornerRadius::same(Theme::R_SM));
-                                if ui.add(close_btn).clicked() {
-                                    open.store(false, Ordering::Relaxed);
-                                    ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
-                                }
-                                
-                                ui.add_space(8.0);
-                                
-                                let save_btn = egui::Button::new(RichText::new("저장").size(Theme::FONT_BODY).strong())
+                                    if ui.add(close_btn).clicked() {
+                                        open.store(false, Ordering::Relaxed);
+                                        ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
+                                    }
+
+                                    ui.add_space(8.0);
+
+                                    let save_btn = egui::Button::new(
+                                        RichText::new("저장").size(Theme::FONT_BODY).strong(),
+                                    )
                                     .min_size(egui::vec2(100.0, Theme::CONTROL_HEIGHT))
                                     .fill(Theme::PRIMARY)
                                     .corner_radius(egui::CornerRadius::same(Theme::R_SM));
-                                if ui.add(save_btn).clicked() {
-                                    let base_g = overmax_core::lock_clone_or_default(&base);
-                                    let mut merged_g = overmax_core::lock_clone_or_default(&merged);
-                                    let _ = settings_ui::save_settings_to_disk(
-                                        root.as_ref(),
-                                        defaults.as_ref(),
-                                        &base_g,
-                                        &mut local_draft,
-                                        &mut merged_g,
-                                    );
-                                    if let Ok(mut m) = merged.lock() {
-                                        *m = merged_g;
+                                    if ui.add(save_btn).clicked() {
+                                        let base_g = overmax_core::lock_clone_or_default(&base);
+                                        let mut merged_g =
+                                            overmax_core::lock_clone_or_default(&merged);
+                                        let _ = settings_ui::save_settings_to_disk(
+                                            root.as_ref(),
+                                            defaults.as_ref(),
+                                            &base_g,
+                                            &mut local_draft,
+                                            &mut merged_g,
+                                        );
+                                        if let Ok(mut m) = merged.lock() {
+                                            *m = merged_g;
+                                        }
                                     }
-                                }
-                            });
+                                },
+                            );
                         });
                     });
                 settings_ui::render_settings_deferred(
@@ -265,7 +289,6 @@ impl NativeApp {
     }
 }
 
-
 struct OverlaySettingsSnapshot {
     scale: f32,
     opacity: f32,
@@ -273,7 +296,9 @@ struct OverlaySettingsSnapshot {
     snap_position: String,
 }
 
-fn read_overlay_settings(settings: &std::sync::Arc<std::sync::Mutex<serde_json::Value>>) -> OverlaySettingsSnapshot {
+fn read_overlay_settings(
+    settings: &std::sync::Arc<std::sync::Mutex<serde_json::Value>>,
+) -> OverlaySettingsSnapshot {
     let Ok(m) = settings.lock() else {
         return OverlaySettingsSnapshot {
             scale: 1.0,
@@ -284,10 +309,24 @@ fn read_overlay_settings(settings: &std::sync::Arc<std::sync::Mutex<serde_json::
     };
     let overlay = m.get("overlay");
     OverlaySettingsSnapshot {
-        scale: overlay.and_then(|o| o.get("scale")).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
-        opacity: overlay.and_then(|o| o.get("base_opacity")).and_then(|v| v.as_f64()).unwrap_or(0.8) as f32,
-        is_lite: overlay.and_then(|o| o.get("lite_mode")).and_then(|v| v.as_bool()).unwrap_or(false),
-        snap_position: overlay.and_then(|o| o.get("position")).and_then(|p| p.get("snap")).and_then(|v| v.as_str()).unwrap_or("manual").to_string(),
+        scale: overlay
+            .and_then(|o| o.get("scale"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0) as f32,
+        opacity: overlay
+            .and_then(|o| o.get("base_opacity"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.8) as f32,
+        is_lite: overlay
+            .and_then(|o| o.get("lite_mode"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        snap_position: overlay
+            .and_then(|o| o.get("position"))
+            .and_then(|p| p.get("snap"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("manual")
+            .to_string(),
     }
 }
 
@@ -361,23 +400,38 @@ impl eframe::App for NativeApp {
         self.show_settings_viewport(ctx);
         self.show_sync_viewport(ctx);
 
-        self.render_overlay_panel(ctx, scale, height, &snap_position, overlay_on, &mut force_topmost);
+        self.render_overlay_panel(
+            ctx,
+            scale,
+            height,
+            &snap_position,
+            overlay_on,
+            &mut force_topmost,
+        );
 
         // Windows 전용: 전체 창 투명도 및 최상위 권한 적용
         #[cfg(target_os = "windows")]
         {
             if overlay_on {
                 let found = self.apply_window_opacity(opacity, force_topmost);
-                if !found
-                    && !self.win_cache.logged_opacity_fail {
-                        debug_ui::push_log(&self.debug_state.log_lines, self.max_log_lines(), format!("[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})", opacity));
-                        self.win_cache.logged_opacity_fail = true;
-                    }
+                if !found && !self.win_cache.logged_opacity_fail {
+                    debug_ui::push_log(
+                        &self.debug_state.log_lines,
+                        self.max_log_lines(),
+                        format!(
+                            "[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})",
+                            opacity
+                        ),
+                    );
+                    self.win_cache.logged_opacity_fail = true;
+                }
             } else {
                 // 숨겨질 때: 투명도를 즉시 0.0(완전 투명)으로 덮어씌워 윈도우 잔상 소멸을 보장
                 if let Some(hwnd) = self.find_overlay_window() {
                     unsafe {
-                        windows_sys::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes(hwnd as _, 0, 0, 0x00000002);
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes(
+                            hwnd as _, 0, 0, 0x00000002,
+                        );
                     }
                 }
                 self.win_cache.cached_hwnd = None;
@@ -444,13 +498,12 @@ impl NativeApp {
         let prev_scale_val = *self.state_tracker.prev_scale;
         let prev_lite = *self.state_tracker.prev_is_lite;
 
-        let scale_changed = (scale - prev_scale_val).abs() > 0.001 && self.state_tracker.prev_scale.update(scale);
+        let scale_changed =
+            (scale - prev_scale_val).abs() > 0.001 && self.state_tracker.prev_scale.update(scale);
         let is_lite = height == overlay_ui::LITE_BASE_HEIGHT;
         let is_lite_changed = self.state_tracker.prev_is_lite.update(is_lite);
 
-        if overlay_on_changed 
-            || (overlay_on && (scale_changed || is_lite_changed))
-        {
+        if overlay_on_changed || (overlay_on && (scale_changed || is_lite_changed)) {
             debug_ui::push_log(
                 &self.debug_state.log_lines,
                 1000,
@@ -485,7 +538,11 @@ impl NativeApp {
 
         let is_over = local_mouse.is_some() || self.is_dragging;
         let passthrough = !overlay_on || !is_over;
-        if self.state_tracker.prev_passthrough.update(Some(passthrough)) {
+        if self
+            .state_tracker
+            .prev_passthrough
+            .update(Some(passthrough))
+        {
             ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(passthrough));
         }
 
@@ -499,11 +556,15 @@ impl NativeApp {
         #[cfg(target_os = "windows")]
         {
             if overlay_on && snap_position != "manual" {
-                if let (Some(overlay_hwnd), Some(game_hwnd)) = (self.win_cache.cached_hwnd, self.win_cache.cached_game_hwnd) {
+                if let (Some(overlay_hwnd), Some(game_hwnd)) =
+                    (self.win_cache.cached_hwnd, self.win_cache.cached_game_hwnd)
+                {
                     unsafe {
                         let fg = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
                         if fg == overlay_hwnd as windows_sys::Win32::Foundation::HWND {
-                            windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(game_hwnd as windows_sys::Win32::Foundation::HWND);
+                            windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(
+                                game_hwnd as windows_sys::Win32::Foundation::HWND,
+                            );
                         }
                     }
                 }
@@ -524,25 +585,30 @@ impl NativeApp {
                         use windows_sys::Win32::UI::WindowsAndMessaging::*;
                         let hwnd = hwnd_val as HWND;
                         let ppi = ctx.pixels_per_point();
-                        let overlay_w_px = (((overlay_ui::BASE_WIDTH * scale).ceil() + 2.0) * ppi) as i32;
+                        let overlay_w_px =
+                            (((overlay_ui::BASE_WIDTH * scale).ceil() + 2.0) * ppi) as i32;
                         let overlay_h_px = (((height * scale).ceil() + 2.0) * ppi) as i32;
                         let margin_px = (16.0 * ppi) as i32;
-                        
+
                         let (px, py) = match snap_position {
-                            "top_left" => {
-                                (g_rect.left + margin_px, g_rect.top + margin_px)
-                            }
-                            "top_right" => {
-                                (g_rect.left + g_rect.width - overlay_w_px - margin_px, g_rect.top + margin_px)
-                            }
-                            "bottom_left" => {
-                                (g_rect.left + margin_px, g_rect.top + g_rect.height - overlay_h_px - margin_px)
-                            }
-                            _ => { // bottom_right
-                                (g_rect.left + g_rect.width - overlay_w_px - margin_px, g_rect.top + g_rect.height - overlay_h_px - margin_px)
+                            "top_left" => (g_rect.left + margin_px, g_rect.top + margin_px),
+                            "top_right" => (
+                                g_rect.left + g_rect.width - overlay_w_px - margin_px,
+                                g_rect.top + margin_px,
+                            ),
+                            "bottom_left" => (
+                                g_rect.left + margin_px,
+                                g_rect.top + g_rect.height - overlay_h_px - margin_px,
+                            ),
+                            _ => {
+                                // bottom_right
+                                (
+                                    g_rect.left + g_rect.width - overlay_w_px - margin_px,
+                                    g_rect.top + g_rect.height - overlay_h_px - margin_px,
+                                )
                             }
                         };
-                        
+
                         // 이전 설정 좌표 및 크기와 다른 경우에만 SetWindowPos 호출
                         let current_geom = (px, py, overlay_w_px, overlay_h_px);
                         let geom_changed = self.win_cache.prev_snap_geometry != Some(current_geom);
@@ -636,25 +702,38 @@ impl NativeApp {
                     let max_log_lines = self.max_log_lines();
                     let settings = self.settings.get_merged();
                     window_tracker::restore_foreground_by_title(game_window_title(&settings));
-                    
+
                     if let Some(rect) = ctx.input(|i| i.viewport().outer_rect) {
                         if let Ok(mut draft) = self.settings.draft.lock() {
                             if let Ok(mut merged_lock) = self.settings.merged.lock() {
-                                let mut overlay = merged_lock.get("overlay").cloned().unwrap_or_else(|| serde_json::json!({}));
+                                let mut overlay = merged_lock
+                                    .get("overlay")
+                                    .cloned()
+                                    .unwrap_or_else(|| serde_json::json!({}));
                                 if let Some(overlay_obj) = overlay.as_object_mut() {
                                     let mut position_map = overlay_obj
                                         .get("position")
                                         .and_then(|v| v.as_object())
                                         .cloned()
                                         .unwrap_or_default();
-                                    position_map.insert("x".to_string(), serde_json::json!(rect.min.x as i32));
-                                    position_map.insert("y".to_string(), serde_json::json!(rect.min.y as i32));
-                                    overlay_obj.insert("position".to_string(), serde_json::Value::Object(position_map));
+                                    position_map.insert(
+                                        "x".to_string(),
+                                        serde_json::json!(rect.min.x as i32),
+                                    );
+                                    position_map.insert(
+                                        "y".to_string(),
+                                        serde_json::json!(rect.min.y as i32),
+                                    );
+                                    overlay_obj.insert(
+                                        "position".to_string(),
+                                        serde_json::Value::Object(position_map),
+                                    );
                                 }
                                 merged_lock["overlay"] = overlay.clone();
                                 draft["overlay"] = overlay;
 
-                                let base_g = overmax_core::lock_clone_or_default(&self.settings.base);
+                                let base_g =
+                                    overmax_core::lock_clone_or_default(&self.settings.base);
                                 let _ = settings_ui::save_settings_to_disk(
                                     self.root.as_ref(),
                                     self.settings.defaults.as_ref(),
@@ -665,7 +744,10 @@ impl NativeApp {
                                 debug_ui::push_log(
                                     &self.debug_state.log_lines,
                                     max_log_lines,
-                                    format!("[Overlay] 오버레이 위치 저장 (user.json): ({},{})", rect.min.x as i32, rect.min.y as i32),
+                                    format!(
+                                        "[Overlay] 오버레이 위치 저장 (user.json): ({},{})",
+                                        rect.min.x as i32, rect.min.y as i32
+                                    ),
                                 );
                             }
                         }
@@ -685,7 +767,6 @@ impl NativeApp {
                 self.last_painted_rect = actions.response_rect;
             });
     }
-
 }
 
 #[cfg(target_os = "windows")]
@@ -694,8 +775,8 @@ use windows_sys::Win32::Foundation::HWND;
 #[cfg(target_os = "windows")]
 impl NativeApp {
     fn determine_active_state(&self, game_hwnd: Option<HWND>) -> bool {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
         use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
         let Some(g_hwnd) = game_hwnd else {
             return false;
@@ -718,17 +799,23 @@ impl NativeApp {
         }
     }
 
-    fn check_cached_window_opacity(&self, hwnd: HWND, target_opacity: f32, is_active: bool) -> bool {
+    fn check_cached_window_opacity(
+        &self,
+        hwnd: HWND,
+        target_opacity: f32,
+        is_active: bool,
+    ) -> bool {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         if unsafe { IsWindow(hwnd) } == 0 {
             return false;
         }
         let style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
-        let mut target_mask = WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32;
+        let mut target_mask =
+            WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32;
         if is_active {
             target_mask |= WS_EX_TOPMOST as i32;
         }
-        
+
         let topmost_ok = if is_active {
             (style & WS_EX_TOPMOST as i32) != 0
         } else {
@@ -751,9 +838,9 @@ impl NativeApp {
     }
 
     fn find_overlay_window(&self) -> Option<HWND> {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
         use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-        
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
         struct EnumData {
             target_pid: u32,
             found_hwnd: Option<HWND>,
@@ -776,12 +863,12 @@ impl NativeApp {
                         let len = GetWindowTextW(hwnd, text.as_mut_ptr(), 512);
                         let title = String::from_utf16_lossy(&text[..len as usize]);
                         let visible = IsWindowVisible(hwnd) != 0;
-                        
+
                         if title == "Overmax" {
                             data.found_hwnd = Some(hwnd);
                             return 0; // 즉시 중단
                         }
-                        
+
                         if data.found_hwnd.is_none() && (title.contains("Overmax") || visible) {
                             data.found_hwnd = Some(hwnd);
                         }
@@ -817,13 +904,21 @@ impl NativeApp {
             }
             let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
             let topmost_flag = if is_active { WS_EX_TOPMOST as i32 } else { 0 };
-            let target_style = (style & !(WS_EX_TOPMOST as i32)) | topmost_flag | WS_EX_LAYERED as i32 | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32;
+            let target_style = (style & !(WS_EX_TOPMOST as i32))
+                | topmost_flag
+                | WS_EX_LAYERED as i32
+                | WS_EX_NOACTIVATE as i32
+                | WS_EX_TOOLWINDOW as i32;
             if style != target_style {
                 SetWindowLongW(hwnd, GWL_EXSTYLE, target_style);
             }
             SetWindowPos(
                 hwnd,
-                if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST },
+                if is_active {
+                    HWND_TOPMOST
+                } else {
+                    HWND_NOTOPMOST
+                },
                 0,
                 0,
                 0,
@@ -848,7 +943,15 @@ impl NativeApp {
                     let current_owner = GetWindowLongPtrW(hwnd, GWL_HWNDPARENT) as HWND;
                     if current_owner != g_hwnd {
                         SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, g_hwnd as isize);
-                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                        SetWindowPos(
+                            hwnd,
+                            HWND_TOPMOST,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                        );
                     }
                 }
             }
@@ -858,14 +961,26 @@ impl NativeApp {
 
             if force_topmost {
                 unsafe {
-                    SetWindowPos(hwnd, if is_active { HWND_TOPMOST } else { HWND_NOTOPMOST }, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                    SetWindowPos(
+                        hwnd,
+                        if is_active {
+                            HWND_TOPMOST
+                        } else {
+                            HWND_NOTOPMOST
+                        },
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
                 }
             }
 
             if self.check_cached_window_opacity(hwnd, opacity, is_active) {
                 return true;
             }
-            
+
             // 캐시된 핸들은 유효하나 스타일이나 투명도가 풀린 경우: 바로 재적용 시도
             if Self::apply_style_and_opacity(hwnd, is_active, opacity) {
                 self.win_cache.last_applied_opacity = Some(opacity);
@@ -878,7 +993,10 @@ impl NativeApp {
             debug_ui::push_log(
                 &self.debug_state.log_lines,
                 self.max_log_lines(),
-                format!("[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})", opacity, hwnd),
+                format!(
+                    "[Win32] 투명도 업데이트 시도: {:.2} (HWND: {:?})",
+                    opacity, hwnd
+                ),
             );
 
             let game_hwnd = self.game_hwnd_cached();

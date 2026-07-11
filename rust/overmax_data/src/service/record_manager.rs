@@ -1,9 +1,9 @@
-use crate::store::record_db::RecordDB;
 use crate::community::sync::load_varchive_record_cache;
+use crate::store::record_db::RecordDB;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 type RecordKey = (i32, String, String);
 type RecordValue = (f64, bool);
@@ -64,7 +64,14 @@ impl RecordManager {
         is_max_combo: bool,
         only_if_improved: bool,
     ) -> bool {
-        if self.record_db.upsert(song_id, button_mode, difficulty, rate, is_max_combo, only_if_improved) {
+        if self.record_db.upsert(
+            song_id,
+            button_mode,
+            difficulty,
+            rate,
+            is_max_combo,
+            only_if_improved,
+        ) {
             if let Ok(mut guard) = self.dirty_record_keys.lock() {
                 guard.insert((song_id, button_mode.to_string(), difficulty.to_string()));
             }
@@ -114,13 +121,25 @@ impl RecordManager {
         (full_dirty, keys)
     }
 
-    pub fn get_local_record(&self, song_id: i32, button_mode: &str, difficulty: &str) -> Option<(f64, bool)> {
+    pub fn get_local_record(
+        &self,
+        song_id: i32,
+        button_mode: &str,
+        difficulty: &str,
+    ) -> Option<(f64, bool)> {
         self.record_db.get(song_id, button_mode, difficulty)
     }
 
-    pub fn get_varchive_cache_record(&self, song_id: i32, button_mode: &str, difficulty: &str) -> Option<(f64, bool)> {
+    pub fn get_varchive_cache_record(
+        &self,
+        song_id: i32,
+        button_mode: &str,
+        difficulty: &str,
+    ) -> Option<(f64, bool)> {
         let guard = overmax_core::lock_or_recover(&self.varchive_cache);
-        guard.get(&(song_id, button_mode.to_string(), difficulty.to_string())).copied()
+        guard
+            .get(&(song_id, button_mode.to_string(), difficulty.to_string()))
+            .copied()
     }
 
     fn merge_varchive_cache(&self, result: &mut HashMap<RecordKey, RecordValue>, song_ids: &[i32]) {
@@ -227,8 +246,8 @@ mod tests {
 
     #[test]
     fn test_recommendation_caching_and_stats() {
-        use crate::service::recommend::Recommender;
         use crate::community::client::VArchiveDB;
+        use crate::service::recommend::Recommender;
 
         let mut vdb = VArchiveDB::new();
         let song1_json = serde_json::json!({
@@ -263,30 +282,30 @@ mod tests {
             serde_json::from_value(song1_json).unwrap(),
             serde_json::from_value(song2_json).unwrap(),
         ];
-        
+
         let dir = test_dir("recommend-stats-cache");
         let db_path = dir.join("record.db");
         let mut db = RecordDB::new(&db_path, None);
         assert!(db.initialize());
-        
+
         assert!(db.upsert(1, "4B", "MX", 99.0, false, false));
         assert!(db.upsert(2, "4B", "MX", 97.0, false, false));
-        
+
         let record_db = Arc::new(db);
         let record_manager = Arc::new(RecordManager::new(record_db, dir.join("varchive")));
         record_manager.refresh();
-        
+
         let recommender = Recommender::new(Arc::new(vdb), record_manager);
-        
+
         let result = recommender.recommend(1, "4B", "MX", 0.1, 10, true);
-        
+
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].song_id, 2);
-        
+
         assert_eq!(result.total_count, 2);
         assert_eq!(result.has_record_count, 2);
         assert_eq!(result.avg_rate, 98.0);
-        
+
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -308,12 +327,18 @@ mod tests {
         manager.refresh();
 
         // 1. Verify get_local_record
-        assert_eq!(manager.get_local_record(123, "5B", "SC"), Some((99.80, true)));
+        assert_eq!(
+            manager.get_local_record(123, "5B", "SC"),
+            Some((99.80, true))
+        );
         assert_eq!(manager.get_local_record(999, "4B", "NM"), None);
 
         // 2. Verify get_varchive_cache_record
         // Write cache has MX 99.5 for song 42
-        assert_eq!(manager.get_varchive_cache_record(42, "4B", "MX"), Some((99.5, true)));
+        assert_eq!(
+            manager.get_varchive_cache_record(42, "4B", "MX"),
+            Some((99.5, true))
+        );
         assert_eq!(manager.get_varchive_cache_record(42, "4B", "NM"), None);
 
         let _ = std::fs::remove_dir_all(dir);

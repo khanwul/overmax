@@ -1,6 +1,6 @@
-use std::time::Instant;
-use overmax_engine::detector::templates::digit::DIGIT_TEMPLATES;
 use overmax_cv::CvTemplate;
+use overmax_engine::detector::templates::digit::DIGIT_TEMPLATES;
+use std::time::Instant;
 
 // BGRA format image region replica
 struct SyntheticImage {
@@ -37,8 +37,10 @@ fn binarize_by_luminance(
     )
 }
 
-
-fn evaluate_sweep(templates: &[CvTemplate], method: LumaMethod) -> (usize, usize, std::time::Duration) {
+fn evaluate_sweep(
+    templates: &[CvTemplate],
+    method: LumaMethod,
+) -> (usize, usize, std::time::Duration) {
     let mut sweep_values = Vec::new();
     for i in 0..=32 {
         let val = if i == 32 { 255 } else { i * 8 };
@@ -47,17 +49,17 @@ fn evaluate_sweep(templates: &[CvTemplate], method: LumaMethod) -> (usize, usize
 
     let mut total_cases = 0;
     let mut success_count = 0;
-    
+
     let start = Instant::now();
     for &bg_color in &sweep_values {
         for &fg_color in &sweep_values {
             if bg_color == fg_color {
                 continue;
             }
-            
+
             for t in templates {
                 total_cases += 1;
-                
+
                 let w = t.width;
                 let h = t.height;
                 let mut bgra = vec![0u8; w * h * 4];
@@ -66,14 +68,18 @@ fn evaluate_sweep(templates: &[CvTemplate], method: LumaMethod) -> (usize, usize
                         let idx = (y * w + x) * 4;
                         let mask_val = t.mask[y * w + x];
                         let pixel_color = if mask_val == 1 { fg_color } else { bg_color };
-                        bgra[idx] = pixel_color;     // B
+                        bgra[idx] = pixel_color; // B
                         bgra[idx + 1] = pixel_color; // G
                         bgra[idx + 2] = pixel_color; // R
-                        bgra[idx + 3] = 255;         // A
+                        bgra[idx + 3] = 255; // A
                     }
                 }
-                
-                let img = SyntheticImage { width: w, height: h, bgra };
+
+                let img = SyntheticImage {
+                    width: w,
+                    height: h,
+                    bgra,
+                };
                 let (binary, _, _) = binarize_by_luminance(
                     &img,
                     method,
@@ -86,8 +92,10 @@ fn evaluate_sweep(templates: &[CvTemplate], method: LumaMethod) -> (usize, usize
                     },
                     255,
                 );
-                
-                if let Some((matched_char, _)) = overmax_cv::image::match_character(&binary, w, h, templates) {
+
+                if let Some((matched_char, _)) =
+                    overmax_cv::image::match_character(&binary, w, h, templates)
+                {
                     if matched_char == t.char_val {
                         success_count += 1;
                     }
@@ -100,7 +108,7 @@ fn evaluate_sweep(templates: &[CvTemplate], method: LumaMethod) -> (usize, usize
 
 fn main() {
     println!("=== OVERMAX CV LUMINANCE METHOD COMPARISON HARNESS ===");
-    
+
     let original_templates: Vec<CvTemplate<'static>> = DIGIT_TEMPLATES
         .iter()
         .map(|t| CvTemplate {
@@ -122,18 +130,26 @@ fn main() {
         let (success, total, elapsed) = evaluate_sweep(&original_templates, method);
         println!("--------------------------------------------------");
         println!("Method: {}", name);
-        println!("  Success Rate: {:.2}% ({} / {})", (success as f64 / total as f64) * 100.0, success, total);
+        println!(
+            "  Success Rate: {:.2}% ({} / {})",
+            (success as f64 / total as f64) * 100.0,
+            success,
+            total
+        );
         println!("  Elapsed Time: {:?}", elapsed);
-        println!("  Per-image:    {:.2} us", elapsed.as_micros() as f64 / total as f64);
+        println!(
+            "  Per-image:    {:.2} us",
+            elapsed.as_micros() as f64 / total as f64
+        );
     }
-    
+
     // 2. Evaluate on collected real-world failure cases in scratch/auto_failures
     let failures_dir = std::path::Path::new("scratch/auto_failures");
     if failures_dir.exists() {
         println!("\n=== EVALUATING REAL-WORLD FAILURE IMAGES (scratch/auto_failures) ===");
         let mut rate_files = Vec::new();
         let mut score_files = Vec::new();
-        
+
         if let Ok(entries) = std::fs::read_dir(failures_dir) {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
@@ -147,15 +163,19 @@ fn main() {
                 }
             }
         }
-        
-        println!("Found {} rate and {} score failure images.", rate_files.len(), score_files.len());
-        
+
+        println!(
+            "Found {} rate and {} score failure images.",
+            rate_files.len(),
+            score_files.len()
+        );
+
         use image::GenericImageView;
-        
+
         for &(method, name) in &methods {
             let mut rate_valid = 0;
             let mut score_valid = 0;
-            
+
             for path in &rate_files {
                 if let Ok(img_data) = image::open(path) {
                     let (w, h) = img_data.dimensions();
@@ -163,8 +183,12 @@ fn main() {
                     for chunk in bgra.chunks_exact_mut(4) {
                         chunk.swap(0, 2);
                     }
-                    
-                    let img = SyntheticImage { width: w as usize, height: h as usize, bgra };
+
+                    let img = SyntheticImage {
+                        width: w as usize,
+                        height: h as usize,
+                        bgra,
+                    };
                     let (binary, _, _) = binarize_by_luminance(
                         &img,
                         method,
@@ -177,8 +201,9 @@ fn main() {
                         },
                         255,
                     );
-                    
-                    let segs = overmax_cv::segment_characters(&binary, w as usize, h as usize).unwrap_or_default();
+
+                    let segs = overmax_cv::segment_characters(&binary, w as usize, h as usize)
+                        .unwrap_or_default();
                     let mut matched = String::new();
                     for &(x1, x2) in &segs {
                         let char_w = x2 - x1;
@@ -188,19 +213,24 @@ fn main() {
                                 char_bin[y * char_w + x] = binary[y * w as usize + (x1 + x)];
                             }
                         }
-                        if let Some((ch, _)) = overmax_cv::image::match_character(&char_bin, char_w, h as usize, &original_templates) {
+                        if let Some((ch, _)) = overmax_cv::image::match_character(
+                            &char_bin,
+                            char_w,
+                            h as usize,
+                            &original_templates,
+                        ) {
                             matched.push(ch);
                         } else {
                             matched.push('?');
                         }
                     }
-                    
+
                     if !matched.is_empty() && !matched.contains('?') {
                         rate_valid += 1;
                     }
                 }
             }
-            
+
             for path in &score_files {
                 if let Ok(img_data) = image::open(path) {
                     let (w, h) = img_data.dimensions();
@@ -208,8 +238,12 @@ fn main() {
                     for chunk in bgra.chunks_exact_mut(4) {
                         chunk.swap(0, 2);
                     }
-                    
-                    let img = SyntheticImage { width: w as usize, height: h as usize, bgra };
+
+                    let img = SyntheticImage {
+                        width: w as usize,
+                        height: h as usize,
+                        bgra,
+                    };
                     let (binary, _, _) = binarize_by_luminance(
                         &img,
                         method,
@@ -222,8 +256,9 @@ fn main() {
                         },
                         255,
                     );
-                    
-                    let segs = overmax_cv::segment_characters(&binary, w as usize, h as usize).unwrap_or_default();
+
+                    let segs = overmax_cv::segment_characters(&binary, w as usize, h as usize)
+                        .unwrap_or_default();
                     let mut matched = String::new();
                     for &(x1, x2) in &segs {
                         let char_w = x2 - x1;
@@ -233,25 +268,38 @@ fn main() {
                                 char_bin[y * char_w + x] = binary[y * w as usize + (x1 + x)];
                             }
                         }
-                        if let Some((ch, _)) = overmax_cv::image::match_character(&char_bin, char_w, h as usize, &original_templates) {
+                        if let Some((ch, _)) = overmax_cv::image::match_character(
+                            &char_bin,
+                            char_w,
+                            h as usize,
+                            &original_templates,
+                        ) {
                             matched.push(ch);
                         } else {
                             matched.push('?');
                         }
                     }
-                    
+
                     if !matched.is_empty() && !matched.contains('?') {
                         score_valid += 1;
                     }
                 }
             }
-            
+
             println!("--------------------------------------------------");
             println!("Method: {}", name);
-            println!("  Real-world Rate Valid Match:  {} / {} ({:.2}%)", 
-                rate_valid, rate_files.len(), (rate_valid as f64 / rate_files.len() as f64) * 100.0);
-            println!("  Real-world Score Valid Match: {} / {} ({:.2}%)", 
-                score_valid, score_files.len(), (score_valid as f64 / score_files.len() as f64) * 100.0);
+            println!(
+                "  Real-world Rate Valid Match:  {} / {} ({:.2}%)",
+                rate_valid,
+                rate_files.len(),
+                (rate_valid as f64 / rate_files.len() as f64) * 100.0
+            );
+            println!(
+                "  Real-world Score Valid Match: {} / {} ({:.2}%)",
+                score_valid,
+                score_files.len(),
+                (score_valid as f64 / score_files.len() as f64) * 100.0
+            );
         }
         println!("--------------------------------------------------");
     }

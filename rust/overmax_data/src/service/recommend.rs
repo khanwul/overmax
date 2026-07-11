@@ -1,9 +1,9 @@
-use crate::service::record_manager::{RecordManager, RecordSource};
 use crate::community::client::VArchiveDB;
+use crate::service::record_manager::{RecordManager, RecordSource};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex};
 
 const DIFFICULTIES: &[&str] = &["NM", "HD", "MX", "SC"];
 const SC_GROUP: &[&str] = &["SC"];
@@ -217,10 +217,7 @@ impl Recommender {
         }
     }
 
-    fn get_candidates(
-        &self,
-        params: CandidateSearchParams,
-    ) -> Vec<RecommendEntry> {
+    fn get_candidates(&self, params: CandidateSearchParams) -> Vec<RecommendEntry> {
         let modes_to_check = if params.same_mode_only {
             vec![params.target_mode]
         } else {
@@ -236,7 +233,10 @@ impl Recommender {
             };
 
             for mode in &modes_to_check {
-                if let (Some(m), Some(d_list)) = (crate::community::client::Mode::from_str(mode), Some(DIFFICULTIES)) {
+                if let (Some(m), Some(d_list)) = (
+                    crate::community::client::Mode::from_str(mode),
+                    Some(DIFFICULTIES),
+                ) {
                     for diff in d_list {
                         if let Some(d) = crate::community::client::Difficulty::from_str(diff) {
                             if let Some(p) = &song.patterns[m as usize][d as usize] {
@@ -256,11 +256,14 @@ impl Recommender {
                                     }
                                 };
 
-                                if (final_cand_floor - params.ref_floor).abs() > params.floor_range {
+                                if (final_cand_floor - params.ref_floor).abs() > params.floor_range
+                                {
                                     continue;
                                 }
 
-                                if sid == params.target_song_id && mode == &params.target_mode && diff == &params.target_diff
+                                if sid == params.target_song_id
+                                    && mode == &params.target_mode
+                                    && diff == &params.target_diff
                                 {
                                     continue;
                                 }
@@ -348,14 +351,17 @@ impl Recommender {
                                 "OFFICIAL_NHM".to_string()
                             };
                         }
-                        
+
                         let key = FloorCacheKey {
                             button_mode: mode.to_string(),
                             scale_type,
                             floor_millis: Self::floor_to_millis(floor_val),
                         };
                         let record_key = (song_id, mode.to_string(), diff.to_string());
-                        floor_patterns.entry(key.clone()).or_insert_with(Vec::new).push(record_key.clone());
+                        floor_patterns
+                            .entry(key.clone())
+                            .or_insert_with(Vec::new)
+                            .push(record_key.clone());
                         record_to_floor_key.insert(record_key, key);
                     }
                 }
@@ -487,7 +493,7 @@ impl Recommender {
             if key.scale_type != scale_type {
                 continue;
             }
-            
+
             let key_floor = key.floor_millis as f64 / 1000.0;
             if (key_floor - ref_floor).abs() > floor_range {
                 continue;
