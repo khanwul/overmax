@@ -632,6 +632,27 @@ pub fn detect_scene_from_logo(
     scene
 }
 
+fn detect_jacket_edges(
+    frame: &CapturedFrame,
+    jacket_roi: crate::detector::roi::RoiRect,
+) -> Option<f32> {
+    let margin = 8;
+    let ext_roi = crate::detector::roi::RoiRect {
+        x1: jacket_roi.x1 - margin,
+        y1: jacket_roi.y1 - margin,
+        x2: jacket_roi.x2 + margin,
+        y2: jacket_roi.y2 + margin,
+    };
+    let ext_img = crop_roi(frame, ext_roi)?;
+    overmax_cv::detect_rect_edges(
+        &ext_img.bgra,
+        ext_img.width as usize,
+        ext_img.height as usize,
+        margin as usize,
+    )
+    .ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DetectionPipeline, JacketMatchStatus};
@@ -805,25 +826,4 @@ mod tests {
             }
         }
     }
-}
-
-fn detect_jacket_edges(
-    frame: &CapturedFrame,
-    jacket_roi: crate::detector::roi::RoiRect,
-) -> Option<f32> {
-    let margin = 8;
-    let ext_roi = crate::detector::roi::RoiRect {
-        x1: jacket_roi.x1 - margin,
-        y1: jacket_roi.y1 - margin,
-        x2: jacket_roi.x2 + margin,
-        y2: jacket_roi.y2 + margin,
-    };
-    let ext_img = crop_roi(frame, ext_roi)?;
-    overmax_cv::detect_rect_edges(
-        &ext_img.bgra,
-        ext_img.width as usize,
-        ext_img.height as usize,
-        margin as usize,
-    )
-    .ok()
 }
