@@ -169,5 +169,6 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-13 | RecordKey 및 RecordValue의 overmax_core 이전 | 핵심 도메인 별칭인 RecordKey 및 RecordValue를 가장 하위인 overmax_core로 옮겨 의존성 정방향 상속 및 여러 크레이트 간 공유 실현 | [game_state.rs](rust/overmax_core/src/game_state.rs) / [lib.rs](rust/overmax_data/src/lib.rs) |
 | 2026-07-13 | 긴 제목 뭉개기 버그 수정 및 FadeClippedLabel 위젯 격리 | 넘치는 제목 마스킹 그라데이션의 c_start 색상을 Color32::TRANSPARENT 대신 bg_color의 알파만 0으로 조정한 색상으로 수정해 보간 시 발생하는 탁한 회색빛 노이즈 해결. 동시에 egui::Widget을 구현하는 FadeClippedLabel 구조체 위젯으로 분리 | [overlay_ui.rs](rust/overmax_app/src/ui/overlay_ui.rs) |
 | 2026-07-13 | FadeClippedLabel 위젯의 별도 모듈 분리 | UI 컴포넌트 모듈성 강화를 위해 FadeClippedLabel 위젯을 독립 파일로 쪼개고 ui/components 모듈 구성 | [fade_clipped_label.rs](rust/overmax_app/src/ui/components/fade_clipped_label.rs) |
+| 2026-07-13 | PlayMetaRow 위젯의 분리 및 모듈 격리 | overlay_ui.rs의 복잡도 개선을 위해 뱃지 계산 및 메타 레이아웃 렌더링을 담당하는 PlayMetaRow 위젯을 components/play_meta_row.rs로 분리 | [play_meta_row.rs](rust/overmax_app/src/ui/components/play_meta_row.rs) |
 
 

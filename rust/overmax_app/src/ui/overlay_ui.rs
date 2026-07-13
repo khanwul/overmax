@@ -1,4 +1,4 @@
-use crate::ui::components::FadeClippedLabel;
+use crate::ui::components::{FadeClippedLabel, PlayMetaRow};
 use crate::ui::overlay_recommend_ui::{
     avg_rate_text, draw_diff_tabs, draw_recommendations, pattern_count_text, PatternTabInfo,
 };
@@ -367,17 +367,12 @@ fn draw_lite_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayActions {
             });
 
             // 2열: Rate + 콤보상태 + sheet_meta 배지 (일반 모드와 동일한 배지 렌더링)
-            let (row_rect, _) = ui.allocate_exact_size(
-                Vec2::new(ui.available_width(), 14.0 * props.scale),
-                egui::Sense::hover(),
+            ui.add(
+                PlayMetaRow::new(props.state, props.pattern_tabs)
+                    .is_result(props.state.scene.is_result())
+                    .session_initial_record(props.session_initial_record)
+                    .scale(props.scale),
             );
-            let (badges, trailing, separator) = meta_badges(
-                props.state,
-                props.pattern_tabs,
-                props.state.scene.is_result(),
-                props.session_initial_record,
-            );
-            draw_meta_badge_row(ui, row_rect, &badges, &trailing, separator, props.scale);
         });
 
     let is_snap_manual = props.is_snap_manual;
@@ -402,154 +397,6 @@ fn draw_lite_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayActions {
 
     actions.response_rect = Some(response.response.rect);
     actions
-}
-
-fn badge_width(text: &str, scale: f32) -> f32 {
-    (text.len() as f32 * 5.2 + 8.0) * scale
-}
-
-fn draw_meta_badge(
-    painter: &egui::Painter,
-    text: &str,
-    current_x: f32,
-    center_y: f32,
-    scale: f32,
-    color: egui::Color32,
-) -> f32 {
-    let badge_w = badge_width(text, scale);
-    let badge_rect = Rect::from_center_size(
-        egui::pos2(current_x + badge_w / 2.0, center_y),
-        Vec2::new(badge_w, 13.0 * scale),
-    );
-    painter.rect_filled(
-        badge_rect,
-        CornerRadius::same((3.0 * scale) as u8),
-        Theme::TAB_INACTIVE_BG,
-    );
-    painter.text(
-        badge_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        text,
-        FontId::proportional(9.0 * scale),
-        color,
-    );
-    current_x + badge_w
-}
-
-/// 결과창/선곡창 공통으로, rate/combo 배지 항목과 뒤따르는 meta 텍스트를 계산한다.
-/// 반환: (배지 항목 (텍스트, 색), 뒤따르는 meta 텍스트, 배지와 meta 사이 구분선 사용 여부)
-fn meta_badges(
-    state: &GameSessionState,
-    pattern_tabs: &[PatternTabInfo],
-    is_result: bool,
-    session_initial_record: Option<RecordValue>,
-) -> (Vec<(String, Color32)>, String, bool) {
-    let mut badges: Vec<(String, Color32)> = Vec::new();
-    let mut trailing = String::new();
-    let mut separator = false;
-
-    if is_result {
-        if let Some(ctx) = &state.context {
-            let (curr_rate, curr_mc, comp_str) =
-                get_result_rate_comparison(ctx, session_initial_record);
-            badges.push((curr_rate, Theme::OK));
-            if let Some(mc) = curr_mc {
-                badges.push((mc.to_string(), Theme::TEXT_ACCENT));
-            }
-            trailing = comp_str;
-        } else {
-            trailing = "—".to_string();
-        }
-    } else {
-        let mut has_badge = false;
-        if let Some(ctx) = &state.context {
-            if ctx.rate > 0.0 {
-                badges.push((format!("{:.2}%", ctx.rate), Theme::OK));
-                has_badge = true;
-                if ctx.is_max_combo {
-                    let sym = if ctx.rate >= 100.0 { "P" } else { "M" };
-                    badges.push((sym.to_string(), Theme::TEXT_ACCENT));
-                }
-            }
-        }
-        let meta = meta_text(state, pattern_tabs);
-        if meta != "—" && !meta.is_empty() {
-            trailing = meta;
-            separator = has_badge;
-        }
-    }
-
-    (badges, trailing, separator)
-}
-
-/// rate/combo 배지와 meta 텍스트를 가운데 정렬로 한 행에 그린다 (일반/lite 모드 공용).
-fn draw_meta_badge_row(
-    ui: &mut egui::Ui,
-    row_rect: Rect,
-    badges: &[(String, Color32)],
-    trailing: &str,
-    use_separator: bool,
-    scale: f32,
-) {
-    let mut total_width = 0.0f32;
-    for (i, (t, _)) in badges.iter().enumerate() {
-        total_width += badge_width(t, scale);
-        if i + 1 < badges.len() {
-            total_width += 3.0 * scale;
-        }
-    }
-
-    let font_meta = FontId::proportional(9.0 * scale);
-    let galley =
-        ui.painter()
-            .layout_no_wrap(trailing.to_string(), font_meta.clone(), Theme::TEXT_ACCENT);
-    if !trailing.is_empty() {
-        if !badges.is_empty() {
-            total_width += if use_separator {
-                10.0 * scale
-            } else {
-                6.0 * scale
-            };
-        }
-        total_width += galley.size().x;
-    }
-
-    let mut current_x = row_rect.left() + (row_rect.width() - total_width) / 2.0;
-    let center_y = row_rect.center().y;
-
-    for (i, (t, c)) in badges.iter().enumerate() {
-        current_x = draw_meta_badge(ui.painter(), t, current_x, center_y, scale, *c);
-        if i + 1 < badges.len() {
-            current_x += 3.0 * scale;
-        }
-    }
-
-    if !badges.is_empty() && !trailing.is_empty() {
-        if use_separator {
-            current_x += 4.0 * scale;
-            ui.painter().text(
-                egui::pos2(current_x, center_y),
-                egui::Align2::LEFT_CENTER,
-                "|",
-                FontId::proportional(10.0 * scale),
-                Theme::TEXT_MUTED,
-            );
-            current_x += 2.0 * scale;
-            current_x += 4.0 * scale;
-        } else {
-            current_x += 6.0 * scale;
-        }
-    }
-
-    if !trailing.is_empty() {
-        ui.painter().text(
-            egui::pos2(current_x, center_y),
-            egui::Align2::LEFT_CENTER,
-            trailing,
-            font_meta,
-            Theme::TEXT_ACCENT,
-        );
-    }
 }
 
 fn draw_header(
@@ -643,22 +490,13 @@ fn draw_header(
             ui.add_space(px.header_meta_gap());
             let scale = px.scale;
             let second_row_height = 15.0 * scale;
-
-            // 세로 높이를 정확히 15.0 * scale 로 고정하여 할당받음 (높이 흔들림 원천 방지)
-            let (row_rect, _) = ui.allocate_exact_size(
-                Vec2::new(ui.available_width(), second_row_height),
-                egui::Sense::hover(),
+            ui.add(
+                PlayMetaRow::new(state, pattern_tabs)
+                    .is_result(state.scene.is_result())
+                    .session_initial_record(session_initial_record)
+                    .scale(scale)
+                    .height(second_row_height),
             );
-
-            if state.scene.is_result() {
-                let (badges, trailing, separator) =
-                    meta_badges(state, pattern_tabs, true, session_initial_record);
-                draw_meta_badge_row(ui, row_rect, &badges, &trailing, separator, scale);
-            } else {
-                let (badges, trailing, separator) =
-                    meta_badges(state, pattern_tabs, false, session_initial_record);
-                draw_meta_badge_row(ui, row_rect, &badges, &trailing, separator, scale);
-            }
         });
 
     if is_snap_manual {
@@ -797,90 +635,7 @@ fn draw_footer(
         });
 }
 
-fn get_result_rate_comparison(
-    ctx: &overmax_core::PlayContext,
-    session_initial_record: Option<RecordValue>,
-) -> (String, Option<&'static str>, String) {
-    let current_rate = ctx.rate;
-    let current_rate_str = format!("{:.2}%", current_rate);
-    let current_mc = if ctx.is_max_combo {
-        if current_rate >= 100.0 {
-            Some("P")
-        } else {
-            Some("M")
-        }
-    } else {
-        None
-    };
 
-    let mut prev_rate = None;
-    let mut prev_mc = false;
-
-    if let Some((r, mc)) = session_initial_record {
-        if r > 0.0 {
-            prev_rate = Some(r);
-            prev_mc = mc;
-        }
-    }
-
-    let format_prev = |rate: f32, is_mc: bool| -> String {
-        let mc_symbol = if is_mc {
-            if rate >= 100.0 {
-                " P"
-            } else {
-                " M"
-            }
-        } else {
-            ""
-        };
-        format!("{:.2}%{}", rate, mc_symbol)
-    };
-
-    let comparison_str = if let Some(p_rate) = prev_rate {
-        if p_rate >= 80.0 {
-            if current_rate > p_rate {
-                let diff = current_rate - p_rate;
-                format!("({} +{:.2}%)", format_prev(p_rate, prev_mc), diff)
-            } else {
-                format!("({})", format_prev(p_rate, prev_mc))
-            }
-        } else {
-            "(NEW!)".to_string()
-        }
-    } else {
-        "(NEW!)".to_string()
-    };
-
-    (current_rate_str, current_mc, comparison_str)
-}
-
-fn meta_text(state: &GameSessionState, pattern_tabs: &[PatternTabInfo]) -> String {
-    let Some(ctx) = &state.context else {
-        return "—".to_string();
-    };
-    let diff = &ctx.diff;
-    let Some(pattern) = pattern_tabs.iter().find(|pattern| &pattern.diff == diff) else {
-        return "—".to_string();
-    };
-    let mut badges = Vec::new();
-    if !pattern.gold.is_empty() {
-        badges.push(format!("황배:{}", pattern.gold));
-    }
-    if !pattern.assist_key.is_empty() {
-        badges.push(format!("보조:{}", pattern.assist_key));
-    }
-    if pattern.keypart {
-        badges.push("키파트 위주 패턴".to_string());
-    }
-    if !pattern.note.is_empty() {
-        badges.push(pattern.note.clone());
-    }
-    if badges.is_empty() {
-        "—".to_string()
-    } else {
-        badges.join(" | ")
-    }
-}
 
 pub(crate) fn diff_color(diff: &str) -> Color32 {
     match diff {
@@ -894,7 +649,8 @@ pub(crate) fn diff_color(diff: &str) -> Color32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{diff_color, install_cjk_fonts, meta_text};
+    use super::{diff_color, install_cjk_fonts};
+    use crate::ui::components::play_meta_row::meta_text;
     use crate::ui::overlay_recommend_ui::PatternTabInfo;
     use eframe::egui::{self, Color32, Context};
     use overmax_core::{GameSessionState, PlayContext};
