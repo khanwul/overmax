@@ -8,9 +8,15 @@ pub struct JacketMatcherConfig {
     pub disable_hog: bool,
 }
 
+#[derive(Debug)]
+struct MatchCache {
+    recent_indices: Vec<usize>,
+}
+
 pub struct JacketMatcher {
     entries: Arc<Vec<ImageEntry>>,
     config: JacketMatcherConfig,
+    cache: std::sync::Mutex<MatchCache>,
 }
 
 impl JacketMatcher {
@@ -18,6 +24,9 @@ impl JacketMatcher {
         Self {
             entries: Arc::new(entries),
             config,
+            cache: std::sync::Mutex::new(MatchCache {
+                recent_indices: Vec::new(),
+            }),
         }
     }
 
@@ -29,6 +38,18 @@ impl JacketMatcher {
         channels: usize,
     ) -> Option<ImageMatch> {
         self.match_jacket_with_top_k(data, width, height, channels, 10)
+    }
+
+    fn update_cache(&self, idx: usize) {
+        if let Ok(mut guard) = self.cache.lock() {
+            if let Some(pos) = guard.recent_indices.iter().position(|&x| x == idx) {
+                guard.recent_indices.remove(pos);
+            }
+            guard.recent_indices.insert(0, idx);
+            if guard.recent_indices.len() > 8 {
+                guard.recent_indices.truncate(8);
+            }
+        }
     }
 
     pub fn match_jacket_with_top_k(
@@ -47,7 +68,57 @@ impl JacketMatcher {
         let (q_phash, q_dhash, q_ahash) =
             overmax_cv::compute_image_hashes(data, width, height, channels).ok()?;
 
-        // 2단계: 전체 DB 곡에 대해 해시 거리(Hamming Distance) 스코어링
+        // 캐시 우선 매칭 시도
+        let cached_indices = if let Ok(guard) = self.cache.lock() {
+            guard.recent_indices.clone()
+        } else {
+            Vec::new()
+        };
+
+        let mut best_cached: Option<(usize, f32)> = None;
+        for &idx in &cached_indices {
+            if idx >= self.entries.len() {
+                continue;
+            }
+            let entry = &self.entries[idx];
+            let p_dist = (entry.phash ^ q_phash).count_ones() as f32;
+            let d_dist = (entry.dhash ^ q_dhash).count_ones() as f32;
+            let a_dist = (entry.ahash ^ q_ahash).count_ones() as f32;
+            let score = 0.5 * p_dist + 0.3 * d_dist + 0.2 * a_dist;
+
+            if best_cached.is_none() || score < best_cached.unwrap().1 {
+                best_cached = Some((idx, score));
+            }
+        }
+
+        if let Some((idx, score)) = best_cached {
+            let hash_sim = (1.0 - score / 64.0).clamp(0.0, 1.0);
+            if self.config.disable_hog {
+                if hash_sim >= self.config.similarity_threshold {
+                    self.update_cache(idx);
+                    return Some(ImageMatch {
+                        image_id: self.entries[idx].image_id.clone(),
+                        similarity: hash_sim,
+                    });
+                }
+            } else if hash_sim >= self.config.similarity_threshold - 0.15 {
+                if let Ok(q_hog) = overmax_cv::compute_image_hog(data, width, height, channels) {
+                    let q_hog_norm = vector_norm(&q_hog).max(1.0);
+                    let entry = &self.entries[idx];
+                    let hog_sim = dot(&entry.hog, &q_hog) / (entry.hog_norm * q_hog_norm);
+                    let similarity = 0.45 * hash_sim + 0.55 * hog_sim;
+                    if similarity >= self.config.similarity_threshold {
+                        self.update_cache(idx);
+                        return Some(ImageMatch {
+                            image_id: entry.image_id.clone(),
+                            similarity,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2단계: 캐시 미스 시 전체 DB 곡에 대해 해시 거리(Hamming Distance) 스코어링
         let mut candidates = self
             .entries
             .iter()
@@ -86,10 +157,14 @@ impl JacketMatcher {
         if skip_hog {
             // HOG 생략 시 최종 유사도는 해시 유사도 자체로 평가
             let similarity = first_hash_sim;
-            return (similarity >= self.config.similarity_threshold).then(|| ImageMatch {
-                image_id: self.entries[first_idx].image_id.clone(),
-                similarity,
-            });
+            if similarity >= self.config.similarity_threshold {
+                self.update_cache(first_idx);
+                return Some(ImageMatch {
+                    image_id: self.entries[first_idx].image_id.clone(),
+                    similarity,
+                });
+            }
+            return None;
         }
 
         // 4단계: HOG 정밀 매칭 (Margin이 좁은 경우에만 게으르게 HOG 피처 계산)
@@ -116,10 +191,15 @@ impl JacketMatcher {
             .into_iter()
             .next()
             .and_then(|(idx, similarity)| {
-                (similarity >= self.config.similarity_threshold).then(|| ImageMatch {
-                    image_id: self.entries[idx].image_id.clone(),
-                    similarity,
-                })
+                if similarity >= self.config.similarity_threshold {
+                    self.update_cache(idx);
+                    Some(ImageMatch {
+                        image_id: self.entries[idx].image_id.clone(),
+                        similarity,
+                    })
+                } else {
+                    None
+                }
             })
     }
 }

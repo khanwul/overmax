@@ -81,6 +81,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 ## 3. 곡 인식 (Song Recognition)
 - **재킷 이미지 매칭**: `ImageIndexDb`를 통해 캡처된 재킷 영역과 미리 색인된 곡 재킷의 유사도를 계산.
 - **Rust Native CV**: `overmax_cv`를 통해 3종 Perceptual Hash(pHash, dHash, aHash)를 사용한 재킷 매칭 및 검색 지원. CPU 성능 최적화를 위한 HOG 특징 연산 비활성화 옵션(`disable_hog`, 기본값 `false`)을 지원합니다.
+- **매칭 캐시 레이어 (Match Cache)**: `JacketMatcher` 내부에서 최근 매칭에 성공한 곡 인덱스를 최대 8개까지 추적하는 LRU 캐시(`MatchCache`)를 운용합니다. 매칭 시 캐시된 항목에 대해 먼저 유사도를 대조해보고 임계치 이상이면 전체 DB 루프 및 정렬을 생략하고 조기 리턴하여 CPU 연산 부하를 획기적으로 경감합니다.
 
 ## 3. 원자적 상태 감지 및 안정화 (Atomic Play Context Sync)
 - **PlayState 감지**:
@@ -176,5 +177,6 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-13 | OverlayHeader 패널 컴포넌트 분리 | overlay_ui.rs의 복잡도 개선을 위해 닫기/설정/업로드 버튼 레이아웃, 클릭 액션 및 드래그 동작이 포함된 상단 헤더 전체 영역을 OverlayHeader 패널 컴포넌트(components/overlay_header.rs)로 격리 | [overlay_header.rs](rust/overmax_app/src/ui/components/overlay_header.rs) |
 | 2026-07-13 | LitePanel 컴포넌트 분리 | overlay_ui.rs의 복잡도 개선을 위해 라이트 모드 오버레이 전체의 2열 뱃지 레이아웃과 닫기/설정/업로드 버튼이 포함된 패널 전체 영역을 LitePanel 컴포넌트(components/lite_panel.rs)로 격리 | [lite_panel.rs](rust/overmax_app/src/ui/components/lite_panel.rs) |
 | 2026-07-13 | 캡처 FPS 및 GUI 렌더링 스팸 최적화 | ScreenCaptureSettings에 active_sleep_ms/background_sleep_ms를 추가해 분석 주기를 유연하게 설정하고, 마우스 오버 시 실제 이동/드래그가 발생할 때만 request_repaint()를 호출하여 무의미한 CPU/GPU 낭비 억제 | [settings.rs](rust/overmax_data/src/config/settings.rs) / [native_app_viewports.rs](rust/overmax_app/src/ui/native_app_viewports.rs) / [detection_worker.rs](rust/overmax_engine/src/detector/detection_worker.rs) |
+| 2026-07-13 | 이미지 매칭 캐시 레이어 도입 | JacketMatcher 내부에 LRU 캐시(최대 8개)를 도입하여, 이미지 캡처 시 캐시를 우선 비교하고 만족하는 경우 전체 DB 탐색 및 정렬을 생략하고 조기 리턴하여 CPU 소모 대폭 최적화 | [jacket_matcher.rs](rust/overmax_data/src/service/jacket_matcher.rs) |
 
 
