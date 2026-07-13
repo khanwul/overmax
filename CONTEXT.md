@@ -68,6 +68,8 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 - **Window Tracker 동적 폴링**: DJMAX Respect V 창의 위치 및 포커스를 조회하는 Win32 시스템 콜 오버헤드를 막기 위해 `WindowQueryScheduler`가 주기적으로 호출을 차단합니다. 창 드래그 중인 경우 `16ms`(60FPS), 창이 정지 상태인 경우 `300ms`, 창 미발견 시 `1000ms`로 주기를 자동 변환합니다.
 - **DXGI 재생성 쿨다운**: `AdaptiveCaptureEngine`이 DXGI 캡처에 실패하여 GDI로 폴백할 시, 매 프레임 재생성을 시도하지 않고 최소 **3초**의 쿨다운 간격을 보장하여 CPU 스팸 루프를 차단합니다.
 - **OCR 픽셀 체크섬 조기 리턴 (Early Return)**: `PlayStateDetector`가 `rate` 영역을 인식할 때 매 프레임 `crop_roi` 및 썸네일을 힙에 생성하지 않고, 원본 버퍼 상에서 즉각 픽셀 값을 건너뛰어 합산하는 `compute_pixel_checksum`을 호출합니다. 이전 체크섬과 차이가 50 이하이고 캐시 강제 만료 시간(5초)이 지나지 않았다면 OCR API와 이미지 크롭 호출 자체를 바이패스합니다. 실제 OCR 분석은 값이 바뀌었을 때 최소 **200ms** 간격으로만 실행됩니다.
+- **분석 루프 Sleep 제어 및 설정 연동**: `DetectionWorker` 분석 스레드는 활성 송셀렉트 시 기본 `120ms` (`active_sleep_ms`), 백그라운드 시 기본 `500ms` (`background_sleep_ms`) 동안 sleep하도록 설정에 연동되어 조율됩니다.
+- **egui 마우스 호버 렌더링 스팸 억제**: 비활성 창 상태에서 십자선 소프트웨어 커서 렌더링을 위해 마우스 호버 시 매 프레임 `request_repaint()`를 스팸하던 문제를 해결하여, 마우스 이동 또는 드래그가 감지된 경우에만 repainting하도록 억제했습니다.
 
 ## 2. 씬 감지 및 동적 ROI (Scene-Aware ROI)
 - **로고 OCR 감지**: `logo` ROI 영역에 대해 Windows OCR 멀티패스를 수행 (Color → Grayscale → Binarized → Binarized Inverted 순서로 시도, 첫 번째 매칭 성공 시 즉시 반환).
@@ -173,5 +175,6 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-13 | StatusLamp 및 ModeBadge 위젯 분리 | 헤더 및 라이트 패널 코드 간소화를 위해 StatusLamp 및 ModeBadge 위젯을 components/로 모듈화하고, sync_ui.rs 등에서 공용으로 사용하던 mode_color 헬퍼 함수를 ModeBadge의 연관 함수로 이전 | [status_lamp.rs](rust/overmax_app/src/ui/components/status_lamp.rs) / [mode_badge.rs](rust/overmax_app/src/ui/components/mode_badge.rs) |
 | 2026-07-13 | OverlayHeader 패널 컴포넌트 분리 | overlay_ui.rs의 복잡도 개선을 위해 닫기/설정/업로드 버튼 레이아웃, 클릭 액션 및 드래그 동작이 포함된 상단 헤더 전체 영역을 OverlayHeader 패널 컴포넌트(components/overlay_header.rs)로 격리 | [overlay_header.rs](rust/overmax_app/src/ui/components/overlay_header.rs) |
 | 2026-07-13 | LitePanel 컴포넌트 분리 | overlay_ui.rs의 복잡도 개선을 위해 라이트 모드 오버레이 전체의 2열 뱃지 레이아웃과 닫기/설정/업로드 버튼이 포함된 패널 전체 영역을 LitePanel 컴포넌트(components/lite_panel.rs)로 격리 | [lite_panel.rs](rust/overmax_app/src/ui/components/lite_panel.rs) |
+| 2026-07-13 | 캡처 FPS 및 GUI 렌더링 스팸 최적화 | ScreenCaptureSettings에 active_sleep_ms/background_sleep_ms를 추가해 분석 주기를 유연하게 설정하고, 마우스 오버 시 실제 이동/드래그가 발생할 때만 request_repaint()를 호출하여 무의미한 CPU/GPU 낭비 억제 | [settings.rs](rust/overmax_data/src/config/settings.rs) / [native_app_viewports.rs](rust/overmax_app/src/ui/native_app_viewports.rs) / [detection_worker.rs](rust/overmax_engine/src/detector/detection_worker.rs) |
 
 

@@ -10,8 +10,6 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-const ACTIVE_SLEEP: Duration = Duration::from_millis(120);
-const BACKGROUND_SLEEP: Duration = Duration::from_millis(500);
 const LOG_INTERVAL: Duration = Duration::from_secs(3);
 
 pub fn spawn(
@@ -272,15 +270,16 @@ impl DetectionWorker {
     }
 
     fn sleep_duration(&self) -> Duration {
+        let capture_settings = self.settings.screen_capture();
         if self.was_found {
             if self.is_foreground {
                 if *self.last_is_song_select || *self.last_logo_detected {
-                    ACTIVE_SLEEP
+                    Duration::from_millis(capture_settings.active_sleep_ms)
                 } else {
                     Duration::from_millis(1000)
                 }
             } else {
-                BACKGROUND_SLEEP
+                Duration::from_millis(capture_settings.background_sleep_ms)
             }
         } else {
             Duration::from_secs_f64(idle_sleep(&self.settings))

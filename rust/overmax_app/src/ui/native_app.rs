@@ -245,6 +245,7 @@ pub struct AppStateTracker {
     pub prev_is_lite: Changed<bool>,
     pub prev_passthrough: Changed<Option<bool>>,
     pub prev_protected: Changed<Option<bool>>,
+    pub prev_mouse_pos: Changed<Option<egui::Pos2>>,
 }
 
 impl Default for AppStateTracker {
@@ -263,6 +264,7 @@ impl AppStateTracker {
             prev_is_lite: Changed::new(false),
             prev_passthrough: Changed::new(None),
             prev_protected: Changed::new(None),
+            prev_mouse_pos: Changed::new(None),
         }
     }
 }

@@ -544,8 +544,9 @@ impl NativeApp {
             ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(passthrough));
         }
 
-        // 비활성 윈도우(WS_EX_NOACTIVATE) 상태에서 마우스가 위에 있을 때 egui/winit이 커서 아이콘을 실시간으로 갱신하도록 렌더링 강제
-        if overlay_on && is_over {
+        // 비활성 윈도우(WS_EX_NOACTIVATE) 상태에서 마우스가 위에 있고, 마우스가 실제로 움직였거나 드래그 중일 때만 렌더링 강제
+        let mouse_moved = self.state_tracker.prev_mouse_pos.update(local_mouse);
+        if overlay_on && is_over && (mouse_moved || self.is_dragging) {
             ctx.request_repaint();
         }
 

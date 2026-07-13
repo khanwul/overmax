@@ -367,6 +367,10 @@ pub struct ScreenCaptureSettings {
     pub logo_ocr_cooldown_sec: f64,
     #[serde(default = "default_idle_sleep")]
     pub idle_sleep_sec: f64,
+    #[serde(default = "default_active_sleep")]
+    pub active_sleep_ms: u64,
+    #[serde(default = "default_background_sleep")]
+    pub background_sleep_ms: u64,
 }
 
 fn default_logo_cooldown() -> f64 {
@@ -374,6 +378,12 @@ fn default_logo_cooldown() -> f64 {
 }
 fn default_idle_sleep() -> f64 {
     0.5
+}
+fn default_active_sleep() -> u64 {
+    120
+}
+fn default_background_sleep() -> u64 {
+    500
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -528,6 +538,8 @@ impl Default for ScreenCaptureSettings {
         Self {
             logo_ocr_cooldown_sec: default_logo_cooldown(),
             idle_sleep_sec: default_idle_sleep(),
+            active_sleep_ms: default_active_sleep(),
+            background_sleep_ms: default_background_sleep(),
         }
     }
 }
