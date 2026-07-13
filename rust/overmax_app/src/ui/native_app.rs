@@ -794,7 +794,7 @@ impl NativeApp {
         let Some(ctx) = &self.session.context else {
             return false;
         };
-        let song_id = ctx.song_id as i32;
+        let song_id = ctx.song_id;
         let mode = &ctx.mode;
         let diff = &ctx.diff;
 

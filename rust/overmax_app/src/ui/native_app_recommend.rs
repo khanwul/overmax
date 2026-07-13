@@ -94,7 +94,7 @@ impl NativeApp {
         let Some(ctx) = &self.session.context else {
             return "곡을 선택하세요".into();
         };
-        let Some(song) = self.varchive_db.search_by_id(ctx.song_id as i32) else {
+        let Some(song) = self.varchive_db.search_by_id(ctx.song_id) else {
             return format!("Song #{}", ctx.song_id);
         };
         song.name
@@ -110,14 +110,14 @@ impl NativeApp {
             return RecommendResult::empty();
         };
         self.recommender
-            .recommend(ctx.song_id as i32, &ctx.mode, &ctx.diff, 0.0, 6, true)
+            .recommend(ctx.song_id, &ctx.mode, &ctx.diff, 0.0, 6, true)
     }
 
     fn pattern_tabs_for_state(&self, state: &GameSessionState) -> Vec<PatternTabInfo> {
         let Some(ctx) = &state.context else {
             return Vec::new();
         };
-        let Some(song) = self.varchive_db.search_by_id(ctx.song_id as i32) else {
+        let Some(song) = self.varchive_db.search_by_id(ctx.song_id) else {
             return Vec::new();
         };
         let mode = &ctx.mode;

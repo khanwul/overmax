@@ -53,6 +53,7 @@ impl<'a> OverlayHeader<'a> {
         self
     }
 
+    #[allow(clippy::wrong_self_convention)]
     pub(crate) fn is_snap_manual(mut self, is_snap_manual: bool) -> Self {
         self.is_snap_manual = is_snap_manual;
         self
