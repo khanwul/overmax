@@ -1,4 +1,4 @@
-use crate::ui::components::{FadeClippedLabel, ModeBadge, PlayMetaRow, StatusLamp};
+use crate::ui::components::{FadeClippedLabel, ModeBadge, OverlayHeader, PlayMetaRow, StatusLamp};
 use crate::ui::overlay_recommend_ui::{
     avg_rate_text, draw_diff_tabs, draw_recommendations, pattern_count_text, PatternTabInfo,
 };
@@ -8,7 +8,7 @@ use eframe::egui::{
     self, Align, Button, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
     Frame, Layout, Margin, Rect, RichText, Sense, Vec2,
 };
-use overmax_core::{GameSessionState, RecordValue};
+use overmax_core::GameSessionState;
 use overmax_data::RecommendResult;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -26,51 +26,51 @@ pub struct OverlayActions {
     pub drag_delta: Option<Vec2>,
 }
 
-struct Px {
-    scale: f32,
+pub(crate) struct Px {
+    pub(crate) scale: f32,
 }
 
 impl Px {
-    fn new(scale: f32) -> Self {
+    pub(crate) fn new(scale: f32) -> Self {
         Self { scale }
     }
-    fn panel_margin(&self) -> f32 {
+    pub(crate) fn panel_margin(&self) -> f32 {
         8.0 * self.scale
     }
-    fn panel_gap(&self) -> f32 {
+    pub(crate) fn panel_gap(&self) -> f32 {
         1.5 * self.scale
     }
-    fn header_radius(&self) -> f32 {
+    pub(crate) fn header_radius(&self) -> f32 {
         10.0 * self.scale
     }
-    fn header_margin_x(&self) -> f32 {
+    pub(crate) fn header_margin_x(&self) -> f32 {
         12.0 * self.scale
     }
-    fn header_margin_y(&self) -> f32 {
+    pub(crate) fn header_margin_y(&self) -> f32 {
         8.0 * self.scale
     }
-    fn header_row_gap(&self) -> f32 {
+    pub(crate) fn header_row_gap(&self) -> f32 {
         8.0 * self.scale
     }
-    fn header_meta_gap(&self) -> f32 {
+    pub(crate) fn header_meta_gap(&self) -> f32 {
         4.0 * self.scale
     }
-    fn mode_badge_w(&self) -> f32 {
+    pub(crate) fn mode_badge_w(&self) -> f32 {
         28.0 * self.scale
     }
-    fn mode_badge_h(&self) -> f32 {
+    pub(crate) fn mode_badge_h(&self) -> f32 {
         22.0 * self.scale
     }
-    fn settings_btn(&self) -> f32 {
+    pub(crate) fn settings_btn(&self) -> f32 {
         24.0 * self.scale
     }
-    fn body_gap(&self) -> f32 {
+    pub(crate) fn body_gap(&self) -> f32 {
         6.0 * self.scale
     }
-    fn footer_margin_x(&self) -> f32 {
+    pub(crate) fn footer_margin_x(&self) -> f32 {
         10.0 * self.scale
     }
-    fn footer_margin_y(&self) -> f32 {
+    pub(crate) fn footer_margin_y(&self) -> f32 {
         5.0 * self.scale
     }
 }
@@ -201,20 +201,18 @@ pub fn draw_overlay_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayAct
         .stroke(egui::Stroke::new(1.0, Theme::PANEL_STROKE))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            draw_header(
-                ui,
+            OverlayHeader::new(
                 props.state,
                 props.song_label,
                 props.pattern_tabs,
                 &props.settings_open,
-                &mut actions,
                 &px,
-                props.varchive_upload_needed,
-                props.varchive_account_configured,
-                props.is_snap_manual,
-                Some(props.record_manager),
-                props.session_initial_record,
-            );
+            )
+            .varchive_upload_needed(props.varchive_upload_needed)
+            .varchive_account_configured(props.varchive_account_configured)
+            .is_snap_manual(props.is_snap_manual)
+            .session_initial_record(props.session_initial_record)
+            .show(ui, &mut actions);
             ui.add_space(px.panel_gap());
             draw_body(
                 ui,
@@ -394,134 +392,6 @@ fn draw_lite_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayActions {
 
     actions.response_rect = Some(response.response.rect);
     actions
-}
-
-fn draw_header(
-    ui: &mut egui::Ui,
-    state: &GameSessionState,
-    song_label: &str,
-    pattern_tabs: &[PatternTabInfo],
-    settings_open: &Arc<AtomicBool>,
-    actions: &mut OverlayActions,
-    px: &Px,
-    varchive_upload_needed: bool,
-    varchive_account_configured: bool,
-    is_snap_manual: bool,
-    _record_manager: Option<&overmax_data::RecordManager>,
-    session_initial_record: Option<RecordValue>,
-) {
-    let mut buttons_left_x = None;
-    let header = Frame::new()
-        .fill(Theme::HEADER_BG)
-        .corner_radius(CornerRadius::same(px.header_radius() as u8))
-        .inner_margin(Margin::symmetric(px.header_margin_x() as i8, px.header_margin_y() as i8))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = px.header_row_gap();
-                ui.add(StatusLamp::new(state.is_stable).scale(px.scale));
-                ui.add(ModeBadge::new(state.context.as_ref().map(|ctx| ctx.mode.as_str())).scale(px.scale));
-
-                let right_w = if varchive_upload_needed {
-                    (24.0 + 18.0 + 4.0) * px.scale
-                } else {
-                    24.0 * px.scale
-                };
-                let spacing = ui.spacing().item_spacing.x;
-                let max_w = ui.available_width() - right_w - spacing * 2.0 - 4.0 * px.scale;
-
-                ui.add(
-                    FadeClippedLabel::new(song_label)
-                        .font(FontId::proportional(14.0 * px.scale))
-                        .color(Theme::TEXT_PRIMARY)
-                        .max_width(max_w.max(0.0))
-                        .bg_color(Theme::HEADER_BG)
-                        .scale(px.scale),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().button_padding = Vec2::ZERO;
-                    let text = RichText::new("⚙")
-                        .color(Theme::TEXT_PRIMARY)
-                        .font(FontId::proportional(15.0 * px.scale));
-                    let btn = Button::new(text)
-                        .fill(Theme::SECTION_BG)
-                        .corner_radius(CornerRadius::same((6.0 * px.scale) as u8))
-                        .wrap();
-                    let response = ui.add_sized(Vec2::splat(px.settings_btn()), btn.sense(Sense::click())).on_hover_text("설정");
-                    buttons_left_x = Some(response.rect.min.x);
-                    if response.clicked() {
-                        settings_open.store(true, Ordering::Relaxed);
-                        actions.command = Some(UiCommand::OpenSettings);
-                    }
-
-                    if varchive_upload_needed {
-                        ui.add_space(4.0 * px.scale);
-                        let upload_text = RichText::new("⬆")
-                            .color(if varchive_account_configured { Theme::TEXT_PRIMARY } else { Theme::TEXT_MUTED })
-                            .font(FontId::proportional(11.0 * px.scale));
-
-                        let upload_btn = Button::new(upload_text)
-                            .fill(if varchive_account_configured { Theme::PRIMARY } else { Theme::SECTION_BG })
-                            .corner_radius(CornerRadius::same((4.0 * px.scale) as u8))
-                            .wrap();
-
-                        let btn_size = Vec2::splat(18.0 * px.scale);
-                        let response = ui.add_sized(btn_size, upload_btn.sense(Sense::click()));
-                        let response = if varchive_account_configured {
-                            response.on_hover_text("V-Archive 업로드 필요 (클릭하여 즉시 업로드)")
-                        } else {
-                            response.on_hover_text("V-Archive 계정 연동 필요 (설정에서 account.txt 경로를 지정해주세요)")
-                        };
-                        buttons_left_x = Some(
-                            buttons_left_x
-                                .map(|x| x.min(response.rect.min.x))
-                                .unwrap_or(response.rect.min.x),
-                        );
-
-                        if response.clicked()
-                            && varchive_account_configured {
-                                actions.command = Some(UiCommand::UploadCurrentPattern);
-                            }
-                    }
-                });
-            });
-            ui.add_space(px.header_meta_gap());
-            let scale = px.scale;
-            let second_row_height = 15.0 * scale;
-            ui.add(
-                PlayMetaRow::new(state, pattern_tabs)
-                    .is_result(state.scene.is_result())
-                    .session_initial_record(session_initial_record)
-                    .scale(scale)
-                    .height(second_row_height),
-            );
-        });
-
-    if is_snap_manual {
-        let drag_rect = drag_rect_excluding_buttons(header.response.rect, buttons_left_x);
-        let drag_response = ui.interact(
-            drag_rect,
-            ui.id().with("overlay_header_drag"),
-            Sense::drag(),
-        );
-        if drag_response.drag_started() {
-            actions.start_drag = true;
-        }
-        if drag_response.dragged() {
-            actions.drag_delta = Some(drag_response.drag_delta());
-        }
-        if drag_response.drag_stopped() {
-            actions.restore_game_focus = true;
-        }
-    }
-}
-
-fn drag_rect_excluding_buttons(header: Rect, buttons_left_x: Option<f32>) -> Rect {
-    let Some(left_x) = buttons_left_x else {
-        return header;
-    };
-    let mut rect = header;
-    rect.max.x = (left_x - 4.0).max(rect.min.x);
-    rect
 }
 
 fn draw_body(
@@ -725,20 +595,18 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(
-                        ui,
+                    crate::ui::components::OverlayHeader::new(
                         &state_detecting,
                         "Test Song Name",
                         &pattern_tabs,
                         &settings_open,
-                        &mut actions,
                         &px,
-                        false,
-                        false,
-                        true,
-                        None,
-                        None,
-                    );
+                    )
+                    .varchive_upload_needed(false)
+                    .varchive_account_configured(false)
+                    .is_snap_manual(true)
+                    .session_initial_record(None)
+                    .show(ui, &mut actions);
                     h_detecting = ui.cursor().top() - start_y;
                 });
             });
@@ -751,20 +619,18 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(
-                        ui,
+                    crate::ui::components::OverlayHeader::new(
                         &state_no_badge,
                         "Test Song Name",
                         &pattern_tabs,
                         &settings_open,
-                        &mut actions,
                         &px,
-                        false,
-                        false,
-                        true,
-                        None,
-                        None,
-                    );
+                    )
+                    .varchive_upload_needed(false)
+                    .varchive_account_configured(false)
+                    .is_snap_manual(true)
+                    .session_initial_record(None)
+                    .show(ui, &mut actions);
                     h_no_badge = ui.cursor().top() - start_y;
                 });
             });
@@ -777,20 +643,18 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(
-                        ui,
+                    crate::ui::components::OverlayHeader::new(
                         &state_normal_badge,
                         "Test Song Name",
                         &pattern_tabs,
                         &settings_open,
-                        &mut actions,
                         &px,
-                        false,
-                        false,
-                        true,
-                        None,
-                        None,
-                    );
+                    )
+                    .varchive_upload_needed(false)
+                    .varchive_account_configured(false)
+                    .is_snap_manual(true)
+                    .session_initial_record(None)
+                    .show(ui, &mut actions);
                     h_normal = ui.cursor().top() - start_y;
                 });
             });
@@ -803,20 +667,18 @@ mod tests {
                     let mut actions = super::OverlayActions::default();
 
                     let start_y = ui.cursor().top();
-                    super::draw_header(
-                        ui,
+                    crate::ui::components::OverlayHeader::new(
                         &state_perfect_badge,
                         "Test Song Name",
                         &pattern_tabs,
                         &settings_open,
-                        &mut actions,
                         &px,
-                        false,
-                        false,
-                        true,
-                        None,
-                        None,
-                    );
+                    )
+                    .varchive_upload_needed(false)
+                    .varchive_account_configured(false)
+                    .is_snap_manual(true)
+                    .session_initial_record(None)
+                    .show(ui, &mut actions);
                     h_perfect = ui.cursor().top() - start_y;
                 });
             });
