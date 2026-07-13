@@ -23,7 +23,7 @@ impl NativeApp {
             if output.state.scene.is_result() {
                 if let Some(ctx_val) = &output.state.context {
                     if self.session_initial_record.is_none() {
-                        let song_id = ctx_val.song_id as i32;
+                        let song_id = ctx_val.song_id;
                         let rate_map = self.record_manager.get_rate_map(&[song_id]);
                         if let Some(&(r, mc)) =
                             rate_map.get(&(song_id, ctx_val.mode.clone(), ctx_val.diff.clone()))
@@ -47,26 +47,39 @@ impl NativeApp {
             if output.state.is_valid() {
                 if let Some(ctx_val) = &output.state.context {
                     if ctx_val.rate >= overmax_engine::detector::play_state::MIN_VALID_RATE {
-                        let key = (ctx_val.song_id, ctx_val.mode.clone(), ctx_val.diff.clone());
-                        if !self.recorded_states.contains(&key) {
+                        let key = (
+                            ctx_val.song_id,
+                            ctx_val.mode.clone(),
+                            ctx_val.diff.clone(),
+                        );
+                        let should_upsert = if let Some(&(prev_rate, prev_mc)) =
+                            self.recorded_states.get(&key)
+                        {
+                            ctx_val.rate > prev_rate || (ctx_val.is_max_combo && !prev_mc)
+                        } else {
+                            true
+                        };
+
+                        if should_upsert {
                             debug_ui::push_log(
                                 &self.debug_state.log_lines,
                                 self.max_log_lines(),
                                 format!(
-                                    "[Main] 기록 저장: {}, {}, {}, {}%, MaxCombo: {}",
+                                    "[Main] 기록 저장: {}, {}, {}, {:.2}%, MaxCombo: {}",
                                     key.0, key.1, key.2, ctx_val.rate, ctx_val.is_max_combo
                                 ),
                             );
                             let is_result = output.is_result;
                             if self.record_manager.upsert(
-                                key.0 as i32,
+                                key.0,
                                 &key.1,
                                 &key.2,
-                                ctx_val.rate as f64,
+                                ctx_val.rate,
                                 ctx_val.is_max_combo,
                                 is_result,
                             ) {
-                                self.recorded_states.insert(key);
+                                self.recorded_states
+                                    .insert(key, (ctx_val.rate, ctx_val.is_max_combo));
                                 changed = true;
                             }
                         }

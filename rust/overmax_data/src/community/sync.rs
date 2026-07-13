@@ -2,6 +2,7 @@
 
 use crate::community::client::VArchiveDB;
 use crate::store::record_db::RecordDB;
+use overmax_core::{RecordKey, RecordValue};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
@@ -47,7 +48,7 @@ impl SyncCandidate {
 pub fn load_varchive_record_cache(
     cache_root: &Path,
     steam_id: &str,
-) -> HashMap<(i32, String, String), (f64, bool)> {
+) -> HashMap<RecordKey, RecordValue> {
     let mut cache = HashMap::new();
     if steam_id.is_empty() || steam_id == "__unknown__" {
         return cache;
@@ -71,7 +72,7 @@ pub fn load_varchive_record_cache(
 }
 
 fn merge_record_entries(
-    cache: &mut HashMap<(i32, String, String), (f64, bool)>,
+    cache: &mut HashMap<RecordKey, RecordValue>,
     records: &[Value],
     button_mode: &str,
 ) {
@@ -85,11 +86,12 @@ fn merge_record_entries(
         let Some(diff) = rec.get("pattern").and_then(|v| v.as_str()) else {
             continue;
         };
-        let rate = rec
+        let rate_f64 = rec
             .get("score")
             .and_then(|v| v.as_f64())
             .or_else(|| rec.get("score").and_then(|v| v.as_i64()).map(|i| i as f64))
             .unwrap_or(0.0);
+        let rate = rate_f64 as f32;
         let is_max_combo = rec
             .get("maxCombo")
             .and_then(|v| v.as_bool())
@@ -148,7 +150,7 @@ pub fn build_candidates(
 
         let is_candidate = match v_rate {
             None => true,
-            Some(vr) => (local_rate - vr) >= 0.01,
+            Some(vr) => (local_rate - vr as f64) >= 0.01,
         };
         if !is_candidate {
             continue;
@@ -172,7 +174,7 @@ pub fn build_candidates(
             difficulty: diff,
             overmax_rate: local_rate,
             overmax_mc: local_mc,
-            varchive_rate: v_rate,
+            varchive_rate: v_rate.map(|r| r as f64),
             varchive_mc: v_mc,
             upload_status: String::new(),
             upload_message: String::new(),

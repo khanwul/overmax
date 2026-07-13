@@ -2,6 +2,7 @@ use rusqlite::{params, Connection, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use overmax_core::{RecordKey, RecordValue};
 
 pub struct RecordDB {
     db_path: PathBuf,
@@ -208,7 +209,7 @@ impl RecordDB {
         false
     }
 
-    pub fn get(&self, song_id: i32, button_mode: &str, difficulty: &str) -> Option<(f64, bool)> {
+    pub fn get(&self, song_id: i32, button_mode: &str, difficulty: &str) -> Option<RecordValue> {
         if !self.is_ready {
             return None;
         }
@@ -226,7 +227,7 @@ impl RecordDB {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             );
             if let Ok((rate, is_max_combo)) = result {
-                return Some((rate, is_max_combo != 0));
+                return Some((rate as f32, is_max_combo != 0));
             }
         }
         None
@@ -235,7 +236,7 @@ impl RecordDB {
     pub fn get_rate_map(
         &self,
         song_ids: &[i32],
-    ) -> std::collections::HashMap<(i32, String, String), (f64, bool)> {
+    ) -> std::collections::HashMap<RecordKey, RecordValue> {
         if !self.is_ready || song_ids.is_empty() {
             return std::collections::HashMap::new();
         }
@@ -277,7 +278,7 @@ impl RecordDB {
                             if let Ok(sid) = song_id_str.parse::<i32>() {
                                 map.insert(
                                     (sid, button_mode, difficulty),
-                                    (rate, is_max_combo_int != 0),
+                                    (rate as f32, is_max_combo_int != 0),
                                 );
                             }
                         }

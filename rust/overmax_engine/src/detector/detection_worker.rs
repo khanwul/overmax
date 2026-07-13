@@ -60,7 +60,7 @@ struct DetectionWorker {
     was_found: bool,
     is_foreground: bool,
     repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
-    last_song_id: Changed<Option<u32>>,
+    last_song_id: Changed<Option<i32>>,
     last_is_song_select: Changed<bool>,
     last_logo_detected: Changed<bool>,
     last_jacket_status: Changed<JacketMatchStatus>,

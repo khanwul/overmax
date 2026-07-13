@@ -57,7 +57,7 @@ pub struct PlayStateDetector {
     last_rate_result: (Option<f32>, String, Option<OcrTelemetry>),
     last_rate_ocr_ts: f64,
     cache: ModeDiffCache,
-    last_song_id: Changed<Option<u32>>,
+    last_song_id: Changed<Option<i32>>,
     result_rate_window: VecDeque<f32>,
 }
 
@@ -290,7 +290,7 @@ impl PlayStateDetector {
         &mut self,
         frame: &CapturedFrame,
         rois: &RoiManager,
-        song_id: Option<u32>,
+        song_id: Option<i32>,
         ocr: &OcrDetector,
         now: f64,
     ) -> (GameSessionState, Option<OcrTelemetry>) {

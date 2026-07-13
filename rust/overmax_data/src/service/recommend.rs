@@ -309,7 +309,7 @@ impl Recommender {
                 entry.button_mode.clone(),
                 entry.difficulty.clone(),
             )) {
-                entry.rate = Some(rate);
+                entry.rate = Some(rate as f64);
                 entry.is_max_combo = is_max_combo;
             }
         }
@@ -445,7 +445,7 @@ impl Recommender {
                 if let Some(&(rate, _)) = rate_map.get(record_key) {
                     if rate > 0.0 {
                         summary.has_record_count += 1;
-                        summary.rate_sum += rate;
+                        summary.rate_sum += rate as f64;
                     }
                 }
             }

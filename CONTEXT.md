@@ -165,5 +165,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-10 | 선곡창 Rate 템플릿 매칭 이진화 롤백 및 조건 확장 | 적응형 이진화의 세그멘테이션 실패 결함 해결(휘도 기반 복원) 및 '.'과 '%' 문자 추가 허용, '?' 섞임 시 파싱 우선 채택을 통해 Windows OCR fallback 루프 차단 | [ocr_engine.rs](rust/overmax_engine/src/detector/ocr_engine.rs) |
 | 2026-07-10 | 선곡창 및 오픈매치 Rate/Score ROI 가로 폭 확장 | 창모드 등 해상도 찌그러짐 시 스케일링 소수점 오차로 글자 앞부분이 잘리는 문제를 해결하기 위해 default ROI 가로 영역 좌측 4px, 우측 6px 확장 | [scene_config.rs](rust/overmax_data/src/config/scene_config.rs) |
 | 2026-07-10 | 결과창 뱃지 매칭 임계치 완화 (10.0 -> 20.0) | 결과창에서 일부 Perfect/FC 뱃지의 해시 매칭 거리가 10.0을 초과해 감지 실패하는 현상 해결 (NONE 이미지들의 해시 거리는 30 이상이므로 오인식 우려 없음) | [play_state.rs](rust/overmax_engine/src/detector/play_state.rs) |
+| 2026-07-13 | 결과창 MaxCombo 연출 지연에 따른 동기화 누락 수정 | recorded_states 캐시를 HashMap으로 변경해 결과창 내에서 rate/maxcombo가 향상되었을 때만 DB upsert를 재수행하여 연출 지연 시 누락 결함 해결 | [native_app_recommend.rs](rust/overmax_app/src/ui/native_app_recommend.rs) |
+| 2026-07-13 | RecordKey 및 RecordValue의 overmax_core 이전 | 핵심 도메인 별칭인 RecordKey 및 RecordValue를 가장 하위인 overmax_core로 옮겨 의존성 정방향 상속 및 여러 크레이트 간 공유 실현 | [game_state.rs](rust/overmax_core/src/game_state.rs) / [lib.rs](rust/overmax_data/src/lib.rs) |
 
 

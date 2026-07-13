@@ -10,7 +10,7 @@ struct FixtureCase {
 
 #[derive(Debug, Deserialize)]
 struct FixtureState {
-    song_id: Option<u32>,
+    song_id: Option<i32>,
     mode: Option<String>,
     diff: Option<String>,
     is_stable: bool,

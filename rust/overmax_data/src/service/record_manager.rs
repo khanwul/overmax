@@ -1,12 +1,10 @@
 use crate::community::sync::load_varchive_record_cache;
 use crate::store::record_db::RecordDB;
+use overmax_core::{RecordKey, RecordValue};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-
-type RecordKey = (i32, String, String);
-type RecordValue = (f64, bool);
 
 pub trait RecordSource {
     fn is_ready(&self) -> bool;
@@ -60,7 +58,7 @@ impl RecordManager {
         song_id: i32,
         button_mode: &str,
         difficulty: &str,
-        rate: f64,
+        rate: f32,
         is_max_combo: bool,
         only_if_improved: bool,
     ) -> bool {
@@ -68,7 +66,7 @@ impl RecordManager {
             song_id,
             button_mode,
             difficulty,
-            rate,
+            rate as f64,
             is_max_combo,
             only_if_improved,
         ) {
@@ -126,7 +124,7 @@ impl RecordManager {
         song_id: i32,
         button_mode: &str,
         difficulty: &str,
-    ) -> Option<(f64, bool)> {
+    ) -> Option<RecordValue> {
         self.record_db.get(song_id, button_mode, difficulty)
     }
 
@@ -135,7 +133,7 @@ impl RecordManager {
         song_id: i32,
         button_mode: &str,
         difficulty: &str,
-    ) -> Option<(f64, bool)> {
+    ) -> Option<RecordValue> {
         let guard = overmax_core::lock_or_recover(&self.varchive_cache);
         guard
             .get(&(song_id, button_mode.to_string(), difficulty.to_string()))

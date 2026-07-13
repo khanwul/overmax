@@ -287,7 +287,8 @@ pub struct NativeApp {
     pub(crate) game_rect: Arc<Mutex<Option<overmax_engine::capture::window_tracker::WindowRect>>>,
     pub(crate) session: GameSessionState,
     pub(crate) confidence: f32,
-    pub(crate) recorded_states: std::collections::HashSet<(u32, String, String)>,
+    pub(crate) recorded_states:
+        std::collections::HashMap<overmax_data::RecordKey, overmax_data::RecordValue>,
     pub(crate) sync_channels: SyncWorkerChannels,
     pub(crate) detection_rx: Receiver<DetectionOutput>,
     pub(crate) ui_cmd_rx: Receiver<UiCommand>,
@@ -303,7 +304,7 @@ pub struct NativeApp {
     pub(crate) game_found_rx: Receiver<()>,
     pub(crate) exit_requested: Arc<AtomicBool>,
     pub(crate) ctx_holder: Arc<Mutex<Option<egui::Context>>>,
-    pub(crate) session_initial_record: Option<(f64, bool)>,
+    pub(crate) session_initial_record: Option<overmax_data::RecordValue>,
     #[cfg(target_os = "windows")]
     pub(crate) _tray: Option<TrayIcon>,
     #[cfg(target_os = "windows")]
@@ -479,7 +480,7 @@ impl NativeApp {
             game_rect: Arc::new(Mutex::new(None)),
             session: GameSessionState::detecting(),
             confidence: 0.0,
-            recorded_states: std::collections::HashSet::new(),
+            recorded_states: std::collections::HashMap::new(),
             sync_channels: SyncWorkerChannels {
                 sync_rx,
                 sync_tx,
@@ -815,7 +816,7 @@ impl NativeApp {
         let Some(session_ctx) = &self.session.context else {
             return;
         };
-        let song_id = session_ctx.song_id as i32;
+        let song_id = session_ctx.song_id;
         let mode = &session_ctx.mode;
         let diff = &session_ctx.diff;
 
@@ -840,9 +841,9 @@ impl NativeApp {
             dlc: song.dlc_code.to_string(),
             button_mode: mode.clone(),
             difficulty: diff.clone(),
-            overmax_rate,
+            overmax_rate: overmax_rate as f64,
             overmax_mc,
-            varchive_rate: v_rate,
+            varchive_rate: v_rate.map(|r| r as f64),
             varchive_mc: v_mc,
             upload_status: String::new(),
             upload_message: String::new(),

@@ -17,6 +17,7 @@ pub use config::settings::{
     JacketMatcherSettings, OverlayPosition, OverlaySettings, ScreenCaptureSettings, Settings,
     SettingsPaths, VArchiveSettings, VArchiveUserMap, WindowTrackerSettings,
 };
+pub use overmax_core::{RecordKey, RecordValue};
 pub use service::jacket_matcher::{JacketMatcher, JacketMatcherConfig};
 pub use service::recommend::{RecommendEntry, RecommendResult, Recommender};
 pub use service::record_manager::{RecordManager, RecordSource};

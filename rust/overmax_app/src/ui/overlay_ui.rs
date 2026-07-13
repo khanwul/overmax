@@ -7,7 +7,7 @@ use eframe::egui::{
     self, Align, Button, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
     Frame, Layout, Margin, Rect, RichText, Sense, Vec2,
 };
-use overmax_core::GameSessionState;
+use overmax_core::{GameSessionState, RecordValue};
 use overmax_data::RecommendResult;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -176,7 +176,7 @@ pub struct OverlayProps<'a> {
     pub lite_mode: bool,
     pub is_snap_manual: bool,
     pub record_manager: &'a overmax_data::RecordManager,
-    pub session_initial_record: Option<(f64, bool)>,
+    pub session_initial_record: Option<overmax_data::RecordValue>,
 }
 
 pub fn draw_overlay_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayActions {
@@ -442,7 +442,7 @@ fn meta_badges(
     state: &GameSessionState,
     pattern_tabs: &[PatternTabInfo],
     is_result: bool,
-    session_initial_record: Option<(f64, bool)>,
+    session_initial_record: Option<RecordValue>,
 ) -> (Vec<(String, Color32)>, String, bool) {
     let mut badges: Vec<(String, Color32)> = Vec::new();
     let mut trailing = String::new();
@@ -564,7 +564,7 @@ fn draw_header(
     varchive_account_configured: bool,
     is_snap_manual: bool,
     _record_manager: Option<&overmax_data::RecordManager>,
-    session_initial_record: Option<(f64, bool)>,
+    session_initial_record: Option<RecordValue>,
 ) {
     let mut buttons_left_x = None;
     let header = Frame::new()
@@ -875,9 +875,9 @@ fn draw_footer(
 
 fn get_result_rate_comparison(
     ctx: &overmax_core::PlayContext,
-    session_initial_record: Option<(f64, bool)>,
+    session_initial_record: Option<RecordValue>,
 ) -> (String, Option<&'static str>, String) {
-    let current_rate = ctx.rate as f64;
+    let current_rate = ctx.rate;
     let current_rate_str = format!("{:.2}%", current_rate);
     let current_mc = if ctx.is_max_combo {
         if current_rate >= 100.0 {
@@ -899,7 +899,7 @@ fn get_result_rate_comparison(
         }
     }
 
-    let format_prev = |rate: f64, is_mc: bool| -> String {
+    let format_prev = |rate: f32, is_mc: bool| -> String {
         let mc_symbol = if is_mc {
             if rate >= 100.0 {
                 " P"

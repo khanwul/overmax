@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub type RecordKey = (i32, String, String);
+pub type RecordValue = (f32, bool);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SceneType {
     Unknown,
@@ -24,7 +27,7 @@ impl SceneType {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayContext {
-    pub song_id: u32,
+    pub song_id: i32,
     pub mode: String,
     pub diff: String,
     pub rate: f32,

@@ -20,7 +20,7 @@ pub struct DetectionOutput {
     pub is_leaving: bool,
     pub confidence: f32,
     pub state: GameSessionState,
-    pub current_song_id: Option<u32>,
+    pub current_song_id: Option<i32>,
     pub image_db_ready: bool,
     pub jacket_status: JacketMatchStatus,
     pub game_rect: Option<crate::capture::window_tracker::WindowRect>,
@@ -38,7 +38,7 @@ pub enum JacketMatchStatus {
     Unchanged,
     NoMatch,
     InvalidId { image_id: String, similarity: f32 },
-    Matched { song_id: u32, similarity: f32 },
+    Matched { song_id: i32, similarity: f32 },
 }
 
 pub struct DetectionPipeline {
@@ -48,7 +48,7 @@ pub struct DetectionPipeline {
     hysteresis: HysteresisBuffer,
     play_state: PlayStateDetector,
     ocr: OcrDetector,
-    current_song_id: Option<u32>,
+    current_song_id: Option<i32>,
     last_logo_ocr_ts: f64,
     last_logo_scene: SceneType,
     last_jacket_ts: f64,
@@ -56,7 +56,7 @@ pub struct DetectionPipeline {
     last_jacket_thumb: Option<Vec<u8>>,
     result_scene_streak: u32,
     last_detected_result_scene: SceneType,
-    last_played_song_id: Option<u32>,
+    last_played_song_id: Option<i32>,
     unknown_since: Option<f64>,
 }
 
@@ -383,7 +383,7 @@ impl DetectionPipeline {
                                 jacket_img.height as usize,
                                 4,
                             ) {
-                                if let Ok(song_id) = match_res.image_id.parse::<u32>() {
+                                if let Ok(song_id) = match_res.image_id.parse::<i32>() {
                                     debug_println!(
                                         "    [detect_logo_if_due] Result screen jacket verified. SongID={}, Similarity={}",
                                         song_id, match_res.similarity
@@ -472,7 +472,7 @@ impl DetectionPipeline {
             self.current_song_id = None;
             return JacketMatchStatus::NoMatch;
         };
-        match result.image_id.parse::<u32>() {
+        match result.image_id.parse::<i32>() {
             Ok(song_id) => {
                 self.current_song_id = Some(song_id);
                 JacketMatchStatus::Matched {
