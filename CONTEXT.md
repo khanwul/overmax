@@ -172,5 +172,6 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-13 | PlayMetaRow 위젯의 분리 및 모듈 격리 | overlay_ui.rs의 복잡도 개선을 위해 뱃지 계산 및 메타 레이아웃 렌더링을 담당하는 PlayMetaRow 위젯을 components/play_meta_row.rs로 분리 | [play_meta_row.rs](rust/overmax_app/src/ui/components/play_meta_row.rs) |
 | 2026-07-13 | StatusLamp 및 ModeBadge 위젯 분리 | 헤더 및 라이트 패널 코드 간소화를 위해 StatusLamp 및 ModeBadge 위젯을 components/로 모듈화하고, sync_ui.rs 등에서 공용으로 사용하던 mode_color 헬퍼 함수를 ModeBadge의 연관 함수로 이전 | [status_lamp.rs](rust/overmax_app/src/ui/components/status_lamp.rs) / [mode_badge.rs](rust/overmax_app/src/ui/components/mode_badge.rs) |
 | 2026-07-13 | OverlayHeader 패널 컴포넌트 분리 | overlay_ui.rs의 복잡도 개선을 위해 닫기/설정/업로드 버튼 레이아웃, 클릭 액션 및 드래그 동작이 포함된 상단 헤더 전체 영역을 OverlayHeader 패널 컴포넌트(components/overlay_header.rs)로 격리 | [overlay_header.rs](rust/overmax_app/src/ui/components/overlay_header.rs) |
+| 2026-07-13 | LitePanel 컴포넌트 분리 | overlay_ui.rs의 복잡도 개선을 위해 라이트 모드 오버레이 전체의 2열 뱃지 레이아웃과 닫기/설정/업로드 버튼이 포함된 패널 전체 영역을 LitePanel 컴포넌트(components/lite_panel.rs)로 격리 | [lite_panel.rs](rust/overmax_app/src/ui/components/lite_panel.rs) |
 
 
