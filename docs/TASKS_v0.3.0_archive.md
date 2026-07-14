@@ -1,0 +1,137 @@
+# TASKS (v0.3.0 Archive)
+
+Overmax v0.3.0 마일스톤까지 완료된 작업 목록 아카이브입니다.
+
+---
+
+## 1. pattern_meta 키(Key) 마이그레이션 및 유사 곡 매칭
+
+- [x] `songs.json` 데이터베이스 내에서 특정 패턴 정보와 가장 유사한 곡을 탐색하는 검색 알고리즘 신설 (`overmax_data`)
+  - [x] 곡명 매칭(Fuzzy / Exact) 및 버튼, 난이도 속성 등 패턴의 상세 스펙 대조 알고리즘 설계
+- [x] `pattern_meta.json` 로딩 시 기존 `mode|title|diff` 형식의 Key를 중복 문제가 없는 `song_id|mode|diff` 형식으로 전환 및 마이그레이션
+  - [x] 타이틀이 동일한 중복 곡들의 세부 데이터 비교를 통한 오배치 방지 예외 처리
+- [x] 마이그레이션 전후 곡 정보 매칭 정확도 검증용 골든 테스트 작성
+
+## 2. Rust 데이터 모델 메모리 레이아웃 및 힙 할당 최적화
+
+- [x] `PatternSheetMetaItem` 구조체의 String 필드 축소 및 Enum 변환을 통한 메모리 압축
+  - [x] `gold` (`GoldMeta`) 및 `assist_key` (`AssistMeta`)를 Enum 타입으로 전환하여 스택 1바이트로 최적화
+  - [x] `pattern_meta.json` 역직렬화 및 로직 전반에 Enum 적용
+- [x] V-Archive `Song` 및 패턴 정보 구조체의 HashMap 제거 및 배열 최적화
+  - [x] `Song.patterns` 구조를 `HashMap<String, HashMap<String, PatternInfo>>`에서 고정 크기 중첩 배열 `[[Option<PatternInfo>; 4]; 4]`로 전환하여 수천 개의 HashMap 힙 오버헤드 해제
+  - [x] `Mode` 및 `Difficulty`를 표현하는 전용 Enum 타입 도입 및 연동
+- [x] 중복 문자열 풀링 또는 `Arc<str>` 도입
+  - [x] `composer`, `dlc_code` 등 여러 곡에서 중복해서 생성되는 문자열에 `Arc<str>`을 적용하여 힙 메모리 중복 할당 방지
+- [x] 리팩토링 후 전체 유닛 테스트(`cargo test`) 및 오버레이 작동 검증
+
+## 3. 라이트모드 (Lite Mode) 및 자석 스냅 구현
+
+- [x] `settings.user.json` 구조에 `lite_mode` 토글 옵션 추가 및 기본값 정의
+- [x] 설정 UI(`settings_ui.rs`) 내 라이트모드 켜기/끄기 체크박스 컴포넌트 추가
+- [x] 라이트모드 켜짐 상태일 때 오버레이 UI 레이아웃 동적 분기 (`overlay_ui.rs`)
+  - [x] 추천곡 목록 리스트 렌더링 생략
+  - [x] 선택된 곡의 비공식 난이도 및 선택한 패턴의 메타 정보(BPM, 레벨, 노트수 등) 레이아웃 재배치 및 집중 노출
+- [x] 래더 매칭 등 선곡 정보 파악이 긴급한 씬 상황에서 오버레이 정보 가독성 확인
+- [x] 오버레이 스냅(고정 위치) 기능과 라이트 모드를 완전 직교 분리 및 '수동(manual)' 모드 드래그 가능성 보장
+- [x] 설정 UI 상에 280x120 크기의 가상 모니터 레이아웃을 구현하고, 모퉁이와 중앙(수동)에 직관적으로 버튼 매핑
+
+## 4. V-Archive 플레이 기록 갱신 알림 기능
+
+- [x] 실시간 감지된 Rate가 V-Archive 로컬 캐시 또는 서버 내 기존 최고 기록보다 높을 시 갱신 판정 로직 추가
+- [x] 게임 실행을 방해하지 않는 간결한 알림 UI (오버레이 헤더 내 ⬆ 단독 업로드 버튼 및 램프 기능) 구현
+- [x] 설정 및 V-Archive 계정 연동 여부(account.txt 실존 여부)에 따른 버튼 활성화/비활성화 및 툴팁 가이드 추가
+
+## 5. 감지 가능 씬(Scene) 다양화
+
+- [x] FREESTYLE 및 ONLINE 대기방 외에 래더 매칭(Ladder), 결과 화면(Result) 등 신규 Scene 탐색 및 정의
+- [x] `SceneType` enum 확장 및 각 씬에 해당하는 OCR 인식 키워드 추가
+- [x] `scene_config.rs` 및 `RoiManager`에 씬별 동적 ROI 좌표 매핑 테이블 정의
+- [x] 씬 전환 단계에서의 `HysteresisBuffer` 상태 전이 안정성 보완
+
+## 6. 전체화면 (Fullscreen) 호환성 검증
+
+- [x] DJMAX RESPECT V 전체화면(Fullscreen) 모드 구동 시 Win32 창 트래킹 및 GDI 화면 캡처 신뢰성 검증
+- [x] winit 기반 투명 오버레이 창이 전체화면 게임 위에 올바르게 오버레이되는지(Z-order 및 포커스 뺏김 현상 등) 확인
+- [x] 전체화면 실행 중 오버레이 인터랙션 시 게임 창 복원 로직 예외 처리 보강
+
+## 8. V-Archive 클라이언트 완전 대체 (장기 목표)
+
+- [ ] [장기] 공식 V-Archive 클라이언트를 보완/대체하기 위한 백그라운드 기록 자동 업로드 파이프라인 설계
+- [ ] [장기] Steam 세션 감지 및 로컬 갱신 데이터를 API를 통해 V-Archive로 안전하게 즉각 백업 업로드하는 모듈 구현
+
+## 9. HOG 피처 데이터베이스 갱신 및 재빌드 (진행 중)
+
+- [ ] `orphera/overmax-image-db` 리포지토리 재작업을 통한 전체 자켓 이미지의 HOG 피처 일괄 갱신 및 재빌드
+  - [x] 이미지 피처 연산 SSOT를 `overmax_cv`로 이전하기 위한 Rust CLI (`db-builder`) 및 파이썬 연동 설계 완료 ([image_db_redesign_plan.md](docs/2026-06-15-image_db_redesign_plan.md))
+  - [x] `overmax_data` 내에 `db-builder` CLI 바이너리 타겟 구현
+  - [x] `overmax-image-db` 저장소 내 `build_image_db.py`가 임시 이미지 저장 후 Rust CLI를 호출하도록 수정
+  - [x] GitHub Actions에 `cargo install --git` 방식 및 액션 캐싱(`actions/cache`)을 통한 자동화 워크플로우 적용
+  - [x] 특정 자켓(Fundamental 등)의 이미지 정규화(Contrast Normalization) 혹은 개별 매칭 가중치 보정 설계 (기본 임계치 0.70 조정으로 갈음)
+  - [x] 정식 배포 시 글로벌 자켓 매칭 기본 임계치(`settings.json`) 검증 및 최적값(0.70) 확정
+
+## 10. 오버레이 반응성 및 사용성 개선 (백로그)
+
+- [x] 프리스타일 화면 이탈 시 오버레이 창 닫힘 반응 속도 개선 (연주 시작 시 즉시 닫히지 않고 한참 남아있는 현상 완화)
+- [x] 시스템 트레이 영역에서 설정창 등 보조 뷰포트를 호출할 때 런타임 갱신 주기 지연 현상 개선 (바로 뜨지 않고 대기하는 문제)
+- [x] 라이트모드 최초 기동/진입 시, 특정 기본 좌표(예: 오른쪽 중앙)에서 깜빡거린 뒤 목표 구석 위치로 이동하는 초기 렌더링 Jitter 현상 제거
+- [x] 자가 업데이트 후 자동 재시작 시 단일 인스턴스 락(Named Mutex) 해제 지연으로 새 프로세스가 조기 종료되던 치명적인 이슈를 프로세스 spawn 직전 가드 drop()을 수행하도록 수정하여 완전 해결
+- [x] 오버레이 창에 마우스 호버 시 일시적으로 불투명해졌다가 다시 투명해지는 오작동 수정 (v0.2.3 topmost 윈도우 스타일 검증 캐시 버그 수정 및 egui native StartDrag 연동을 통해 완전 해결)
+- [x] topmost 윈도우 스타일 검증 캐시 버그 수정으로 비활성 시 SetWindowPos 스팸 호출 차단 및 z-order 꼬임 깜빡임 해결
+- [x] game_rect 락 try_lock 교체 및 Snap 기하 캐싱을 통해 락 경합 및 SetWindowPos 호출 횟수 최적화 (매 프레임 -> 0회)
+- [x] 보조창 종료 순서 안전화 및 트레이 메뉴 클릭 시 켜져 있는 보조창 Focus Bring to Front 구현
+- [x] 마우스 오버 감지 target_os 조건부 컴파일 가드 적용으로 크로스 플랫폼 빌드 이식성 확보 (v0.2.3)
+- [x] 오버레이 창 위에 마우스 진입 시(passthrough 해제 시) 마우스 커서가 사라지던 소실 버그를 십자선 모양(Crosshair)의 소프트웨어 커서 직접 렌더링을 통해 해결 (v0.2.3)
+- [x] 스팀이 비표준 경로에 설치되었거나 레지스트리가 유실된(포터블 등) 환경에서 스팀 로그인 정보(`loginusers.vdf`)를 탐색할 수 있도록, HKLM 레지스트리 추가 검사 및 실행 중인 `steam.exe` 프로세스의 이미지 경로 스캔 폴백 구현
+
+## 11. HOG 자켓 이미지 매칭 성능 최적화
+
+- [x] 무거운 HOG 자켓 이미지 매칭을 비활성화(`disable_hog = true`)하는 기본값을 적용하여 실시간 분석 루프 CPU 오버헤드 대폭 축소 (a/d/pHash 3종 해시 결합만으로 뛰어난 변별력 확보)
+- [x] 매칭 씬 캐시 레이어 도입
+  - [x] 최근 매칭된 곡 혹은 선곡 빈도가 높은 곡 정보를 로컬 캐시하여 중복 검색 생략
+
+## 12. 시스템 CPU 사용량 프로파일링 및 단계적 최적화 (백로그)
+
+- [x] CPU 과다 점유의 정확한 원인 분석을 위한 종합 프로파일링 (진단 우선)
+  - [x] Rust 프로파일러(samply)를 사용하여 기동 시 실시간 CPU 점유 병목 조사 (GDI 캡처 memcpy 힙 할당 및 OS API 대기가 주원인임을 규명)
+- [x] 캡처 및 디텍션 제어 루프 최적화
+  - [x] `CaptureEngine::capture_bgra`에 인플레이스 버퍼 재사용(out_buffer: &mut Vec<u8>) 인터페이스를 도입하여 memcpy 및 힙 할당 제거 (옵션 A 완료)
+  - [x] `WindowTracker` 호출 빈도 동적 조절(Dynamic Polling) 도입으로 win32u 시스템 콜 오버헤드 해소
+  - [x] `AdaptiveCaptureEngine` 내 DXGI 디바이스 재시도 쿨다운(3초)을 도입하여 예외 발생 시의 CPU 스파이크 차단
+  - [x] 변화량 감지 캐시(픽셀 체크섬 조기 리턴)를 통한 무의미한 프레임 스킵 (화면 픽셀 변화가 없을 시 HOG 매칭 및 OCR 연산 생략 조기 리턴)
+  - [x] AdaptiveCaptureEngine 캡처 FPS 제한 및 스레드 적정 sleep 제어 보완
+- [x] 그래픽 및 GUI 렌더링 최적화
+  - [x] egui 이벤트 루프에서 불필요한 `request_repaint` 스팸 호출 조사 및 억제
+
+## 13. 결과창 OCR 정밀화 및 오버레이 반응성 개선
+
+- [x] 결과창 Rate OCR의 소수점 셋째 자리 `9` 반올림 오류 해결 (버림/절사 보정 추가)
+- [x] Score ROI 신설 및 스코어 OCR을 통한 판정율 역산(Rate = Score / 10,000) 및 크로스 검증(Cross-Validation) 적용
+- [x] 선곡창(Freestyle, OpenMatch)에서도 스코어 OCR 및 판정율 역산을 통한 Rate 인식 보강 적용
+- [x] Max Combo 및 Perfect Play 뱃지 감지 로직을 이미지 해시(pHash, dHash, aHash) 템플릿 매칭 방식으로 전환하여 오인식 및 Jitter 완전 해소
+- [x] OCR 3-pass 루프를 단일 패스(1-pass)로 롤백하여 CPU 연산 부하 축소
+- [x] Hysteresis 신뢰도가 0이 될 때 딜레이 없이 오버레이 창 즉시 숨김(0ms 반응성 확보)
+- [x] 결과창 진입 시 Hysteresis 감쇠 오동작을 차단하여 감지 끊김 Jitter 현상 제거
+- [x] 레거시 bottom_guide 감지 로직을 완전 제거하고, 뱃지 OCR 결과 자체를 결과창 오픈 매칭 앵커로 활용하여 인식 구조 대폭 단순화
+- [x] COLLECTION 화면에서 결과창 오인식이 발생하던 F5 freestyle candidate 및 last_played_song_id 가드 결함 수정
+- [x] 결과창 씬 진입 시 오버레이 헤더(2열) 및 라이트모드 2열에 메타 데이터를 생략하고 기존 최고 기록 대비 레이트 차이 비교 텍스트 출력
+- [x] Rate/Score 템플릿 매칭 시 8이 3으로 오인식되는 결함 해결 (템플릿 우선순위 정렬 순서 조정 및 '8' 템플릿 미세 가중치 보정 적용)
+- [x] 선곡창(Freestyle/OpenMatch) 및 결과창 대기 중 Rate OCR 캐싱을 비활성화하여 기록 변경 시 오버레이 미갱신 및 DB 오염 방지
+- [x] 결과창 및 선곡창 헤더 2열 내 플레인 텍스트(괄호 비교문, 메타 텍스트)의 폰트 크기(10.0 -> 9.0)를 좌측 뱃지들과 일관성을 가지도록 일괄 조정
+- [x] 결과창 모드 매칭(detect_freestyle_mode)에 Bradley-Roth 적응형 이진화(Adaptive Thresholding)를 적용하여 하얗게 밝아지는 BGA 조건에서의 8B 오인식 결함 해결
+- [x] 프리스타일 선곡창 Rate/Score 템플릿 매칭 시 이진화 방식 원복(휘도 기반) 및 '.' / '%' 문자 매칭 허용 조건 추가
+- [x] 템플릿 매칭 시 '?'가 섞이더라도 정상 파싱 범위 내일 경우 템플릿 매칭을 우선 채택하도록 가드 완화
+- [x] 창모드/해상도 찌그러짐 시 스케일 소수점 오차로 글자 앞부분이 잘려 OCR fallback으로 빠지는 현상을 해결하기 위해 rate/score ROI의 가로 폭 확장 적용
+- [x] 결과창에서 MaxCombo 연출이 지연되어 늦게 인식되더라도, rate/maxcombo가 개선되었을 때 DB 및 recorded_states 메모리 캐시를 정상 갱신하여 동기화 누락 방지
+- [x] PlayContext 및 RecordValue 내 song_id를 i32로, rate를 f32로 타입 정렬하고 이 별칭들을 base 크레이트인 overmax_core로 이전하여 프로젝트 전반의 의존성 깔끔하게 통합
+- [x] draw_fade_title 함수를 FadeClippedLabel 커스텀 위젯으로 분리 및 텍스트 뭉개기 그라데이션의 탁한 회색빛 노이즈(Black bleeding) 버그 해결
+- [x] FadeClippedLabel 커스텀 위젯을 별도 components/fade_clipped_label.rs 파일로 격리하여 UI 컴포넌트 독립 분리 구축
+- [x] PlayMetaRow 커스텀 위젯을 components/play_meta_row.rs 파일로 격리하여 뱃지 행 레이아웃 연산 및 드로잉 로직 모듈화
+- [x] StatusLamp 및 ModeBadge 커스텀 위젯을 별도 파일로 격리 분리하고, mode_color 공용 함수를 ModeBadge 내부로 캡슐화해 sync_ui 등과 연동
+- [x] OverlayHeader 커스텀 패널 컴포넌트를 별도 components/overlay_header.rs 파일로 격리 및 닫기/설정/업로드 버튼/드래그 동작을 빌더 체인 형태로 캡슐화해 오버레이 드로잉 대폭 간결화
+- [x] LitePanel 커스텀 패널 컴포넌트를 별도 components/lite_panel.rs 파일로 격리하여 라이트 모드 오버레이 레이아웃 렌더링 및 드래그 동작을 모듈화하고 overlay_ui.rs의 복잡도 150라인 이상 다이어트
+
+## 14. 코드 안정성 및 패닉 방어 리팩토링
+
+- [x] 설정 관리 UI([settings_ui.rs](rust/overmax_app/src/settings_ui.rs)) 내 예외적 오염 데이터에 대응하는 Fallback 처리 및 명시적인 `.expect()` 처리 도입
+- [x] Mutex 락 획득 시 락 오염(Poisoning)으로 인한 연쇄 크래시를 방지하기 위해 `.unwrap_or_else(|e| e.into_inner())` 처리 적용 ([recommend.rs](rust/overmax_data/src/recommend.rs))
+- [x] Win32 창 트래킹 시 `g_hwnd.unwrap()`을 안전한 매핑으로 변경하여 패닉 가능성 배제 ([native_app_viewports.rs](rust/overmax_app/src/native_app_viewports.rs))

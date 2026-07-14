@@ -131,17 +131,14 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 # Future Focus
 
-1. **감지 씬(Scene) 다양화**:
+1. **추천 기능 고도화**:
+   - DJMAX RESPECT V 추천 시스템 및 알고리즘 고도화.
+2. **메모리 사용량 최적화**:
+   - 백그라운드 실행 및 인게임 영향 최소화를 위한 메모리 사용량 및 리소스 최적화.
+3. **감지 씬(Scene) 다양화**:
    - FREESTYLE 및 ONLINE 대기방 외에도 래더 매칭 씬이나 결과 화면 등 감지 가능 범위를 추가 확장 (`SceneType::LadderMatch` 등).
-2. **전체화면(Fullscreen) 호환성 검증 (완료)**:
-   - `AdaptiveCaptureEngine` 동적 위임 연동(DXGI 캡처 백엔드) 및 포커스 차단용 Win32 스타일 적용 완료. 전체 창 모드(Borderless Fullscreen)에서 드래그 종료 후 포커스 복원 시 Z-Order 밀림 현상을 Win32 Owner 윈도우 연동(`GWL_HWNDPARENT`)을 통해 해결 완료. 단, OS 설계 제약 및 안티치트 충돌로 인해 하드웨어 독점 전체화면(Exclusive Fullscreen) 모드에서의 오버레이 표시는 지원하지 않으며, 보더리스 모드 실행이 필수 권장 사항임.
-3. **V-Archive 클라이언트 완전 대체 (장기 목표)**:
+4. **V-Archive 클라이언트 완전 대체 (장기 목표)**:
    - 공식 데스크톱 클라이언트의 도움 없이 Overmax 자체 앱 내에서 플레이 기록 수집부터 V-Archive 연동 및 백업 업로드까지 전담하는 올인원 클라이언트 구현.
-4. **HOG 피처 데이터베이스 갱신 및 재빌드**:
-   - 로컬 이미지 왜곡으로 인한 HOG 유사도 저하 근본 해결 및 매칭 임계치를 기존 값(`0.85`)으로 원복하기 위한 피처 일괄 갱신.
-5. **마우스 호버 시 투명도 반응 지연, 커서 사라짐 및 깜빡임 개선 (완료 - v0.2.3)**:
-   - egui의 MousePassthrough 전환 시 topmost 스타일 검증 캐시 오판독 버그를 해결하고 `ViewportCommand::StartDrag`와의 조화를 통해 마우스 호버 및 투명도 전환으로 인한 깜빡임 및 불투명 고착 현상을 안정화 완료함.
-    - 마우스가 투명 오버레이로 진입해 passthrough가 풀렸을 때 마우스 포인터가 소실되는 문제를 방지하기 위해, 오버레이 위에 마우스가 있는 동안 하드웨어 시스템 커서를 완전히 숨기고 십자선 모양(Crosshair)의 소프트웨어 커서를 직접 그리도록 조치하여 Active/Deactive 상태 전환 시에도 일관된 마우스 커서의 일정성과 가시성을 확보함.
 
 ---
 
@@ -181,5 +178,3 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-14 | 결과창 4B 모드 매칭 임계치 완화 (0.80 -> 0.75) | 경계 부근에서 4B 템플릿의 매칭 점수가 0.7879 등으로 미달되어 인식 실패하는 버그 해결 | [ocr_engine.rs](rust/overmax_engine/src/detector/ocr_engine.rs) |
 | 2026-07-14 | 스코어 파싱 실패 시 이진화 OCR 폴백 적용 | 템플릿 매칭이 '98.560' 처럼 비숫자 문자를 오인하여 글자수 불일치 발생 시 즉시 실패하는 대신, 이진화 OCR(1-pass)로 폴백하여 '981560'을 온전히 파싱할 수 있게 개선 | [ocr_engine.rs](rust/overmax_engine/src/detector/ocr_engine.rs) |
 | 2026-07-14 | 결과창 모드/난이도 글로벌 명암 이진화 전환 | BGA 간섭 노이즈가 심한 로컬 적응형(Bradley-Roth) 대신, 대비 분리가 강한 글로벌 이진화로 전환하여 18개 테스트셋 인식률 100% 달성 및 CPU 연산 효율 개선 | [ocr_engine.rs](rust/overmax_engine/src/detector/ocr_engine.rs) |
-
-
