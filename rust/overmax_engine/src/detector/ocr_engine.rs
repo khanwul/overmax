@@ -201,6 +201,11 @@ impl OcrDetector {
             Ok(b) => b,
             Err(_) => return None,
         };
+        // 전경색(1) 픽셀 개수 가드 (빈 프레임 오독 방지)
+        let fg_count = binary.iter().filter(|&&x| x == 1).count();
+        if fg_count < 20 {
+            return None;
+        }
         let (target_w, target_h) = (50usize, 68usize);
         let resized_binary = resize_binary(&binary, w, h, target_w, target_h);
 
@@ -236,6 +241,11 @@ impl OcrDetector {
             Ok(b) => b,
             Err(_) => return None,
         };
+        // 전경색(1) 픽셀 개수 가드 (빈 프레임 오독 방지)
+        let fg_count = binary.iter().filter(|&&x| x == 1).count();
+        if fg_count < 10 {
+            return None;
+        }
         let (target_w, target_h) = (90usize, 18usize);
         let resized_binary = resize_binary(&binary, w, h, target_w, target_h);
 

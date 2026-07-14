@@ -304,18 +304,23 @@ fn main() {
                         Ok(b) => b,
                         Err(_) => (vec![], 0, 0),
                     };
-                    let visual_binary: Vec<u8> = binary
-                        .iter()
-                        .map(|&x| if x == 1 { 255 } else { 0 })
-                        .collect();
-                    let mode_bin_path = crops_dir.join(format!("{}_mode_bin.png", file_stem));
-                    let saved_bin =
-                        save_binary_crop(&visual_binary, w as u32, h as u32, &mode_bin_path);
-                    img_report.push_str(&format!(
-                        "    - Binary Crop Saved: {} ({})\n",
-                        mode_bin_path.display(),
-                        if saved_bin { "OK" } else { "Failed" }
-                    ));
+                    let fg_count = binary.iter().filter(|&&x| x == 1).count();
+                    if fg_count < 20 {
+                        img_report.push_str("    - Binary Crop Skipped: fg_count < 20 (Blank)\n");
+                    } else {
+                        let visual_binary: Vec<u8> = binary
+                            .iter()
+                            .map(|&x| if x == 1 { 255 } else { 0 })
+                            .collect();
+                        let mode_bin_path = crops_dir.join(format!("{}_mode_bin.png", file_stem));
+                        let saved_bin =
+                            save_binary_crop(&visual_binary, w as u32, h as u32, &mode_bin_path);
+                        img_report.push_str(&format!(
+                            "    - Binary Crop Saved: {} ({})\n",
+                            mode_bin_path.display(),
+                            if saved_bin { "OK" } else { "Failed" }
+                        ));
+                    }
                 }
             }
         }
@@ -351,18 +356,23 @@ fn main() {
                         Ok(b) => b,
                         Err(_) => (vec![], 0, 0),
                     };
-                    let visual_binary: Vec<u8> = binary
-                        .iter()
-                        .map(|&x| if x == 1 { 255 } else { 0 })
-                        .collect();
-                    let diff_bin_path = crops_dir.join(format!("{}_diff_bin.png", file_stem));
-                    let saved_bin =
-                        save_binary_crop(&visual_binary, w as u32, h as u32, &diff_bin_path);
-                    img_report.push_str(&format!(
-                        "    - Binary Crop Saved: {} ({})\n",
-                        diff_bin_path.display(),
-                        if saved_bin { "OK" } else { "Failed" }
-                    ));
+                    let fg_count = binary.iter().filter(|&&x| x == 1).count();
+                    if fg_count < 10 {
+                        img_report.push_str("    - Binary Crop Skipped: fg_count < 10 (Blank)\n");
+                    } else {
+                        let visual_binary: Vec<u8> = binary
+                            .iter()
+                            .map(|&x| if x == 1 { 255 } else { 0 })
+                            .collect();
+                        let diff_bin_path = crops_dir.join(format!("{}_diff_bin.png", file_stem));
+                        let saved_bin =
+                            save_binary_crop(&visual_binary, w as u32, h as u32, &diff_bin_path);
+                        img_report.push_str(&format!(
+                            "    - Binary Crop Saved: {} ({})\n",
+                            diff_bin_path.display(),
+                            if saved_bin { "OK" } else { "Failed" }
+                        ));
+                    }
                 }
             }
         }
