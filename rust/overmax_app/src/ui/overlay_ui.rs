@@ -321,7 +321,7 @@ mod tests {
     use eframe::egui::{self, Color32, Context};
     use overmax_core::GameSessionState;
 
-     #[test]
+    #[test]
     fn uses_existing_diff_colors() {
         assert_eq!(diff_color("SC"), Color32::from_rgb(0x9B, 0x59, 0xB6));
     }

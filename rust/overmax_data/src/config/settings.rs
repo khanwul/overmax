@@ -458,7 +458,7 @@ fn default_db_path() -> String {
     "cache/image_index.db".to_string()
 }
 fn default_similarity() -> f64 {
-    0.75
+    0.7
 }
 fn default_margin() -> f64 {
     3.0
