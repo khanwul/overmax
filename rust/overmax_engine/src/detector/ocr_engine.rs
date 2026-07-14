@@ -201,7 +201,9 @@ impl OcrDetector {
             Ok(b) => b,
             Err(_) => return None,
         };
-        // 전경색(1) 픽셀 개수 가드 (빈 프레임 오독 방지)
+        // [가드레일] 50x68 해상도(3400px)에서 전경색 픽셀이 20px(약 0.6%) 미만인 경우,
+        // 유효한 텍스트 뼈대가 실존하지 않는 빈 화면(Blank/Black)으로 규정하여
+        // 템플릿 오인식(False Positive)을 차단하고 즉시 None을 반환합니다.
         let fg_count = binary.iter().filter(|&&x| x == 1).count();
         if fg_count < 20 {
             return None;
@@ -241,7 +243,9 @@ impl OcrDetector {
             Ok(b) => b,
             Err(_) => return None,
         };
-        // 전경색(1) 픽셀 개수 가드 (빈 프레임 오독 방지)
+        // [가드레일] 90x18 해상도(1620px)에서 전경색 픽셀이 10px(약 0.6%) 미만인 경우,
+        // 유효한 텍스트 뼈대가 실존하지 않는 빈 화면(Blank/Black)으로 규정하여
+        // 템플릿 오인식(False Positive)을 차단하고 즉시 None을 반환합니다.
         let fg_count = binary.iter().filter(|&&x| x == 1).count();
         if fg_count < 10 {
             return None;
