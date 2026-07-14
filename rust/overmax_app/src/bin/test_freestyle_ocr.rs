@@ -294,16 +294,13 @@ fn main() {
                 let w = mode_img.width as usize;
                 let h = mode_img.height as usize;
                 if w * h > 0 {
-                    let (binary, _, _) = match overmax_cv::binarize_by_global_contrast(
+                    let (binary, _, _) = overmax_cv::binarize_by_global_contrast(
                         &mode_img.bgra,
                         w,
                         h,
                         overmax_cv::LumaMethod::Average,
                         1,
-                    ) {
-                        Ok(b) => b,
-                        Err(_) => (vec![], 0, 0),
-                    };
+                    ).unwrap_or_default();
                     let fg_count = binary.iter().filter(|&&x| x == 1).count();
                     if fg_count < 20 {
                         img_report.push_str("    - Binary Crop Skipped: fg_count < 20 (Blank)\n");
@@ -346,16 +343,13 @@ fn main() {
                 let w = diff_img.width as usize;
                 let h = diff_img.height as usize;
                 if w * h > 0 {
-                    let (binary, _, _) = match overmax_cv::binarize_by_global_contrast(
+                    let (binary, _, _) = overmax_cv::binarize_by_global_contrast(
                         &diff_img.bgra,
                         w,
                         h,
                         overmax_cv::LumaMethod::Average,
                         1,
-                    ) {
-                        Ok(b) => b,
-                        Err(_) => (vec![], 0, 0),
-                    };
+                    ).unwrap_or_default();
                     let fg_count = binary.iter().filter(|&&x| x == 1).count();
                     if fg_count < 10 {
                         img_report.push_str("    - Binary Crop Skipped: fg_count < 10 (Blank)\n");
