@@ -1,4 +1,4 @@
-use crate::ui::components::{FadeClippedLabel, ModeBadge, PlayMetaRow, StatusLamp};
+use crate::ui::components::{FadeClippedLabel, ModeBadge, OverlayHeaderDetail, StatusLamp};
 use crate::ui::overlay_theme::Theme;
 use crate::ui::overlay_ui::{diff_color, OverlayActions, OverlayProps, Px, LITE_BASE_HEIGHT};
 use crate::ui::ui_command::UiCommand;
@@ -155,7 +155,7 @@ impl LitePanel {
 
                 // 2열: Rate + 콤보상태 + sheet_meta 배지 (일반 모드와 동일한 배지 렌더링)
                 ui.add(
-                    PlayMetaRow::new(props.state, props.pattern_tabs)
+                    OverlayHeaderDetail::new(props.state, props.pattern_tabs)
                         .is_result(props.state.scene.is_result())
                         .session_initial_record(props.session_initial_record)
                         .scale(props.scale),

@@ -26,6 +26,7 @@ impl Theme {
     // Status Colors
     pub const OK: Color32 = Color32::from_rgb(0, 212, 255);
     pub const WARN: Color32 = Color32::from_rgb(255, 75, 75);
+    pub const RED: Color32 = Color32::from_rgb(255, 75, 75);
 
     // Log Category Colors
     pub const LOG_CAPTURE: Color32 = Color32::from_rgb(126, 200, 227);

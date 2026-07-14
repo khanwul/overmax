@@ -1,4 +1,4 @@
-use crate::ui::components::{FadeClippedLabel, ModeBadge, PlayMetaRow, StatusLamp};
+use crate::ui::components::{FadeClippedLabel, ModeBadge, OverlayHeaderDetail, StatusLamp};
 use crate::ui::overlay_recommend_ui::PatternTabInfo;
 use crate::ui::overlay_theme::Theme;
 use crate::ui::overlay_ui::{OverlayActions, Px};
@@ -162,7 +162,7 @@ impl<'a> OverlayHeader<'a> {
                 let scale = self.px.scale;
                 let second_row_height = 15.0 * scale;
                 ui.add(
-                    PlayMetaRow::new(self.state, self.pattern_tabs)
+                    OverlayHeaderDetail::new(self.state, self.pattern_tabs)
                         .is_result(self.state.scene.is_result())
                         .session_initial_record(self.session_initial_record)
                         .scale(scale)
