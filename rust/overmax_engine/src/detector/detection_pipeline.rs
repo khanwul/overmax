@@ -233,25 +233,23 @@ impl DetectionPipeline {
         }
 
         let logo_roi = self.rois.get_roi("logo")?;
-
-        let Some(logo) = crop_roi(frame, logo_roi) else {
+        if crop_roi(frame, logo_roi).is_none() {
             debug_println!("    [detect_logo_if_due] logo crop failed! now={}", now);
             self.last_logo_scene = SceneType::Unknown;
             self.last_logo_ocr_ts = now;
             return Some(SceneType::Unknown);
-        };
+        }
 
-        let (scene, raw_text, _label) = self.ocr.detect_logo(&logo);
+        let (scene, raw_text) =
+            parse_static_scene(frame, &self.ocr, &self.rois, &self.jacket_matcher);
         debug_println!(
-            "    [detect_logo_if_due] now={}, crop_size={}x{}, OCR raw='{}', scene={:?}",
+            "    [detect_logo_if_due] now={}, OCR raw='{}', static_scene={:?}",
             now,
-            logo.width,
-            logo.height,
             raw_text,
             scene
         );
 
-        let scene_candidate = self.process_frame_fallback(frame, scene, &raw_text);
+        let scene_candidate = self.process_frame_fallback(scene, &raw_text);
 
         if scene_candidate != SceneType::Unknown && scene_candidate != SceneType::Online {
             self.rois.set_scene(scene_candidate);
@@ -262,20 +260,8 @@ impl DetectionPipeline {
         Some(final_scene)
     }
 
-    fn process_frame_fallback(
-        &self,
-        frame: &CapturedFrame,
-        initial_scene: SceneType,
-        raw_text: &str,
-    ) -> SceneType {
-        let mut scene = initial_scene;
-        if scene == SceneType::Unknown {
-            scene = detect_result_scene_via_edge(frame, &self.rois).unwrap_or(scene);
-        }
-        if scene == SceneType::Unknown {
-            scene = detect_openmatch_scene_via_edge(frame, &self.rois, &self.jacket_matcher)
-                .unwrap_or(scene);
-        }
+    fn process_frame_fallback(&self, scene_candidate: SceneType, raw_text: &str) -> SceneType {
+        let mut scene = scene_candidate;
         if scene == SceneType::Unknown {
             scene = self.try_keyword_lockin(raw_text).unwrap_or(scene);
         }
@@ -568,31 +554,37 @@ fn detect_openmatch_scene_via_edge(
     None
 }
 
+fn parse_static_scene(
+    frame: &CapturedFrame,
+    ocr: &OcrDetector,
+    rois: &RoiManager,
+    matcher: &overmax_data::JacketMatcher,
+) -> (SceneType, String) {
+    let Some(logo_roi) = rois.get_roi("logo") else {
+        return (SceneType::Unknown, String::new());
+    };
+    let Some(logo_img) = crop_roi(frame, logo_roi) else {
+        return (SceneType::Unknown, String::new());
+    };
+    let (mut scene, raw_text, _) = ocr.detect_logo(&logo_img);
+
+    if scene == SceneType::Unknown {
+        scene = detect_result_scene_via_edge(frame, rois).unwrap_or(scene);
+    }
+    if scene == SceneType::Unknown {
+        scene = detect_openmatch_scene_via_edge(frame, rois, matcher).unwrap_or(scene);
+    }
+
+    (scene, raw_text)
+}
+
 pub fn detect_scene_from_logo(
     frame: &CapturedFrame,
     ocr: &OcrDetector,
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
 ) -> SceneType {
-    let logo_roi = match rois.get_roi("logo") {
-        Some(roi) => roi,
-        None => return SceneType::Unknown,
-    };
-    let logo_img = match crop_roi(frame, logo_roi) {
-        Some(img) => img,
-        None => return SceneType::Unknown,
-    };
-    let (mut scene, _raw_text, _) = ocr.detect_logo(&logo_img);
-
-    if scene == SceneType::Unknown {
-        scene = detect_result_scene_via_edge(frame, rois).unwrap_or(scene);
-    }
-
-    if scene == SceneType::Unknown {
-        scene = detect_openmatch_scene_via_edge(frame, rois, matcher).unwrap_or(scene);
-    }
-
-    scene
+    parse_static_scene(frame, ocr, rois, matcher).0
 }
 
 fn detect_jacket_edges(
