@@ -251,7 +251,7 @@ impl DetectionPipeline {
             scene
         );
 
-        let scene_candidate = self.resolve_scene_candidate(frame, &raw_text, scene);
+        let scene_candidate = self.process_frame_fallback(frame, scene, &raw_text);
 
         if scene_candidate != SceneType::Unknown && scene_candidate != SceneType::Online {
             self.rois.set_scene(scene_candidate);
@@ -262,67 +262,24 @@ impl DetectionPipeline {
         Some(final_scene)
     }
 
-    fn resolve_scene_candidate(
+    fn process_frame_fallback(
         &self,
         frame: &CapturedFrame,
-        raw_text: &str,
         initial_scene: SceneType,
+        raw_text: &str,
     ) -> SceneType {
         let mut scene = initial_scene;
         if scene == SceneType::Unknown {
-            scene = check_open_match_badge(frame, &self.rois).unwrap_or(scene);
+            scene = detect_result_scene_via_edge(frame, &self.rois).unwrap_or(scene);
         }
         if scene == SceneType::Unknown {
-            scene = self.try_result_edge_detection(frame).unwrap_or(scene);
-        }
-        if scene == SceneType::Unknown {
-            scene = self.try_openmatch_edge_similarity(frame).unwrap_or(scene);
+            scene = detect_openmatch_scene_via_edge(frame, &self.rois, &self.jacket_matcher)
+                .unwrap_or(scene);
         }
         if scene == SceneType::Unknown {
             scene = self.try_keyword_lockin(raw_text).unwrap_or(scene);
         }
         scene
-    }
-
-    fn try_result_edge_detection(&self, frame: &CapturedFrame) -> Option<SceneType> {
-        let jacket_roi = self
-            .rois
-            .get_roi_for_scene("jacket", SceneType::ResultFreestyle)?;
-        if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
-            debug_println!(
-                "    [detect_logo_if_due] Result screen jacket edge strength: {}",
-                edge_strength
-            );
-            if edge_strength >= 15.0 {
-                debug_println!("    [detect_logo_if_due] Bypassed logo OCR: Result screen detected via jacket edge strength!");
-                return Some(SceneType::ResultFreestyle);
-            }
-        }
-        None
-    }
-
-    fn try_openmatch_edge_similarity(&self, frame: &CapturedFrame) -> Option<SceneType> {
-        let jacket_roi = self
-            .rois
-            .get_roi_for_scene("jacket", SceneType::OpenMatch)?;
-        if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
-            if edge_strength >= 25.0 {
-                if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
-                    if let Some(match_res) = self.jacket_matcher.match_jacket(
-                        &jacket_img.bgra,
-                        jacket_img.width as usize,
-                        jacket_img.height as usize,
-                        4,
-                    ) {
-                        if match_res.similarity >= 0.65 {
-                            debug_println!("    [detect_logo_if_due] Bypassed logo OCR: OpenMatch screen detected via jacket edge ({:.2}) and similarity ({:.4})!", edge_strength, match_res.similarity);
-                            return Some(SceneType::OpenMatch);
-                        }
-                    }
-                }
-            }
-        }
-        None
     }
 
     fn try_keyword_lockin(&self, raw_text: &str) -> Option<SceneType> {
@@ -564,6 +521,53 @@ pub fn check_open_match_badge(frame: &CapturedFrame, rois: &RoiManager) -> Optio
     None
 }
 
+fn detect_result_scene_via_edge(frame: &CapturedFrame, rois: &RoiManager) -> Option<SceneType> {
+    // ResultFreestyle, ResultOpen3, ResultOpen2 재킷 ROI는 같은 위치를 공유함
+    // 따라서 ResultFreestyle 재킷 ROI를 기준으로 엣지 디텍션을 수행하고, 추가 확인을 통해 분기함
+    let jacket_roi = rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle)?;
+    if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
+        debug_println!(
+            "    [detect_result_scene_via_edge] Result screen jacket edge strength: {}",
+            edge_strength
+        );
+        if edge_strength >= 15.0 {
+            debug_println!("    [detect_result_scene_via_edge] Bypassed logo OCR: Result screen detected via jacket edge strength!");
+            if let Some(fallback_scene) = check_open_match_badge(frame, rois) {
+                return Some(fallback_scene);
+            } else {
+                return Some(SceneType::ResultFreestyle);
+            }
+        }
+    }
+    None
+}
+
+fn detect_openmatch_scene_via_edge(
+    frame: &CapturedFrame,
+    rois: &RoiManager,
+    matcher: &overmax_data::JacketMatcher,
+) -> Option<SceneType> {
+    let jacket_roi = rois.get_roi_for_scene("jacket", SceneType::OpenMatch)?;
+    if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
+        if edge_strength >= 25.0 {
+            if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
+                if let Some(match_res) = matcher.match_jacket(
+                    &jacket_img.bgra,
+                    jacket_img.width as usize,
+                    jacket_img.height as usize,
+                    4,
+                ) {
+                    if match_res.similarity >= 0.65 {
+                        debug_println!("    [detect_openmatch_scene_via_edge] Bypassed logo OCR: OpenMatch screen detected via jacket edge ({:.2}) and similarity ({:.4})!", edge_strength, match_res.similarity);
+                        return Some(SceneType::OpenMatch);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn detect_scene_from_logo(
     frame: &CapturedFrame,
     ocr: &OcrDetector,
@@ -580,43 +584,12 @@ pub fn detect_scene_from_logo(
     };
     let (mut scene, _raw_text, _) = ocr.detect_logo(&logo_img);
 
-    // 1단계 결과창 재킷 엣지 디텍션 폴킷
     if scene == SceneType::Unknown {
-        // ResultFreestyle, ResultOpen3, ResultOpen2 재킷 ROI는 같은 위치를 공유함
-        // 따라서 ResultFreestyle 재킷 ROI를 기준으로 엣지 디텍션을 수행하고, 추가 확인을 통해 분기함
-        if let Some(jacket_roi) = rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle) {
-            if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
-                if edge_strength >= 15.0 {
-                    if let Some(fallback_scene) = check_open_match_badge(frame, rois) {
-                        scene = fallback_scene;
-                    } else {
-                        scene = SceneType::ResultFreestyle;
-                    }
-                }
-            }
-        }
+        scene = detect_result_scene_via_edge(frame, rois).unwrap_or(scene);
     }
 
-    // 2단계 오픈매치 선곡창 재킷 엣지 + 유사도 폴백
     if scene == SceneType::Unknown {
-        if let Some(jacket_roi) = rois.get_roi_for_scene("jacket", SceneType::OpenMatch) {
-            if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
-                if edge_strength >= 25.0 {
-                    if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
-                        if let Some(match_res) = matcher.match_jacket(
-                            &jacket_img.bgra,
-                            jacket_img.width as usize,
-                            jacket_img.height as usize,
-                            4,
-                        ) {
-                            if match_res.similarity >= 0.65 {
-                                scene = SceneType::OpenMatch;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        scene = detect_openmatch_scene_via_edge(frame, rois, matcher).unwrap_or(scene);
     }
 
     scene
