@@ -127,10 +127,7 @@ impl DetectionPipeline {
         logo_detected: bool,
         now: f64,
     ) -> DetectionOutput {
-        let is_result = matches!(
-            self.last_logo_scene,
-            SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
-        );
+        let is_result = self.last_logo_scene.is_result();
         let is_song_select = self.hysteresis.is_active || is_result;
         let is_leaving = if is_result {
             false
@@ -329,10 +326,7 @@ impl DetectionPipeline {
     }
 
     fn try_keyword_lockin(&self, raw_text: &str) -> Option<SceneType> {
-        let is_prev_result = matches!(
-            self.last_logo_scene,
-            SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
-        );
+        let is_prev_result = self.last_logo_scene.is_result();
         if !is_prev_result {
             return None;
         }
@@ -355,10 +349,7 @@ impl DetectionPipeline {
         candidate: SceneType,
         raw_text: &str,
     ) -> SceneType {
-        let is_detected_result = matches!(
-            candidate,
-            SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
-        );
+        let is_detected_result = candidate.is_result();
 
         if is_detected_result {
             if candidate == self.last_detected_result_scene {

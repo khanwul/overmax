@@ -295,12 +295,7 @@ impl PlayStateDetector {
         now: f64,
     ) -> (GameSessionState, Option<OcrTelemetry>) {
         let scene = rois.current_scene();
-        let is_result = matches!(
-            scene,
-            overmax_core::SceneType::ResultFreestyle
-                | overmax_core::SceneType::ResultOpen3
-                | overmax_core::SceneType::ResultOpen2
-        );
+        let is_result = scene.is_result();
 
         let mode;
         let diff;

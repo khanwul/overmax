@@ -292,10 +292,7 @@ fn run_roi_test(
     }
 
     // 2. Max Combo 테스트
-    let is_result = matches!(
-        scene,
-        SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2
-    );
+    let is_result = scene.is_result();
     let is_mc = if is_result {
         overmax_engine::detector::play_state::detect_max_combo_result(frame, rois)
     } else {
