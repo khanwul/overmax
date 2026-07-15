@@ -394,11 +394,9 @@ pub fn match_character(
         let mut diff_pixels = 0usize;
         let total_pixels = target_w * target_h;
         for i in 0..total_pixels {
-            let a = if resized_bin[i] > 0 { 1u8 } else { 0u8 };
-            let b = if scaled_template[i] > 0 { 1u8 } else { 0u8 };
-            if a != b {
-                diff_pixels += 1;
-            }
+            let a = (resized_bin[i] > 0) as u8;
+            let b = (scaled_template[i] > 0) as u8;
+            diff_pixels += (a ^ b) as usize;
         }
 
         let match_rate = (total_pixels - diff_pixels) as f32 / total_pixels as f32;
