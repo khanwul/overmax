@@ -300,7 +300,8 @@ fn main() {
                         h,
                         overmax_cv::LumaMethod::Average,
                         1,
-                    ).unwrap_or_default();
+                    )
+                    .unwrap_or_default();
                     let fg_count = binary.iter().filter(|&&x| x == 1).count();
                     if fg_count < 20 {
                         img_report.push_str("    - Binary Crop Skipped: fg_count < 20 (Blank)\n");
@@ -349,7 +350,8 @@ fn main() {
                         h,
                         overmax_cv::LumaMethod::Average,
                         1,
-                    ).unwrap_or_default();
+                    )
+                    .unwrap_or_default();
                     let fg_count = binary.iter().filter(|&&x| x == 1).count();
                     if fg_count < 10 {
                         img_report.push_str("    - Binary Crop Skipped: fg_count < 10 (Blank)\n");
