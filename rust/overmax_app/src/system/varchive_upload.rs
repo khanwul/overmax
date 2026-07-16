@@ -150,3 +150,29 @@ pub fn fetch_records_blocking(v_id: &str, button: i32) -> Result<serde_json::Val
         ))
     }
 }
+
+pub fn fetch_single_song_records_blocking(
+    v_id: &str,
+    button: i32,
+    song_id: i32,
+) -> Result<serde_json::Value, String> {
+    let url = format!(
+        "https://v-archive.net/api/v2/archive/{}/button/{}?title={}",
+        v_id, button, song_id
+    );
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client.get(&url).send().map_err(|e| e.to_string())?;
+
+    if resp.status().is_success() {
+        resp.json().map_err(|e| e.to_string())
+    } else {
+        Err(format!(
+            "HTTP request failed with status: {}",
+            resp.status()
+        ))
+    }
+}

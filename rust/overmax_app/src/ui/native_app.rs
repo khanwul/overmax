@@ -766,22 +766,72 @@ impl NativeApp {
                 };
                 let btn = button_num(&candidate.button_mode);
                 let cache_root = root.join("cache").join("varchive");
-                if let Err(e) = upsert_varchive_cache_record(
-                    &cache_root,
-                    &steam,
-                    btn,
-                    candidate.song_id,
-                    &candidate.difficulty,
-                    candidate.overmax_rate,
-                    candidate.overmax_mc,
-                ) {
-                    let _ = tx.send((
-                        index,
-                        "success".into(),
-                        format!("업로드 OK, 캐시 갱신 실패: {e}"),
-                    ));
+
+                let varchive_settings = settings.varchive();
+                let v_id = varchive_settings
+                    .user_map
+                    .get(&steam)
+                    .and_then(|u| u.v_id.as_deref())
+                    .unwrap_or("")
+                    .to_string();
+
+                let cache_updated = if !v_id.is_empty() {
+                    match varchive_upload::fetch_single_song_records_blocking(
+                        &v_id,
+                        btn,
+                        candidate.song_id,
+                    ) {
+                        Ok(data) => {
+                            if let Err(e) = overmax_data::merge_fetched_records_to_cache(
+                                &cache_root,
+                                &steam,
+                                btn,
+                                &data,
+                            ) {
+                                Err(format!("API 조회 OK, 캐시 병합 실패: {e}"))
+                            } else {
+                                Ok(())
+                            }
+                        }
+                        Err(e) => {
+                            if let Err(ue) = upsert_varchive_cache_record(
+                                &cache_root,
+                                &steam,
+                                btn,
+                                candidate.song_id,
+                                &candidate.difficulty,
+                                candidate.overmax_rate,
+                                candidate.overmax_mc,
+                            ) {
+                                Err(format!("API 실패 ({e}), 폴백 캐시 갱신 실패: {ue}"))
+                            } else {
+                                Ok(())
+                            }
+                        }
+                    }
                 } else {
-                    let _ = tx.send((index, "success".into(), success_message.into()));
+                    upsert_varchive_cache_record(
+                        &cache_root,
+                        &steam,
+                        btn,
+                        candidate.song_id,
+                        &candidate.difficulty,
+                        candidate.overmax_rate,
+                        candidate.overmax_mc,
+                    )
+                };
+
+                match cache_updated {
+                    Ok(_) => {
+                        let _ = tx.send((index, "success".into(), success_message.into()));
+                    }
+                    Err(err_msg) => {
+                        let _ = tx.send((
+                            index,
+                            "success".into(),
+                            format!("업로드 OK, 캐시 갱신 오류: {err_msg}"),
+                        ));
+                    }
                 }
             } else {
                 let _ = tx.send((index, "error".into(), res.message));

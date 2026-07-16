@@ -319,10 +319,154 @@ pub fn delete_varchive_cache_record(
     fs::write(&path, text).map_err(|e| e.to_string())
 }
 
+/// Merges fetched records (e.g., from a single song API fetch or full fetch) into the local cache.
+/// For each record in `data["records"]`, it upserts it into the local cache file.
+pub fn merge_fetched_records_to_cache(
+    cache_root: &Path,
+    steam_id: &str,
+    button: i32,
+    data: &Value,
+) -> Result<(), String> {
+    let user_dir = cache_root.join(steam_id);
+    fs::create_dir_all(&user_dir).map_err(|e| e.to_string())?;
+    let path = user_dir.join(format!("{button}.json"));
+
+    let mut root = if path.exists() {
+        let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({ "records": [] }))
+    } else {
+        json!({ "records": [] })
+    };
+
+    let existing_records = root
+        .as_object_mut()
+        .and_then(|m| {
+            m.entry("records".to_string())
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+        })
+        .ok_or_else(|| "invalid cache shape".to_string())?;
+
+    let new_records = data
+        .get("records")
+        .and_then(|r| r.as_array())
+        .ok_or_else(|| "invalid input data: records field missing or not an array".to_string())?;
+
+    for new_rec in new_records {
+        let Some(new_obj) = new_rec.as_object() else {
+            continue;
+        };
+
+        let new_title = new_obj.get("title").and_then(|v| match v {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        });
+        let new_pattern = new_obj.get("pattern").and_then(|v| v.as_str());
+
+        if let (Some(t), Some(p)) = (new_title, new_pattern) {
+            let mut updated = false;
+            for rec in existing_records.iter_mut() {
+                let Some(obj) = rec.as_object_mut() else {
+                    continue;
+                };
+                let title_match = match obj.get("title") {
+                    Some(Value::String(s)) => s == &t,
+                    Some(Value::Number(n)) => n.to_string() == t,
+                    _ => false,
+                };
+                let pat_match = obj.get("pattern").and_then(|v| v.as_str()) == Some(p);
+                if title_match && pat_match {
+                    // Replace the whole record object with the new one
+                    *rec = new_rec.clone();
+                    updated = true;
+                    break;
+                }
+            }
+            if !updated {
+                existing_records.push(new_rec.clone());
+            }
+        }
+    }
+
+    // Update user.updated_at if present in the data
+    if let Some(new_updated_at) = data.get("user").and_then(|u| u.get("updated_at")) {
+        if let Some(obj) = root.as_object_mut() {
+            obj.insert("updated_at".to_string(), new_updated_at.clone());
+        }
+    } else if let Some(new_updated_at) = data.get("updated_at") {
+        if let Some(obj) = root.as_object_mut() {
+            obj.insert("updated_at".to_string(), new_updated_at.clone());
+        }
+    }
+
+    let text = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    fs::write(&path, text).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_merge_fetched_records_to_cache() {
+        let dir = std::env::temp_dir().join(format!("varch-merge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("765611")).unwrap();
+
+        let initial_payload = json!({
+            "user": {
+                "v_id": "test_user",
+                "updated_at": "2026-07-16T12:00:00Z"
+            },
+            "records": [
+                {"title": "100", "pattern": "MX", "score": 98.5, "maxCombo": false}
+            ]
+        });
+
+        // 1. Initial merge (creates file)
+        merge_fetched_records_to_cache(&dir, "765611", 6, &initial_payload).unwrap();
+
+        // 2. Merge another song
+        let next_payload = json!({
+            "user": {
+                "v_id": "test_user",
+                "updated_at": "2026-07-16T13:00:00Z"
+            },
+            "records": [
+                {"title": "101", "pattern": "NM", "score": 99.9, "maxCombo": true}
+            ]
+        });
+        merge_fetched_records_to_cache(&dir, "765611", 6, &next_payload).unwrap();
+
+        // 3. Upsert existing song and change its score
+        let update_payload = json!({
+            "user": {
+                "v_id": "test_user",
+                "updated_at": "2026-07-16T14:00:00Z"
+            },
+            "records": [
+                {"title": "100", "pattern": "MX", "score": 100.0, "maxCombo": true}
+            ]
+        });
+        merge_fetched_records_to_cache(&dir, "765611", 6, &update_payload).unwrap();
+
+        // Load and assert
+        let m = load_varchive_record_cache(&dir, "765611");
+        // song 100 MX should be updated to 100.0, true
+        assert_eq!(m.get(&(100, "6B".into(), "MX".into())), Some(&(100.0, true)));
+        // song 101 NM should be preserved as 99.9, true
+        assert_eq!(m.get(&(101, "6B".into(), "NM".into())), Some(&(99.9, true)));
+
+        // Read raw JSON to check updated_at
+        let path = dir.join("765611").join("6.json");
+        let text = std::fs::read_to_string(path).unwrap();
+        let val: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(val.get("updated_at").and_then(|v| v.as_str()), Some("2026-07-16T14:00:00Z"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn parses_cache_file_like_python_client() {
