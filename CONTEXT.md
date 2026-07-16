@@ -189,7 +189,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-16 | 라이트모드 오버레이 모드/난이도 뱃지 높이 일치화 및 구조화 | 라이트모드 뱃지 높이 불일치 문제를 해결하기 위해 Px::mode_badge_h()를 18.0으로 조정하고, ModeBadge 컴포넌트 내부 기본 크기 계산도 Px 구조체 값을 사용하도록 일원화 | [overlay_ui.rs](rust/overmax_app/src/ui/overlay_ui.rs) / [mode_badge.rs](rust/overmax_app/src/ui/components/mode_badge.rs) |
 | 2026-07-16 | 선곡창 캐시 제거 및 결과창 실시간 독립 감지 | 선곡창 오인식 전염 차단 및 데이터 무결성 보장을 위해 선곡창 캐시(last_played_song_id, song_select_mode/diff)를 완전히 제거하고 결과창 단독 픽셀 매칭 및 보정 구조로 단순화 | [play_state.rs](rust/overmax_engine/src/detector/play_state.rs) / [detection_pipeline.rs](rust/overmax_engine/src/detector/detection_pipeline.rs) |
 | 2026-07-16 | 재킷 매칭 기반 Freestyle 씬 우선 판독 및 OCR Bypass | 선곡창 최초 진입 시 OCR 쿨다운 대기 지연을 해소하고 CPU 사용량을 최적화하기 위해, 재킷 엣지/이미지 매칭 성공 시 OCR 호출을 생략(Bypass)하도록 파이프라인 개선 | [detection_pipeline.rs](rust/overmax_engine/src/detector/detection_pipeline.rs) |
-| 2026-07-16 | 결과창 재킷 매칭 및 씬 우선 감지 파이프라인 정립 | 결과창에서도 씬 판단 단계에서 재킷 매칭을 동시에 수행하여 곡 ID를 추출하고, commit_result_scene의 중복 매칭을 제거하여 씬 감지 및 곡 ID 확인 프로세스를 일원화 | [detection_pipeline.rs](rust/overmax_engine/src/detector/detection_pipeline.rs) |
+| 2026-07-16 | 결과창 재킷 매칭 및 씬 우선 감지 파이프라인 정립 | 결과창 씬 판정 단계에서 재킷 매칭이 성공했을 때만 씬을 확정하도록 (SceneType, i32) 반환 타입을 엄격화하고, commit_result_scene은 Hysteresis 필터링 역할만 담당하도록 극대 단순화 | [detection_pipeline.rs](rust/overmax_engine/src/detector/detection_pipeline.rs) |
 
 
 
