@@ -158,13 +158,6 @@ impl PlayStateDetector {
         self.cache.clear_result_cache();
     }
 
-    /// 로고 OCR raw_text에서 파싱된 모드를 직접 주입합니다.
-    /// detect_freestyle_mode 템플릿 매칭이 실패하는 결과 화면에서
-    /// detection_pipeline이 로고 텍스트로부터 모드를 추출하여 세팅합니다.
-    pub fn set_logo_mode(&mut self, mode: String) {
-        self.cache.result_mode.update(Some(mode));
-    }
-
     fn resolve_result_mode_diff(
         &mut self,
         scene: overmax_core::SceneType,

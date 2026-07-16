@@ -278,9 +278,9 @@ impl DetectionPipeline {
 
     fn commit_result_scene(
         &mut self,
-        frame: &CapturedFrame,
+        _frame: &CapturedFrame,
         candidate: SceneType,
-        raw_text: &str,
+        _raw_text: &str,
     ) -> SceneType {
         let is_detected_result = candidate.is_result();
 
@@ -295,47 +295,15 @@ impl DetectionPipeline {
             // 1프레임 대기 후, 2프레임차에 최종 검증 수행
             if self.result_scene_streak >= 2 {
                 let mut allow_entry = false;
-                let mut matched_song_id = None;
 
-                // 결과창 진입 확정 시, 항상 결과창 재킷 매칭을 1회 실행하여 곡 ID 검출
-                if let Some(jacket_roi) = self.rois.get_roi_for_scene("jacket", candidate) {
-                    if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
-                        if let Some(match_res) = self.jacket_matcher.match_jacket(
-                            &jacket_img.bgra,
-                            jacket_img.width as usize,
-                            jacket_img.height as usize,
-                            4,
-                        ) {
-                            if let Ok(song_id) = match_res.image_id.parse::<i32>() {
-                                if match_res.similarity >= 0.70 {
-                                    matched_song_id = Some(song_id);
-                                    allow_entry = true;
-                                    debug_println!(
-                                        "    [detect_logo_if_due] Result screen jacket verified. SongID={}, Similarity={}",
-                                        song_id, match_res.similarity
-                                    );
-                                }
-                            }
-                        }
-                    }
+                // 이미 씬 판별 시점에 결과창 재킷 매칭이 완료되어 current_song_id에 저장되었으므로,
+                // 이 값의 존재 여부만으로 결과창 진입을 결정
+                if self.current_song_id.is_some() {
+                    allow_entry = true;
                 }
 
                 if allow_entry {
                     self.last_logo_scene = candidate;
-                    self.current_song_id = matched_song_id; // 결과창에서 직접 재킷으로 인식된 곡 ID로 확정
-
-                    // ResultFreestyle 확정 시, 로고 OCR raw_text에서 모드를 파싱하여 play_state에 주입
-                    // (결과 화면 폰트가 선곡 화면과 달라 템플릿 매칭이 실패하므로)
-                    if candidate == SceneType::ResultFreestyle {
-                        if let Some(mode) = self.ocr.parse_mode_from_text(raw_text) {
-                            debug_println!(
-                                "    [detect_logo_if_due] Parsed mode '{}' from logo text '{}'",
-                                mode,
-                                raw_text.trim()
-                            );
-                            self.play_state.set_logo_mode(mode);
-                        }
-                    }
                 } else {
                     debug_println!("    [detect_logo_if_due] Result screen jacket verification failed. Rejecting scene.");
                     self.result_scene_streak = 0;
@@ -499,21 +467,46 @@ pub fn check_open_match_badge(frame: &CapturedFrame, rois: &RoiManager) -> Optio
     None
 }
 
-fn detect_result_scene_via_edge(frame: &CapturedFrame, rois: &RoiManager) -> Option<SceneType> {
+fn detect_result_scene_via_edge(
+    frame: &CapturedFrame,
+    rois: &RoiManager,
+    matcher: &overmax_data::JacketMatcher,
+) -> Option<(SceneType, Option<i32>)> {
     // ResultFreestyle, ResultOpen3, ResultOpen2 재킷 ROI는 같은 위치를 공유함
     // 따라서 ResultFreestyle 재킷 ROI를 기준으로 엣지 디텍션을 수행하고, 추가 확인을 통해 분기함
     let jacket_roi = rois.get_roi_for_scene("jacket", SceneType::ResultFreestyle)?;
     if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
-        debug_println!(
-            "    [detect_result_scene_via_edge] Result screen jacket edge strength: {}",
-            edge_strength
-        );
         if edge_strength >= 15.0 {
-            debug_println!("    [detect_result_scene_via_edge] Bypassed logo OCR: Result screen detected via jacket edge strength!");
+            debug_println!(
+                "    [detect_result_scene_via_edge] Result screen detected via jacket edge strength: {}",
+                edge_strength
+            );
+
+            // 결과창 재킷 매칭 시도
+            let mut song_id_opt = None;
+            if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
+                if let Some(match_res) = matcher.match_jacket(
+                    &jacket_img.bgra,
+                    jacket_img.width as usize,
+                    jacket_img.height as usize,
+                    4,
+                ) {
+                    if match_res.similarity >= 0.70 {
+                        if let Ok(song_id) = match_res.image_id.parse::<i32>() {
+                            song_id_opt = Some(song_id);
+                            debug_println!(
+                                "    [detect_result_scene_via_edge] Result screen jacket verified. SongID={}, Similarity={}",
+                                song_id, match_res.similarity
+                            );
+                        }
+                    }
+                }
+            }
+
             if let Some(fallback_scene) = check_open_match_badge(frame, rois) {
-                return Some(fallback_scene);
+                return Some((fallback_scene, song_id_opt));
             } else {
-                return Some(SceneType::ResultFreestyle);
+                return Some((SceneType::ResultFreestyle, song_id_opt));
             }
         }
     }
@@ -582,27 +575,27 @@ fn parse_static_scene(
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
 ) -> Option<(SceneType, String, Option<i32>)> {
-    // 1. 프리스타일 재킷 엣지 & 매칭을 최우선으로 검증 (성공 시 OCR Bypass)
+    // 1. 결과창 감지 우선 (Bypass OCR)
+    if let Some((scene, song_id_opt)) = detect_result_scene_via_edge(frame, rois, matcher) {
+        return Some((scene, String::new(), song_id_opt));
+    }
+
+    // 2. 오픈매치 대기실 감지 우선 (Bypass OCR)
+    if let Some((scene, song_id)) = detect_openmatch_scene_via_edge(frame, rois, matcher) {
+        return Some((scene, String::new(), Some(song_id)));
+    }
+
+    // 3. 프리스타일 선곡창 감지 우선 (Bypass OCR)
     if let Some((scene, song_id)) = detect_freestyle_scene_via_edge(frame, rois, matcher) {
         return Some((scene, String::new(), Some(song_id)));
     }
 
+    // 4. 최종 폴백: Windows OCR을 통한 로고 감지 및 씬 판별
     let logo_roi = rois.get_roi("logo")?;
     let logo_img = crop_roi(frame, logo_roi)?;
-    let (mut scene, raw_text, _) = ocr.detect_logo(&logo_img);
-    let mut matched_song_id = None;
+    let (scene, raw_text, _) = ocr.detect_logo(&logo_img);
 
-    if scene == SceneType::Unknown {
-        scene = detect_result_scene_via_edge(frame, rois).unwrap_or(scene);
-    }
-    if scene == SceneType::Unknown {
-        if let Some((om_scene, song_id)) = detect_openmatch_scene_via_edge(frame, rois, matcher) {
-            scene = om_scene;
-            matched_song_id = Some(song_id);
-        }
-    }
-
-    Some((scene, raw_text, matched_song_id))
+    Some((scene, raw_text, None))
 }
 
 pub fn detect_scene_from_logo(
