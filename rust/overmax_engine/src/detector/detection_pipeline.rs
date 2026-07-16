@@ -625,12 +625,11 @@ fn check_category_band_solid(
     frame: &CapturedFrame,
     jacket_roi: crate::detector::roi::RoiRect,
 ) -> bool {
-    let margin_x = 2; // 2픽셀 우측 오프셋
     let width = 5;
     let band_roi = crate::detector::roi::RoiRect {
-        x1: jacket_roi.x2 + margin_x,
+        x1: jacket_roi.x2,
         y1: jacket_roi.y1,
-        x2: jacket_roi.x2 + margin_x + width,
+        x2: jacket_roi.x2 + width,
         y2: jacket_roi.y2,
     };
 
@@ -684,8 +683,8 @@ fn check_category_band_solid(
 
     let avg_diff = diff_sum / (total_pixels * 3) as f64;
 
-    // 평균 픽셀 채널 편차가 10.0 이하이면 매우 고른 단색(Solid)으로 판정
-    let is_solid = avg_diff <= 10.0;
+    // 5x60 띠 내부 글자로 인한 픽셀 편차를 고려하여 임계치를 25.0 이하로 설정
+    let is_solid = avg_diff <= 25.0;
     if is_solid {
         debug_println!(
             "    [check_category_band_solid] Category band solid detected! brightness={:.1}, avg_diff={:.2}",
