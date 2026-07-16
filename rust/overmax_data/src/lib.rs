@@ -6,9 +6,9 @@ pub mod store;
 pub use community::client::VArchiveDB;
 pub use community::sheet_meta::{PatternSheetMeta, PatternSheetMetaItem};
 pub use community::sync::{
-    build_candidates, delete_varchive_cache_record, load_varchive_record_cache,
-    merge_fetched_records_to_cache, save_fetched_records_to_cache, upsert_varchive_cache_record,
-    SyncCandidate,
+    build_candidates, delete_varchive_cache_record, get_latest_updated_at_from_cache,
+    load_varchive_record_cache, merge_fetched_records_to_cache, save_fetched_records_to_cache,
+    upsert_varchive_cache_record, SyncCandidate,
 };
 pub use config::compatibility::DataCompatibility;
 pub use config::scene_config::{GlobalRoiConfig, RoiRect, SceneRoiConfig};

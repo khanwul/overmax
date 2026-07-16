@@ -404,6 +404,40 @@ pub fn merge_fetched_records_to_cache(
     fs::write(&path, text).map_err(|e| e.to_string())
 }
 
+/// Scans the local JSON cache file and returns the latest updatedAt ISO timestamp string.
+pub fn get_latest_updated_at_from_cache(
+    cache_root: &Path,
+    steam_id: &str,
+    button: i32,
+) -> Option<String> {
+    let path = cache_root.join(steam_id).join(format!("{button}.json"));
+    if !path.exists() {
+        return None;
+    }
+    let text = fs::read_to_string(&path).ok()?;
+    let root: Value = serde_json::from_str(&text).ok()?;
+    let records = root.get("records")?.as_array()?;
+
+    let mut latest: Option<String> = None;
+    for rec in records {
+        if let Some(updated_at) = rec.get("updatedAt").and_then(|v| v.as_str()) {
+            if !updated_at.is_empty() {
+                match &latest {
+                    Some(curr) => {
+                        if updated_at > curr {
+                            latest = Some(updated_at.to_string());
+                        }
+                    }
+                    None => {
+                        latest = Some(updated_at.to_string());
+                    }
+                }
+            }
+        }
+    }
+    latest
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -455,7 +489,10 @@ mod tests {
         // Load and assert
         let m = load_varchive_record_cache(&dir, "765611");
         // song 100 MX should be updated to 100.0, true
-        assert_eq!(m.get(&(100, "6B".into(), "MX".into())), Some(&(100.0, true)));
+        assert_eq!(
+            m.get(&(100, "6B".into(), "MX".into())),
+            Some(&(100.0, true))
+        );
         // song 101 NM should be preserved as 99.9, true
         assert_eq!(m.get(&(101, "6B".into(), "NM".into())), Some(&(99.9, true)));
 
@@ -463,7 +500,39 @@ mod tests {
         let path = dir.join("765611").join("6.json");
         let text = std::fs::read_to_string(path).unwrap();
         let val: Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(val.get("updated_at").and_then(|v| v.as_str()), Some("2026-07-16T14:00:00Z"));
+        assert_eq!(
+            val.get("updated_at").and_then(|v| v.as_str()),
+            Some("2026-07-16T14:00:00Z")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_get_latest_updated_at_from_cache() {
+        let dir = std::env::temp_dir().join(format!("varch-latest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("765611")).unwrap();
+
+        // 1. If file does not exist, should return None
+        assert_eq!(get_latest_updated_at_from_cache(&dir, "765611", 6), None);
+
+        // 2. Normal case with various updatedAt dates
+        let payload = json!({
+            "records": [
+                {"title": "1", "pattern": "NM", "score": 99.0, "maxCombo": true, "updatedAt": "2023-10-08T12:00:00.000Z"},
+                {"title": "2", "pattern": "HD", "score": 98.0, "maxCombo": false, "updatedAt": "2023-10-09T15:30:00.000Z"},
+                {"title": "3", "pattern": "MX", "score": 97.0, "maxCombo": true, "updatedAt": "2023-10-05T09:00:00.000Z"},
+                {"title": "4", "pattern": "SC", "score": 96.0, "maxCombo": false, "updatedAt": ""} // Empty updatedAt
+            ]
+        });
+        std::fs::write(dir.join("765611").join("6.json"), payload.to_string()).unwrap();
+
+        // Should return the latest one: 2023-10-09T15:30:00.000Z
+        assert_eq!(
+            get_latest_updated_at_from_cache(&dir, "765611", 6),
+            Some("2023-10-09T15:30:00.000Z".to_string())
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

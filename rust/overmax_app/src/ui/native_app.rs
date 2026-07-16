@@ -998,15 +998,36 @@ impl NativeApp {
                     format!("[VArchiveClient] 기록 요청 중: {} ({}B)", v_id, b),
                 );
 
-                match varchive_upload::fetch_records_blocking(&v_id, b) {
+                let since =
+                    overmax_data::get_latest_updated_at_from_cache(&cache_root, &steam_id, b);
+                if let Some(ref s) = since {
+                    debug_ui::push_log(
+                        &log_lines,
+                        max_lines,
+                        format!("[VArchiveClient] 증분 조회 적용 (since={})", s),
+                    );
+                }
+
+                match varchive_upload::fetch_records_blocking(&v_id, b, since.as_deref()) {
                     Ok(data) => {
-                        if let Err(e) = overmax_data::save_fetched_records_to_cache(
-                            &cache_root,
-                            &steam_id,
-                            &v_id,
-                            b,
-                            &data,
-                        ) {
+                        let save_res = if since.is_some() {
+                            overmax_data::merge_fetched_records_to_cache(
+                                &cache_root,
+                                &steam_id,
+                                b,
+                                &data,
+                            )
+                        } else {
+                            overmax_data::save_fetched_records_to_cache(
+                                &cache_root,
+                                &steam_id,
+                                &v_id,
+                                b,
+                                &data,
+                            )
+                        };
+
+                        if let Err(e) = save_res {
                             debug_ui::push_log(
                                 &log_lines,
                                 max_lines,

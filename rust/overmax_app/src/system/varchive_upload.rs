@@ -129,11 +129,22 @@ pub fn upload_score_blocking(
     }
 }
 
-pub fn fetch_records_blocking(v_id: &str, button: i32) -> Result<serde_json::Value, String> {
-    let url = format!(
-        "https://v-archive.net/api/v2/archive/{}/button/{}",
-        v_id, button
-    );
+pub fn fetch_records_blocking(
+    v_id: &str,
+    button: i32,
+    since: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let url = if let Some(s) = since {
+        format!(
+            "https://v-archive.net/api/v2/archive/{}/button/{}?since={}",
+            v_id, button, s
+        )
+    } else {
+        format!(
+            "https://v-archive.net/api/v2/archive/{}/button/{}",
+            v_id, button
+        )
+    };
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
