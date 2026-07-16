@@ -209,7 +209,7 @@ impl DetectionPipeline {
             return None;
         }
 
-        let Some((scene, raw_text)) =
+        let Some((scene, raw_text, matched_song_id)) =
             parse_static_scene(frame, &self.ocr, &self.rois, &self.jacket_matcher)
         else {
             debug_println!("    [detect_logo_if_due] logo crop failed! now={}", now);
@@ -217,6 +217,20 @@ impl DetectionPipeline {
             self.last_logo_ocr_ts = now;
             return Some(SceneType::Unknown);
         };
+
+        if let Some(song_id) = matched_song_id {
+            self.current_song_id = Some(song_id);
+            self.last_jacket_match_ts = now;
+
+            // process_frame_shared 에서 중복 매칭이 돌지 않도록 썸네일 캐시 갱신
+            if let Some(jacket_roi) = self.rois.get_roi("jacket") {
+                if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
+                    if let Some(thumb) = make_thumbnail(&jacket_img) {
+                        self.last_jacket_thumb = Some(thumb);
+                    }
+                }
+            }
+        }
 
         debug_println!(
             "    [detect_logo_if_due] now={}, OCR raw='{}', static_scene={:?}",
@@ -506,11 +520,39 @@ fn detect_result_scene_via_edge(frame: &CapturedFrame, rois: &RoiManager) -> Opt
     None
 }
 
+fn detect_freestyle_scene_via_edge(
+    frame: &CapturedFrame,
+    rois: &RoiManager,
+    matcher: &overmax_data::JacketMatcher,
+) -> Option<(SceneType, i32)> {
+    let jacket_roi = rois.get_roi_for_scene("jacket", SceneType::Freestyle)?;
+    if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
+        if edge_strength >= 25.0 {
+            if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
+                if let Some(match_res) = matcher.match_jacket(
+                    &jacket_img.bgra,
+                    jacket_img.width as usize,
+                    jacket_img.height as usize,
+                    4,
+                ) {
+                    if match_res.similarity >= 0.60 {
+                        if let Ok(song_id) = match_res.image_id.parse::<i32>() {
+                            debug_println!("    [detect_freestyle_scene_via_edge] Bypassed logo OCR: Freestyle screen detected via jacket edge ({:.2}) and similarity ({:.4})!", edge_strength, match_res.similarity);
+                            return Some((SceneType::Freestyle, song_id));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn detect_openmatch_scene_via_edge(
     frame: &CapturedFrame,
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
-) -> Option<SceneType> {
+) -> Option<(SceneType, i32)> {
     let jacket_roi = rois.get_roi_for_scene("jacket", SceneType::OpenMatch)?;
     if let Some(edge_strength) = detect_jacket_edges(frame, jacket_roi) {
         if edge_strength >= 25.0 {
@@ -522,8 +564,10 @@ fn detect_openmatch_scene_via_edge(
                     4,
                 ) {
                     if match_res.similarity >= 0.65 {
-                        debug_println!("    [detect_openmatch_scene_via_edge] Bypassed logo OCR: OpenMatch screen detected via jacket edge ({:.2}) and similarity ({:.4})!", edge_strength, match_res.similarity);
-                        return Some(SceneType::OpenMatch);
+                        if let Ok(song_id) = match_res.image_id.parse::<i32>() {
+                            debug_println!("    [detect_openmatch_scene_via_edge] Bypassed logo OCR: OpenMatch screen detected via jacket edge ({:.2}) and similarity ({:.4})!", edge_strength, match_res.similarity);
+                            return Some((SceneType::OpenMatch, song_id));
+                        }
                     }
                 }
             }
@@ -537,19 +581,28 @@ fn parse_static_scene(
     ocr: &OcrDetector,
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
-) -> Option<(SceneType, String)> {
+) -> Option<(SceneType, String, Option<i32>)> {
+    // 1. 프리스타일 재킷 엣지 & 매칭을 최우선으로 검증 (성공 시 OCR Bypass)
+    if let Some((scene, song_id)) = detect_freestyle_scene_via_edge(frame, rois, matcher) {
+        return Some((scene, String::new(), Some(song_id)));
+    }
+
     let logo_roi = rois.get_roi("logo")?;
     let logo_img = crop_roi(frame, logo_roi)?;
     let (mut scene, raw_text, _) = ocr.detect_logo(&logo_img);
+    let mut matched_song_id = None;
 
     if scene == SceneType::Unknown {
         scene = detect_result_scene_via_edge(frame, rois).unwrap_or(scene);
     }
     if scene == SceneType::Unknown {
-        scene = detect_openmatch_scene_via_edge(frame, rois, matcher).unwrap_or(scene);
+        if let Some((om_scene, song_id)) = detect_openmatch_scene_via_edge(frame, rois, matcher) {
+            scene = om_scene;
+            matched_song_id = Some(song_id);
+        }
     }
 
-    Some((scene, raw_text))
+    Some((scene, raw_text, matched_song_id))
 }
 
 pub fn detect_scene_from_logo(
@@ -559,7 +612,7 @@ pub fn detect_scene_from_logo(
     matcher: &overmax_data::JacketMatcher,
 ) -> SceneType {
     parse_static_scene(frame, ocr, rois, matcher)
-        .map(|(scene, _)| scene)
+        .map(|(scene, _, _)| scene)
         .unwrap_or(SceneType::Unknown)
 }
 
