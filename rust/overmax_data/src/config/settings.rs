@@ -501,8 +501,6 @@ pub struct VArchiveSettings {
     #[serde(default = "default_timeout")]
     pub download_timeout_sec: u64,
     #[serde(default)]
-    pub auto_refresh: bool,
-    #[serde(default)]
     pub user_map: std::collections::HashMap<String, VArchiveUserMap>,
 }
 
@@ -592,7 +590,6 @@ impl Default for VArchiveSettings {
             cache_path: default_songs_cache(),
             cache_ttl_sec: default_ttl(),
             download_timeout_sec: default_timeout(),
-            auto_refresh: false,
             user_map: std::collections::HashMap::new(),
         }
     }

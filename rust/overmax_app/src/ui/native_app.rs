@@ -402,12 +402,10 @@ impl NativeApp {
 
         // 시작 시 자동 갱신
         let varchive_settings = app_settings.varchive();
-        if varchive_settings.auto_refresh {
-            if let Some(user_info) = varchive_settings.user_map.get(&steam0) {
-                if let Some(v_id) = &user_info.v_id {
-                    if !v_id.is_empty() {
-                        let _ = fetch_req_tx.send((steam0.clone(), v_id.to_string(), 0));
-                    }
+        if let Some(user_info) = varchive_settings.user_map.get(&steam0) {
+            if let Some(v_id) = &user_info.v_id {
+                if !v_id.is_empty() {
+                    let _ = fetch_req_tx.send((steam0.clone(), v_id.to_string(), 0));
                 }
             }
         }
@@ -920,9 +918,6 @@ impl NativeApp {
     pub(crate) fn handle_auto_refresh(&mut self) {
         let settings = self.settings.get_merged();
         let varchive = settings.varchive();
-        if !varchive.auto_refresh {
-            return;
-        }
 
         let sid = steam_session::most_recent_steam_id().unwrap_or_default();
         if sid.is_empty() {

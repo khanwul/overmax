@@ -239,10 +239,6 @@ fn varchive_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
 
         ui.add_space(Theme::ROW_SPACING);
 
-        form_row(ui, "자동화", |ui| {
-            auto_refresh_row(ui, draft);
-        });
-
         if ctx.current_steam_id.is_empty() {
             ui.add_space(8.0);
             ui.label(
@@ -278,23 +274,6 @@ fn current_steam_label(ctx: &SettingsUiContext) -> String {
             }
         }
         format!("현재 Steam: {}", ctx.current_steam_id)
-    }
-}
-
-fn auto_refresh_row(ui: &mut egui::Ui, draft: &mut Value) {
-    let varchive = object_section_mut(draft, "varchive");
-    let mut enabled = varchive
-        .get("auto_refresh")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if ui
-        .checkbox(
-            &mut enabled,
-            RichText::new("시작 시 자동 갱신").size(Theme::FONT_BODY),
-        )
-        .changed()
-    {
-        varchive.insert("auto_refresh".into(), json!(enabled));
     }
 }
 
