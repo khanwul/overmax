@@ -1,4 +1,3 @@
-use crate::community::sync::load_varchive_record_cache;
 use crate::store::record_db::RecordDB;
 use overmax_core::{RecordKey, RecordValue};
 use std::collections::{HashMap, HashSet};
@@ -34,7 +33,10 @@ impl RecordManager {
 
     pub fn refresh(&self) {
         let steam_id = self.record_db.get_steam_id();
-        let cache = load_varchive_record_cache(&self.varchive_cache_root, &steam_id);
+        let cache = self
+            .record_db
+            .load_varchive_records(&steam_id)
+            .unwrap_or_default();
         if let Ok(mut guard) = self.varchive_cache.lock() {
             *guard = cache;
         }
@@ -198,6 +200,7 @@ mod tests {
         assert!(db.initialize());
         assert!(db.upsert(42, "4B", "MX", 98.0, false, false));
         write_cache(&cache_root, steam_id);
+        db.migrate_json_cache_to_db(&cache_root).unwrap();
 
         let db = Arc::new(db);
         let manager = RecordManager::new(db, &cache_root);
@@ -319,6 +322,7 @@ mod tests {
         assert!(db.initialize());
         assert!(db.upsert(123, "5B", "SC", 99.80, true, false));
         write_cache(&cache_root, steam_id); // Writes MX/SC cache: MX=99.5, SC=97.0 for song 42/99
+        db.migrate_json_cache_to_db(&cache_root).unwrap();
 
         let db = Arc::new(db);
         let manager = RecordManager::new(db, &cache_root);

@@ -4,8 +4,8 @@ use eframe::egui::ViewportBuilder;
 use overmax_core::{Changed, GameSessionState};
 use overmax_data::{
     build_candidates, load_base_settings, load_merged_settings, normalize_settings,
-    upsert_varchive_cache_record, DataCompatibility, PatternSheetMeta, RecommendResult,
-    Recommender, RecordDB, RecordManager, SyncCandidate, VArchiveDB,
+    DataCompatibility, PatternSheetMeta, RecommendResult, Recommender, RecordDB,
+    RecordManager, SyncCandidate, VArchiveDB,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -348,9 +348,17 @@ impl NativeApp {
 
         let compat = DataCompatibility::current();
         let recent_steam = steam_session::most_recent_steam_id();
-        let mut record_db = RecordDB::new(root.join(compat.record_db), recent_steam.as_deref());
+        let mut record_db =
+            RecordDB::new(root.join(compat.record_db), recent_steam.as_deref());
         record_db.initialize();
         let record_db = Arc::new(record_db);
+
+        // JSON 캐시 파일이 있다면 SQLite DB로 마이그레이션 실행
+        let cache_root = root.join("cache").join("varchive");
+        if let Err(e) = record_db.migrate_json_cache_to_db(&cache_root) {
+            let _ = log_tx.send(format!("[VArchive] 캐시 마이그레이션 실패: {e}"));
+        }
+
         let record_manager = Arc::new(RecordManager::new(
             record_db.clone(),
             root.join("cache").join("varchive"),
@@ -733,7 +741,7 @@ impl NativeApp {
             .unwrap_or_default();
         let account_path = account_path_for_steam(&settings, &steam);
         let tx = self.sync_channels.upload_res_tx.clone();
-        let root = self.root.clone();
+        let record_db = self.record_db.clone();
 
         std::thread::spawn(move || {
             let path = Path::new(&account_path);
@@ -763,7 +771,6 @@ impl NativeApp {
                     "등록 완료"
                 };
                 let btn = button_num(&candidate.button_mode);
-                let cache_root = root.join("cache").join("varchive");
 
                 let varchive_settings = settings.varchive();
                 let v_id = varchive_settings
@@ -780,11 +787,11 @@ impl NativeApp {
                         candidate.song_id,
                     ) {
                         Ok(data) => {
-                            if let Err(e) = overmax_data::merge_fetched_records_to_cache(
-                                &cache_root,
+                            if let Err(e) = record_db.merge_varchive_fetched_records(
                                 &steam,
                                 btn,
                                 &data,
+                                false,
                             ) {
                                 Err(format!("API 조회 OK, 캐시 병합 실패: {e}"))
                             } else {
@@ -792,14 +799,22 @@ impl NativeApp {
                             }
                         }
                         Err(e) => {
-                            if let Err(ue) = upsert_varchive_cache_record(
-                                &cache_root,
+                            let fallback_payload = serde_json::json!({
+                                "records": [
+                                    {
+                                        "title": candidate.song_id,
+                                        "pattern": candidate.difficulty,
+                                        "score": candidate.overmax_rate,
+                                        "maxCombo": candidate.overmax_mc,
+                                        "updatedAt": ""
+                                    }
+                                ]
+                            });
+                            if let Err(ue) = record_db.merge_varchive_fetched_records(
                                 &steam,
                                 btn,
-                                candidate.song_id,
-                                &candidate.difficulty,
-                                candidate.overmax_rate,
-                                candidate.overmax_mc,
+                                &fallback_payload,
+                                false,
                             ) {
                                 Err(format!("API 실패 ({e}), 폴백 캐시 갱신 실패: {ue}"))
                             } else {
@@ -808,15 +823,20 @@ impl NativeApp {
                         }
                     }
                 } else {
-                    upsert_varchive_cache_record(
-                        &cache_root,
-                        &steam,
-                        btn,
-                        candidate.song_id,
-                        &candidate.difficulty,
-                        candidate.overmax_rate,
-                        candidate.overmax_mc,
-                    )
+                    let fallback_payload = serde_json::json!({
+                        "records": [
+                            {
+                                "title": candidate.song_id,
+                                "pattern": candidate.difficulty,
+                                "score": candidate.overmax_rate,
+                                "maxCombo": candidate.overmax_mc,
+                                "updatedAt": ""
+                            }
+                        ]
+                    });
+                    record_db
+                        .merge_varchive_fetched_records(&steam, btn, &fallback_payload, false)
+                        .map_err(|e| format!("폴백 캐시 갱신 실패: {e}"))
                 };
 
                 match cache_updated {
@@ -976,9 +996,9 @@ impl NativeApp {
 
     fn spawn_fetch(&self, steam_id: String, v_id: String, button: i32, ctx: egui::Context) {
         let tx = self.sync_channels.fetch_res_tx.clone();
-        let cache_root = self.root.join("cache").join("varchive");
         let log_lines = self.debug_state.log_lines.clone();
         let max_lines = self.max_log_lines();
+        let record_db = self.record_db.clone();
 
         std::thread::spawn(move || {
             let buttons = if button == 0 {
@@ -993,8 +1013,7 @@ impl NativeApp {
                     format!("[VArchiveClient] 기록 요청 중: {} ({}B)", v_id, b),
                 );
 
-                let since =
-                    overmax_data::get_latest_updated_at_from_cache(&cache_root, &steam_id, b);
+                let since = record_db.get_latest_updated_at_from_db(&steam_id, b);
                 if let Some(ref s) = since {
                     debug_ui::push_log(
                         &log_lines,
@@ -1005,22 +1024,13 @@ impl NativeApp {
 
                 match varchive_upload::fetch_records_blocking(&v_id, b, since.as_deref()) {
                     Ok(data) => {
-                        let save_res = if since.is_some() {
-                            overmax_data::merge_fetched_records_to_cache(
-                                &cache_root,
-                                &steam_id,
-                                b,
-                                &data,
-                            )
-                        } else {
-                            overmax_data::save_fetched_records_to_cache(
-                                &cache_root,
-                                &steam_id,
-                                &v_id,
-                                b,
-                                &data,
-                            )
-                        };
+                        let clear_first = since.is_none();
+                        let save_res = record_db.merge_varchive_fetched_records(
+                            &steam_id,
+                            b,
+                            &data,
+                            clear_first,
+                        );
 
                         if let Err(e) = save_res {
                             debug_ui::push_log(

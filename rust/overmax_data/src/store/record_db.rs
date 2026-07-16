@@ -49,7 +49,9 @@ impl RecordDB {
 
         let conn_result = Connection::open(&self.db_path);
         if let Ok(mut conn) = conn_result {
-            if self.create_records_table(&conn).is_ok() {
+            if self.create_records_table(&conn).is_ok()
+                && self.create_varchive_records_table(&conn).is_ok()
+            {
                 self.ensure_schema(&mut conn);
                 self.is_ready = true;
                 return true;
@@ -70,6 +72,37 @@ impl RecordDB {
                 updated_at    INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                 PRIMARY KEY (steam_id, song_id, button_mode, difficulty)
             )",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn create_varchive_records_table(&self, conn: &Connection) -> Result<()> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS varchive_records (
+                steam_id      TEXT NOT NULL,
+                song_id       TEXT NOT NULL,
+                button_mode   TEXT NOT NULL,
+                difficulty    TEXT NOT NULL,
+                raw_data      TEXT NOT NULL,
+                score         REAL GENERATED ALWAYS AS (json_extract(raw_data, '$.score')) STORED,
+                max_combo     INTEGER GENERATED ALWAYS AS (json_extract(raw_data, '$.maxCombo')) STORED,
+                updated_at    TEXT GENERATED ALWAYS AS (json_extract(raw_data, '$.updatedAt')) STORED,
+                rating        REAL GENERATED ALWAYS AS (json_extract(raw_data, '$.rating')) STORED,
+                PRIMARY KEY (steam_id, song_id, button_mode, difficulty)
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_varchive_score ON varchive_records (score)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_varchive_updated_at ON varchive_records (steam_id, button_mode, updated_at DESC)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_varchive_rating ON varchive_records (rating)",
             [],
         )?;
         Ok(())
@@ -328,5 +361,153 @@ impl RecordDB {
             map.insert((sid, button_mode, difficulty), (rate, is_max_combo != 0));
         }
         map
+     }
+
+    pub fn load_varchive_records(
+        &self,
+        steam_id: &str,
+    ) -> Result<std::collections::HashMap<(i32, String, String), (f32, bool)>> {
+        let mut map = std::collections::HashMap::new();
+        if !self.is_ready || steam_id.is_empty() || steam_id == Self::UNKNOWN_STEAM_ID {
+            return Ok(map);
+        }
+        let conn = Connection::open(&self.db_path)?;
+        let mut stmt = conn.prepare(
+            "SELECT song_id, button_mode, difficulty, score, max_combo 
+             FROM varchive_records WHERE steam_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![steam_id])?;
+        while let Some(row) = rows.next()? {
+            let song_id_str: String = row.get(0)?;
+            let song_id: i32 = song_id_str.parse().unwrap_or(0);
+            let button_mode: String = row.get(1)?;
+            let difficulty: String = row.get(2)?;
+            let score: f64 = row.get(3)?;
+            let max_combo_int: i32 = row.get(4)?;
+            let max_combo = max_combo_int != 0;
+
+            map.insert((song_id, button_mode, difficulty), (score as f32, max_combo));
+        }
+        Ok(map)
+    }
+
+    pub fn merge_varchive_fetched_records(
+        &self,
+        steam_id: &str,
+        button: i32,
+        data: &serde_json::Value,
+        clear_first: bool,
+    ) -> Result<(), String> {
+        if !self.is_ready {
+            return Err("DB is not ready".to_string());
+        }
+        let mut conn = Connection::open(&self.db_path).map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+        let button_mode = match button {
+            4 => "4B",
+            5 => "5B",
+            6 => "6B",
+            8 => "8B",
+            _ => return Err(format!("invalid button: {button}")),
+        };
+
+        if clear_first {
+            tx.execute(
+                "DELETE FROM varchive_records WHERE steam_id = ?1 AND button_mode = ?2",
+                params![steam_id, button_mode],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        let new_records = data
+            .get("records")
+            .and_then(|r| r.as_array())
+            .ok_or_else(|| "records field missing or not an array".to_string())?;
+
+        for rec in new_records {
+            let Some(obj) = rec.as_object() else {
+                continue;
+            };
+            let song_id = obj
+                .get("title")
+                .and_then(|v| match v {
+                    serde_json::Value::String(s) => Some(s.clone()),
+                    serde_json::Value::Number(n) => Some(n.to_string()),
+                    _ => None,
+                })
+                .ok_or_else(|| "missing title (song_id)".to_string())?;
+
+            let difficulty = obj
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing pattern (difficulty)".to_string())?;
+
+            let raw_data_str = serde_json::to_string(rec).map_err(|e| e.to_string())?;
+
+            tx.execute(
+                "INSERT OR REPLACE INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![steam_id, song_id, button_mode, difficulty, raw_data_str],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_latest_updated_at_from_db(&self, steam_id: &str, button: i32) -> Option<String> {
+        if !self.is_ready {
+            return None;
+        }
+        let button_mode = match button {
+            4 => "4B",
+            5 => "5B",
+            6 => "6B",
+            8 => "8B",
+            _ => return None,
+        };
+        let conn = Connection::open(&self.db_path).ok()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT updated_at 
+             FROM varchive_records 
+             WHERE steam_id = ?1 AND button_mode = ?2 
+             ORDER BY updated_at DESC LIMIT 1",
+            )
+            .ok()?;
+        let mut rows = stmt.query(params![steam_id, button_mode]).ok()?;
+        if let Some(row) = rows.next().ok()? {
+            let val: Option<String> = row.get(0).ok();
+            return val;
+        }
+        None
+    }
+
+    pub fn migrate_json_cache_to_db(&self, cache_root: &Path) -> Result<(), String> {
+        if !self.is_ready {
+            return Err("DB is not ready".to_string());
+        }
+        let steam_id = self.get_steam_id();
+        let user_dir = cache_root.join(&steam_id);
+        if !user_dir.exists() {
+            return Ok(());
+        }
+
+        for button in &[4, 5, 6, 8] {
+            let path = user_dir.join(format!("{button}.json"));
+            if path.exists() {
+                let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Err(e) = self.merge_varchive_fetched_records(&steam_id, *button, &data, true) {
+                        return Err(format!("Failed to migrate {button}.json: {e}"));
+                    }
+                }
+                let backup_path = user_dir.join(format!("{button}.json.bak"));
+                let _ = fs::rename(&path, &backup_path);
+            }
+        }
+        Ok(())
     }
 }
