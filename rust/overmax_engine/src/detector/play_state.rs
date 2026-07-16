@@ -20,16 +20,13 @@ struct RawPlayState {
     context: Option<PlayContext>,
 }
 
-/// 결과창/선곡창 mode·diff 인식 결과 캐시.
+/// 결과창 mode·diff 인식 결과 캐시.
 ///
 /// - `result_*`: 결과창에서 인식 시도한 값. 채워져 있으면 우선 사용되어
 ///   결과창 진입 후 프레임 간 흔들림 없이 유지된다.
-/// - `song_select_*`: 선곡창에서 인식한 값. 결과창 인식에 실패하면 이 값으로 복구된다.
 struct ModeDiffCache {
     result_mode: Changed<Option<String>>,
     result_diff: Changed<Option<String>>,
-    song_select_mode: Changed<Option<String>>,
-    song_select_diff: Changed<Option<String>>,
 }
 
 impl ModeDiffCache {
@@ -37,12 +34,10 @@ impl ModeDiffCache {
         Self {
             result_mode: Changed::new(None),
             result_diff: Changed::new(None),
-            song_select_mode: Changed::new(None),
-            song_select_diff: Changed::new(None),
         }
     }
 
-    /// 결과창 -> 선곡창 복귀 시 결과창 인식값만 초기화하고 선곡창 값은 보존한다.
+    /// 결과창 -> 선곡창 복귀 시 결과창 인식값을 초기화한다.
     fn clear_result_cache(&mut self) {
         self.result_mode.update(None);
         self.result_diff.update(None);
@@ -156,8 +151,6 @@ impl PlayStateDetector {
         self.last_rate_ocr_ts = 0.0;
         // 결과창 진입 시 복구용(result_mode/diff) 캐시는 reset 시에도 보존합니다.
         self.last_song_id.update(None);
-        self.cache.song_select_mode.update(None);
-        self.cache.song_select_diff.update(None);
         self.result_rate_window.clear();
     }
 
@@ -179,62 +172,47 @@ impl PlayStateDetector {
         rois: &RoiManager,
         ocr: &OcrDetector,
     ) -> (Option<String>, Option<String>) {
-        let mut mode = None;
-        let mut diff = None;
+        let mut detected_mode = None;
+        let mut detected_diff = None;
 
-        if self.cache.result_mode.is_some() && self.cache.result_diff.is_some() {
-            mode = self.cache.result_mode.get().clone();
-            diff = self.cache.result_diff.get().clone();
-        } else {
-            match scene {
-                overmax_core::SceneType::ResultFreestyle => {
-                    if let Some(mode_roi) = rois.get_roi("mode_digit") {
-                        if let Some(mode_img) = crop_roi(frame, mode_roi) {
-                            mode = ocr.detect_freestyle_mode(&mode_img);
-                        }
-                    }
-                    if let Some(diff_roi) = rois.get_roi("diff_panel") {
-                        if let Some(diff_img) = crop_roi(frame, diff_roi) {
-                            diff = ocr.detect_result_difficulty(&diff_img);
-                        }
+        // 1. 결과창 실시간 템플릿 매칭 우선 시도
+        match scene {
+            overmax_core::SceneType::ResultFreestyle => {
+                if let Some(mode_roi) = rois.get_roi("mode_digit") {
+                    if let Some(mode_img) = crop_roi(frame, mode_roi) {
+                        detected_mode = ocr.detect_freestyle_mode(&mode_img);
                     }
                 }
-                overmax_core::SceneType::ResultOpen3 | overmax_core::SceneType::ResultOpen2 => {
-                    mode = detect_button_mode_from_roi(frame, rois, "openmatch_mode");
-                    if let Some(diff_roi) = rois.get_roi("openmatch_diff") {
-                        if let Some(diff_img) = crop_roi(frame, diff_roi) {
-                            diff = ocr.detect_openmatch_result_difficulty(&diff_img);
-                        }
+                if let Some(diff_roi) = rois.get_roi("diff_panel") {
+                    if let Some(diff_img) = crop_roi(frame, diff_roi) {
+                        detected_diff = ocr.detect_result_difficulty(&diff_img);
                     }
                 }
-                _ => {}
             }
-
-            if self.cache.result_mode.is_none() {
-                self.cache
-                    .result_mode
-                    .update(self.cache.song_select_mode.get().clone());
+            overmax_core::SceneType::ResultOpen3 | overmax_core::SceneType::ResultOpen2 => {
+                detected_mode = detect_button_mode_from_roi(frame, rois, "openmatch_mode");
+                if let Some(diff_roi) = rois.get_roi("openmatch_diff") {
+                    if let Some(diff_img) = crop_roi(frame, diff_roi) {
+                        detected_diff = ocr.detect_openmatch_result_difficulty(&diff_img);
+                    }
+                }
             }
-            if self.cache.result_diff.is_none() {
-                self.cache
-                    .result_diff
-                    .update(self.cache.song_select_diff.get().clone());
-            }
-
-            if mode.is_none() {
-                mode = self.cache.result_mode.get().clone();
-            }
-            if diff.is_none() {
-                diff = self.cache.result_diff.get().clone();
-            }
-
-            if mode.is_some() && diff.is_some() {
-                self.cache.result_mode.update(mode.clone());
-                self.cache.result_diff.update(diff.clone());
-            }
+            _ => {}
         }
 
-        (mode, diff)
+        // 2. 결과창 템플릿 매칭 성공 시, 결과창 캐시를 업데이트 (자가 보정 가능)
+        if detected_mode.is_some() {
+            self.cache.result_mode.update(detected_mode.clone());
+        }
+        if detected_diff.is_some() {
+            self.cache.result_diff.update(detected_diff.clone());
+        }
+
+        // 3. 최종 반환값 결정: 결과창 캐시가 존재하면 우선 사용
+        let final_mode = self.cache.result_mode.get().clone();
+        let final_diff = self.cache.result_diff.get().clone();
+
+        (final_mode, final_diff)
     }
 
     fn cross_validate_rate_with_score(
@@ -319,8 +297,6 @@ impl PlayStateDetector {
         }
 
         self.last_song_id.update(song_id);
-        self.cache.song_select_mode.update(mode.clone());
-        self.cache.song_select_diff.update(diff.clone());
 
         let mut telemetry = None;
         debug_println!(
@@ -692,19 +668,8 @@ mod tests {
     }
 
     #[test]
-    fn recovers_result_mode_diff_from_song_select_cache() {
+    fn result_mode_diff_remains_none_without_match() {
         let mut detector = PlayStateDetector::new(3);
-
-        // 선곡창에서 인식된 mode/diff 를 song_select 캐시에 주입
-        detector
-            .cache
-            .song_select_mode
-            .update(Some("4B".to_string()));
-        detector
-            .cache
-            .song_select_diff
-            .update(Some("MX".to_string()));
-        // 결과창 진입 직후 상태: 결과창 인식값(result)은 비워짐
         detector.cache.clear_result_cache();
 
         let frame = blank_frame();
@@ -712,11 +677,9 @@ mod tests {
         rois.set_scene(SceneType::ResultFreestyle);
         let ocr = crate::detector::ocr_engine::OcrDetector::new();
 
-        // 결과창에서 mode_digit/diff_panel ROI 가 없어 인식에 실패하면
-        // 선곡창 캐시(song_select) 값으로 복구되어야 한다.
+        // 결과창에서 mode_digit/diff_panel ROI가 없어 인식에 실패하면 None이어야 함
         let (state, _) = detector.detect(&frame, &rois, Some(7), &ocr, 1.0);
-        assert_eq!(state.context.as_ref().map(|c| c.mode.as_str()), Some("4B"));
-        assert_eq!(state.context.as_ref().map(|c| c.diff.as_str()), Some("MX"));
+        assert!(state.context.is_none());
     }
 
     fn blank_frame() -> CapturedFrame {

@@ -85,8 +85,8 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 ## 3. 원자적 상태 감지 및 안정화 (Atomic Play Context Sync)
 - **PlayState 감지**:
-  - **버튼 모드 (Button Mode)**: `btn_mode` ROI의 평균 BGR 색상과 미리 정의된 대표색(4B/5B/6B/8B)의 Euclidean 거리가 60 이하인 모드 중 최적 매칭값 선택.
-  - **난이도 (Difficulty)**: 각 난이도 패널 ROI(NM/HD/MX/SC)의 평균 밝기를 계산. 상위 1위 밝기가 최소 밝기(45) 이상이고 2위와의 차이(margin)가 15.0 이상일 때 유효(confident)한 난이도로 판정.
+  - **버튼 모드 (Button Mode)**: 선곡창에서는 `btn_mode` ROI의 평균 BGR 색상과 미리 정의된 대표색의 Euclidean 거리가 60 이하인 모드 중 최적 매칭값을 선택하고, 결과창에서는 선곡창 캐시 폴백 없이 오직 결과창 자체의 픽셀들로만 독립적으로 모드 템플릿 매칭을 수행합니다.
+  - **난이도 (Difficulty)**: 선곡창에서는 각 난이도 패널 ROI의 평균 밝기를 계산해 상위 1위 밝기가 최소 밝기(45) 이상이고 2위와의 차이가 15.0 이상일 때 판정하며, 결과창에서는 선곡창 캐시 폴백 없이 오직 결과창 난이도 패널의 템플릿 매칭만을 수행합니다.
   - **Max Combo**: 결과창 및 선곡창의 `max_combo_badge` ROI 영역에 대해 사전에 수집된 대표 뱃지 이미지 템플릿과의 이미지 해시(pHash, dHash, ahash) 비교를 수행. 결과창의 경우 가중 해밍 거리가 20.0 이하(선곡창은 10.0 이하)인 경우에 한해 True로 판정하여, 연출 그래픽 변화나 노이즈에 의한 Jitter 및 오인식을 완벽하게 차단.
   - **Rate**: `rate` ROI 영역의 Windows OCR 멀티패스(Color → Grayscale → Grayscale Inverted) 결과를 실수값(`f32`)으로 실시간 수집. 유효 파싱값이 나온 첫 번째 패스 결과를 채택.
   - **Score & Rate Cross-Validation**: 결과창 및 선곡창에서 `score` ROI 영역을 단일 패스 OCR로 추출하여 판정율을 역산(`Rate = Score / 10,000`)합니다. 두 OCR 결과(Rate vs. Score 역산값) 간에 불일치가 발생할 경우, 오차가 0.1% 이내이면 정밀한 스코어 역산값으로 보정하고, 오차가 클 경우 각 값의 정확도 범위(`90%~100%`, `70%~90%` 등)를 기준으로 타당성(Plausibility) 신뢰도를 평가해 더 상식적이고 가능성이 높은 값을 최종 채택합니다. 추가로 선곡창 자릿수 오인식에 대비해 신뢰 범위 가드(MIN_VALID_RATE인 80% ~ 100%)를 둡니다.
@@ -186,6 +186,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-16 | V-Archive 캐시 SQLite DB 내장화 및 생성 컬럼 최적화 | 기존 JSON 파일 캐시를 SQLite DB(varchive_records)로 통합 및 자동 마이그레이션 적용. score, max_combo, updated_at, rating을 생성형(STORED) 물리 컬럼으로 빼고 복합 인덱스를 적용해 렉 없는 O(1) 조회 성능 확보 | [record_db.rs](rust/overmax_data/src/store/record_db.rs) / [native_app.rs](rust/overmax_app/src/ui/native_app.rs) / [record_manager.rs](rust/overmax_data/src/service/record_manager.rs) |
 | 2026-07-16 | 업로드 후 TOP 50 랭킹 및 순위 알림 | 업로드 완료 시 SQLite DB의 rating 컬럼을 기반으로 실시간 TOP 50 내 순위를 O(1)로 조회하여 오버레이 토스트 메시지(예: 8B TOP 29위 달성!)로 출력 | [native_app.rs](rust/overmax_app/src/ui/native_app.rs) / [record_db.rs](rust/overmax_data/src/store/record_db.rs) |
 | 2026-07-16 | 라이트모드 오버레이 모드/난이도 뱃지 높이 일치화 및 구조화 | 라이트모드 뱃지 높이 불일치 문제를 해결하기 위해 Px::mode_badge_h()를 18.0으로 조정하고, ModeBadge 컴포넌트 내부 기본 크기 계산도 Px 구조체 값을 사용하도록 일원화 | [overlay_ui.rs](rust/overmax_app/src/ui/overlay_ui.rs) / [mode_badge.rs](rust/overmax_app/src/ui/components/mode_badge.rs) |
+| 2026-07-16 | 선곡창 캐시 제거 및 결과창 실시간 독립 감지 | 선곡창 오인식 전염 차단 및 데이터 무결성 보장을 위해 선곡창 캐시(last_played_song_id, song_select_mode/diff)를 완전히 제거하고 결과창 단독 픽셀 매칭 및 보정 구조로 단순화 | [play_state.rs](rust/overmax_engine/src/detector/play_state.rs) / [detection_pipeline.rs](rust/overmax_engine/src/detector/detection_pipeline.rs) |
 
 
 

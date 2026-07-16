@@ -56,7 +56,6 @@ pub struct DetectionPipeline {
     last_jacket_thumb: Option<Vec<u8>>,
     result_scene_streak: u32,
     last_detected_result_scene: SceneType,
-    last_played_song_id: Option<i32>,
     unknown_since: Option<f64>,
 }
 
@@ -78,7 +77,6 @@ impl DetectionPipeline {
             last_jacket_thumb: None,
             result_scene_streak: 0,
             last_detected_result_scene: SceneType::Unknown,
-            last_played_song_id: None,
             unknown_since: None,
         }
     }
@@ -137,18 +135,6 @@ impl DetectionPipeline {
         let confidence = self.hysteresis.confidence;
 
         if !is_song_select {
-            // 선곡 화면에서 플레이 진입(이탈) 시, 직전의 곡 ID를 플레이 이력으로 기록
-            if self.hysteresis.is_active && self.current_song_id.is_some() {
-                self.last_played_song_id = self.current_song_id;
-                debug_println!(
-                    "    [process_frame_shared] Saved last_played_song_id={:?} upon gameplay entry",
-                    self.last_played_song_id
-                );
-            }
-            // 결과창 상태를 완전히 빠져나가는 경우에도 플레이 이력 소멸
-            if !is_result {
-                self.last_played_song_id = None;
-            }
             self.reset_on_screen_exit();
             return self.output(
                 logo_detected,
@@ -163,14 +149,6 @@ impl DetectionPipeline {
         }
 
         if is_leaving {
-            // 선곡 화면에서 나갈 때도 플레이 이력 확보
-            if self.current_song_id.is_some() {
-                self.last_played_song_id = self.current_song_id;
-                debug_println!(
-                    "    [process_frame_shared] Saved last_played_song_id={:?} upon leaving",
-                    self.last_played_song_id
-                );
-            }
             return self.output(
                 logo_detected,
                 true,
@@ -183,9 +161,8 @@ impl DetectionPipeline {
             );
         }
 
-        // 결과창에서 다시 선곡 화면으로 복귀하는 경우 플레이 이력 리셋
+        // 결과창에서 다시 선곡 화면으로 복귀하는 경우 결과창 캐시 리셋
         if !is_result {
-            self.last_played_song_id = None;
             self.play_state.clear_detected_cache();
         }
 
@@ -303,27 +280,26 @@ impl DetectionPipeline {
 
             // 1프레임 대기 후, 2프레임차에 최종 검증 수행
             if self.result_scene_streak >= 2 {
-                let mut allow_entry = true;
+                let mut allow_entry = false;
+                let mut matched_song_id = None;
 
-                // 만약 플레이 이력이 없다면 결과창 재킷 매칭을 통해 2차 검증을 수행
-                if self.last_played_song_id.is_none() {
-                    allow_entry = false; // 기본적으로 차단
-                    if let Some(jacket_roi) = self.rois.get_roi_for_scene("jacket", candidate) {
-                        if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
-                            if let Some(match_res) = self.jacket_matcher.match_jacket(
-                                &jacket_img.bgra,
-                                jacket_img.width as usize,
-                                jacket_img.height as usize,
-                                4,
-                            ) {
-                                if let Ok(song_id) = match_res.image_id.parse::<i32>() {
+                // 결과창 진입 확정 시, 항상 결과창 재킷 매칭을 1회 실행하여 곡 ID 검출
+                if let Some(jacket_roi) = self.rois.get_roi_for_scene("jacket", candidate) {
+                    if let Some(jacket_img) = crop_roi(frame, jacket_roi) {
+                        if let Some(match_res) = self.jacket_matcher.match_jacket(
+                            &jacket_img.bgra,
+                            jacket_img.width as usize,
+                            jacket_img.height as usize,
+                            4,
+                        ) {
+                            if let Ok(song_id) = match_res.image_id.parse::<i32>() {
+                                if match_res.similarity >= 0.70 {
+                                    matched_song_id = Some(song_id);
+                                    allow_entry = true;
                                     debug_println!(
                                         "    [detect_logo_if_due] Result screen jacket verified. SongID={}, Similarity={}",
                                         song_id, match_res.similarity
                                     );
-                                    // 유실되었던 플레이 이력을 매칭된 곡 ID로 복구(Backfill)
-                                    self.last_played_song_id = Some(song_id);
-                                    allow_entry = true;
                                 }
                             }
                         }
@@ -332,6 +308,8 @@ impl DetectionPipeline {
 
                 if allow_entry {
                     self.last_logo_scene = candidate;
+                    self.current_song_id = matched_song_id; // 결과창에서 직접 재킷으로 인식된 곡 ID로 확정
+
                     // ResultFreestyle 확정 시, 로고 OCR raw_text에서 모드를 파싱하여 play_state에 주입
                     // (결과 화면 폰트가 선곡 화면과 달라 템플릿 매칭이 실패하므로)
                     if candidate == SceneType::ResultFreestyle {
@@ -349,6 +327,7 @@ impl DetectionPipeline {
                     self.result_scene_streak = 0;
                     self.last_detected_result_scene = SceneType::Unknown;
                     self.last_logo_scene = SceneType::Unknown;
+                    self.current_song_id = None;
                 }
             }
         } else {
