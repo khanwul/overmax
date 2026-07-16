@@ -553,7 +553,7 @@ fn detect_openmatch_scene_via_edge(
 
 fn parse_static_scene(
     frame: &CapturedFrame,
-    ocr: &OcrDetector,
+    _ocr: &OcrDetector,
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
 ) -> Option<(SceneType, String, Option<i32>)> {
@@ -572,12 +572,8 @@ fn parse_static_scene(
         return Some((scene, String::new(), Some(song_id)));
     }
 
-    // 4. 최종 폴백: Windows OCR을 통한 로고 감지 및 씬 판별
-    let logo_roi = rois.get_roi("logo")?;
-    let logo_img = crop_roi(frame, logo_roi)?;
-    let (scene, raw_text, _) = ocr.detect_logo(&logo_img);
-
-    Some((scene, raw_text, None))
+    // 4. 최종 폴백: Windows OCR을 통한 로고 감지 비활성화
+    Some((SceneType::Unknown, String::new(), None))
 }
 
 pub fn detect_scene_from_logo(
