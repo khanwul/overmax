@@ -94,10 +94,6 @@ impl RecordDB {
             [],
         )?;
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_varchive_score ON varchive_records (score)",
-            [],
-        )?;
-        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_varchive_updated_at ON varchive_records (steam_id, button_mode, updated_at DESC)",
             [],
         )?;
