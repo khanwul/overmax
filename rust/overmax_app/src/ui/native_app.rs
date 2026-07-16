@@ -4,8 +4,8 @@ use eframe::egui::ViewportBuilder;
 use overmax_core::{Changed, GameSessionState};
 use overmax_data::{
     build_candidates, load_base_settings, load_merged_settings, normalize_settings,
-    DataCompatibility, PatternSheetMeta, RecommendResult, Recommender, RecordDB,
-    RecordManager, SyncCandidate, VArchiveDB,
+    DataCompatibility, PatternSheetMeta, RecommendResult, Recommender, RecordDB, RecordManager,
+    SyncCandidate, VArchiveDB,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -348,8 +348,7 @@ impl NativeApp {
 
         let compat = DataCompatibility::current();
         let recent_steam = steam_session::most_recent_steam_id();
-        let mut record_db =
-            RecordDB::new(root.join(compat.record_db), recent_steam.as_deref());
+        let mut record_db = RecordDB::new(root.join(compat.record_db), recent_steam.as_deref());
         record_db.initialize();
         let record_db = Arc::new(record_db);
 
@@ -787,12 +786,9 @@ impl NativeApp {
                         candidate.song_id,
                     ) {
                         Ok(data) => {
-                            if let Err(e) = record_db.merge_varchive_fetched_records(
-                                &steam,
-                                btn,
-                                &data,
-                                false,
-                            ) {
+                            if let Err(e) =
+                                record_db.merge_varchive_fetched_records(&steam, btn, &data, false)
+                            {
                                 Err(format!("API 조회 OK, 캐시 병합 실패: {e}"))
                             } else {
                                 Ok(())
@@ -848,10 +844,8 @@ impl NativeApp {
                             &candidate.song_id.to_string(),
                             &candidate.difficulty,
                         ) {
-                            msg = format!(
-                                "{} ({} TOP {}위 달성!)",
-                                msg, candidate.button_mode, rank
-                            );
+                            msg =
+                                format!("{} ({} TOP {}위 달성!)", msg, candidate.button_mode, rank);
                         }
                         Ok(msg)
                     }

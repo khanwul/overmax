@@ -357,7 +357,7 @@ impl RecordDB {
             map.insert((sid, button_mode, difficulty), (rate, is_max_combo != 0));
         }
         map
-     }
+    }
 
     pub fn load_varchive_records(
         &self,
@@ -382,7 +382,10 @@ impl RecordDB {
             let max_combo_int: i32 = row.get(4)?;
             let max_combo = max_combo_int != 0;
 
-            map.insert((song_id, button_mode, difficulty), (score as f32, max_combo));
+            map.insert(
+                (song_id, button_mode, difficulty),
+                (score as f32, max_combo),
+            );
         }
         Ok(map)
     }
@@ -496,7 +499,9 @@ impl RecordDB {
             if path.exists() {
                 let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
                 if let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if let Err(e) = self.merge_varchive_fetched_records(&steam_id, *button, &data, true) {
+                    if let Err(e) =
+                        self.merge_varchive_fetched_records(&steam_id, *button, &data, true)
+                    {
                         return Err(format!("Failed to migrate {button}.json: {e}"));
                     }
                 }
