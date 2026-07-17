@@ -72,45 +72,60 @@ impl JacketMatcher {
         let (q_phash, q_dhash, q_ahash) =
             overmax_cv::compute_image_hashes(data, width, height, channels).ok()?;
 
-        // 2단계: 전체 DB 곡에 대해 해시 거리(Hamming Distance) 스코어링 (정수형 최적화)
+        // 오염이 집중되는 상단 테두리(y=0), 우측 테두리(x=7), 좌상단 즐겨찾기(y=1, x=0) 비트들을 무력화
+        let mut mask_bits: u64 = 0;
+        for x in 0..8 {
+            mask_bits |= 1 << x; // y = 0
+        }
+        for y in 0..8 {
+            mask_bits |= 1 << (y * 8 + 7); // x = 7
+        }
+        mask_bits |= 1 << 8; // y = 1, x = 0
+
+        let hash_mask: u64 = !mask_bits;
+        let compare_bits = hash_mask.count_ones() as f32; // 유효 비트 수 (48개)
+
+        // 2단계: 전체 DB 곡에 대해 해시 유사도 스코어링 (마스크 반영)
         let mut candidates = self
             .entries
             .iter()
             .enumerate()
             .map(|(idx, entry)| {
-                let p_dist = (entry.phash ^ q_phash).count_ones();
-                let d_dist = (entry.dhash ^ q_dhash).count_ones();
-                let a_dist = (entry.ahash ^ q_ahash).count_ones();
-                let score_int = 5 * p_dist + 3 * d_dist + 2 * a_dist;
-                (idx, score_int)
+                let p_dist = (entry.phash ^ q_phash).count_ones(); // phash는 전역 변환이므로 마스크 없음
+                let d_dist = ((entry.dhash ^ q_dhash) & hash_mask).count_ones();
+                let a_dist = ((entry.ahash ^ q_ahash) & hash_mask).count_ones();
+
+                let p_sim = 1.0 - (p_dist as f32 / 64.0);
+                let d_sim = 1.0 - (d_dist as f32 / compare_bits);
+                let a_sim = 1.0 - (a_dist as f32 / compare_bits);
+
+                let hash_sim = 0.5 * p_sim + 0.3 * d_sim + 0.2 * a_sim;
+                (idx, hash_sim)
             })
             .collect::<Vec<_>>();
 
-        // 해시 스코어 정렬 (낮을수록 가까움, 정수 비교로 최적화)
-        candidates.sort_by_key(|a| a.1);
+        // 해시 유사도 정렬 (내림차순, 높을수록 가까움)
+        candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         if candidates.is_empty() {
             return None;
         }
 
         let first_idx = candidates[0].0;
-        let first_score_int = candidates[0].1;
-        let first_score = first_score_int as f32 * 0.1;
-        let first_hash_sim = (1.0 - first_score / 64.0).clamp(0.0, 1.0);
+        let first_hash_sim = candidates[0].1;
 
-        // 3단계: HOG 연산 스킵 여부 판정
+        // 3단계: HOG 연산 스킵 여부 판정 (유사도 차이가 크면 스킵)
         let skip_hog = if self.config.disable_hog {
             true
         } else if candidates.len() > 1 {
-            let second_score_int = candidates[1].1;
-            let margin = (second_score_int - first_score_int) as f32 * 0.1;
-            margin >= self.config.margin_threshold || first_score == 0.0
+            let second_hash_sim = candidates[1].1;
+            let margin = first_hash_sim - second_hash_sim;
+            margin >= self.config.margin_threshold * 0.1 || first_hash_sim >= 0.99
         } else {
             true
         };
 
         if skip_hog {
-            // HOG 생략 시 최종 유사도는 해시 유사도 자체로 평가
             let similarity = first_hash_sim;
             if similarity >= self.config.similarity_threshold {
                 self.update_cache(first_idx);
@@ -122,25 +137,29 @@ impl JacketMatcher {
             return None;
         }
 
-        // 4단계: HOG 정밀 매칭 (Margin이 좁은 경우에만 게으르게 HOG 피처 계산)
+        // 4단계: HOG 정밀 매칭 (상단/우측 테두리 + 좌상단 HOG 블록 성분 마스킹 적용)
         let q_hog = overmax_cv::compute_image_hog(data, width, height, channels).ok()?;
-        let q_hog_norm = vector_norm(&q_hog).max(1.0);
+        let mut q_hog_masked = q_hog.clone();
+        apply_hog_mask(&mut q_hog_masked);
+        let q_hog_norm = vector_norm(&q_hog_masked).max(1.0);
 
         // 상위 top_k개 후보군에 대해서만 HOG Dot product 연산 적용
         let mut final_candidates = candidates
             .into_iter()
             .take(top_k.min(self.entries.len()))
-            .map(|(idx, score_int)| {
+            .map(|(idx, hash_sim)| {
                 let entry = &self.entries[idx];
-                let score = score_int as f32 * 0.1;
-                let hash_sim = (1.0 - score / 64.0).clamp(0.0, 1.0);
-                let hog_sim = dot(&entry.hog, &q_hog) / (entry.hog_norm * q_hog_norm);
+                let mut db_hog_masked = entry.hog.clone();
+                apply_hog_mask(&mut db_hog_masked);
+                let db_hog_norm = vector_norm(&db_hog_masked).max(1.0);
+
+                let hog_sim = dot(&db_hog_masked, &q_hog_masked) / (db_hog_norm * q_hog_norm);
                 let similarity = 0.45 * hash_sim + 0.55 * hog_sim;
                 (idx, similarity)
             })
             .collect::<Vec<_>>();
 
-        // 최종 유사도 기준 내림차순 정렬 (높을수록 좋음)
+        // 최종 유사도 기준 내림차순 정렬
         final_candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         final_candidates
@@ -172,6 +191,32 @@ fn dot(left: &[f32], right: &[f32]) -> f32 {
 
 fn vector_norm(values: &[f32]) -> f32 {
     values.iter().map(|&v| v * v).sum::<f32>().sqrt()
+}
+
+fn apply_hog_mask(hog: &mut [f32]) {
+    // 7x7 블록 중 block_y = 0 (상단) 및 block_x = 6 (우측), 그리고 좌상단 (0,1), (1,1) 무력화
+    for block_x in 0..7 {
+        let start = block_x * 252; // block_y = 0
+        for i in 0..36 {
+            hog[start + i] = 0.0;
+        }
+    }
+    for block_y in 0..7 {
+        let start = 6 * 252 + block_y * 36; // block_x = 6
+        for i in 0..36 {
+            hog[start + i] = 0.0;
+        }
+    }
+    // 좌상단 추가 블록: (0,1)
+    let start_0_1 = 36;
+    for i in 0..36 {
+        hog[start_0_1 + i] = 0.0;
+    }
+    // 좌상단 추가 블록: (1,1)
+    let start_1_1 = 252 + 36;
+    for i in 0..36 {
+        hog[start_1_1 + i] = 0.0;
+    }
 }
 
 #[cfg(test)]

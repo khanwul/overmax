@@ -587,3 +587,28 @@ pub fn adaptive_threshold_bradley_roth(
 
     binary
 }
+
+pub fn stretch_contrast(gray: &mut [u8], _width: usize, _height: usize) {
+    if gray.is_empty() {
+        return;
+    }
+    let mut min = 255u8;
+    let mut max = 0u8;
+    for &val in gray.iter() {
+        if val < min {
+            min = val;
+        }
+        if val > max {
+            max = val;
+        }
+    }
+
+    let range = max.saturating_sub(min);
+    if range > 15 {
+        let range_f = range as f32;
+        for val in gray.iter_mut() {
+            let stretched = ((*val as f32 - min as f32) / range_f * 255.0).round();
+            *val = stretched.clamp(0.0, 255.0) as u8;
+        }
+    }
+}

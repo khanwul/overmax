@@ -197,9 +197,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-17 | 오픈매치 결과창 판독 시 PlayerPanel 엣지 감지 도입 | 오픈매치 결과창(ResultOpen2, ResultOpen3)을 BGR 색상 Fallback 대신 PlayerPanel ROI의 엣지 강도를 비교하여 판독하도록 개선 | [detection_pipeline.rs](rust/overmax_engine/src/detector/detection_pipeline.rs) / [scene_config.rs](rust/overmax_data/src/config/scene_config.rs) |
 | 2026-07-17 | 프리스타일 결과창 판독 시 mode_colorbar 체크 추가 | 프리스타일 결과창 감정 정밀도를 높이기 위해 mode_colorbar ROI의 색상 일치성 및 엣지 강도를 추가 검증하도록 보강 | [detection_pipeline.rs](rust/overmax_engine/src/detector/detection_pipeline.rs) / [scene_config.rs](rust/overmax_data/src/config/scene_config.rs) |
 | 2026-07-17 | 파이프라인 실시간 검증 도구 도입 | 캡처 이미지 세트를 대상으로 파이프라인의 씬/곡 감지 결과 및 상세 데이터를 검증하는 verify_pipeline 바이너리 추가 | [verify_pipeline.rs](rust/overmax_app/src/bin/verify_pipeline.rs) |
-
-
-
-
+| 2026-07-17 | 즐겨찾기(Favorite) 마크 영역 마스킹 도입 | 즐겨찾기 마크 오버레이로 인한 자켓 유사도 저하를 막기 위해 좌상단 23% 영역을 마스킹하고 DB를 재구축함 | [image.rs](rust/overmax_cv/src/image.rs) / [lib.rs](rust/overmax_cv/src/lib.rs) |
+| 2026-07-17 | 런타임 해시 및 HOG 마스킹 도입 | 기존 DB 데이터의 무결성을 깨뜨리지 않고 좌상단 즐겨찾기 뱃지 노이즈를 런타임에 소거하기 위해, Hamming Distance 및 HOG 코사인 유사도 연산 시 좌상단/테두리 영역에 해당하는 비트와 원소를 동적으로 AND 마스킹 처리 | [jacket_matcher.rs](rust/overmax_data/src/service/jacket_matcher.rs) |
 
 

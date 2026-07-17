@@ -21,7 +21,8 @@ pub fn compute_image_features(
     channels: usize,
 ) -> Result<(u64, u64, u64, Vec<f32>), error::CvError> {
     image::validate_image(data, width, height, channels, "compute_image_features")?;
-    let gray = image::to_gray(data, channels);
+    let mut gray = image::to_gray(data, channels);
+    image::stretch_contrast(&mut gray, width, height);
     let (phash, dhash, ahash) = image::compute_hashes(&gray, width, height);
     let hog = hog::hog_gray(&gray, width, height);
     Ok((phash, dhash, ahash, hog))
@@ -34,7 +35,8 @@ pub fn compute_image_hashes(
     channels: usize,
 ) -> Result<(u64, u64, u64), error::CvError> {
     image::validate_image(data, width, height, channels, "compute_image_hashes")?;
-    let gray = image::to_gray(data, channels);
+    let mut gray = image::to_gray(data, channels);
+    image::stretch_contrast(&mut gray, width, height);
     let (phash, dhash, ahash) = image::compute_hashes(&gray, width, height);
     Ok((phash, dhash, ahash))
 }
