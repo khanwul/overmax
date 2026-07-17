@@ -84,35 +84,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // 구버전 클라이언트의 코사인 유사도 연산을 만족하기 위한 물리적 HOG 데이터 직렬화
                 let hog_bytes = f32_vec_to_bytes(&res.hog);
 
-                // metadata 컬럼용 JSON 구성 (신형 마스킹 해시 세트 직렬화)
-                let metadata_json = serde_json::json!({
-                    "masked_hashes": {
-                        "phash": format!("{:016x}", res.masked_phash),
-                        "dhash": format!("{:016x}", res.masked_dhash),
-                        "ahash": format!("{:016x}", res.masked_ahash),
-                    },
-                    "mask_version": 1
-                });
-                let metadata_str = serde_json::to_string(&metadata_json).unwrap();
-
                 tx.execute(
                     "INSERT INTO images (image_id, phash, dhash, ahash, hog, orb, metadata)
-                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)
+                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL)
                      ON CONFLICT(image_id) DO UPDATE SET
                          phash = excluded.phash,
                          dhash = excluded.dhash,
                          ahash = excluded.ahash,
                          hog   = excluded.hog,
                          orb   = NULL,
-                         metadata = excluded.metadata",
-                    params![
-                        song_id,
-                        phash_str,
-                        dhash_str,
-                        ahash_str,
-                        hog_bytes,
-                        metadata_str
-                    ],
+                         metadata = NULL",
+                    params![song_id, phash_str, dhash_str, ahash_str, hog_bytes],
                 )?;
                 success_count += 1;
             }
@@ -134,9 +116,6 @@ struct ProcessResult {
     orig_phash: u64,
     orig_dhash: u64,
     orig_ahash: u64,
-    masked_phash: u64,
-    masked_dhash: u64,
-    masked_ahash: u64,
     hog: Vec<f32>,
 }
 
@@ -156,19 +135,17 @@ fn process_image(path: &Path) -> Result<ProcessResult, String> {
     }
 
     // 3. Compute Features via overmax_cv (guarantees identical logic to overlay runtime)
-    let feats = overmax_cv::compute_image_features_v2(&bgra, width, height, 4)
-        .map_err(|e| format!("{:?}", e))?;
+    let (orig_phash, orig_dhash, orig_ahash) =
+        overmax_cv::compute_image_features(&bgra, width, height, 4)
+            .map_err(|e| format!("{:?}", e))?;
 
     let hog =
         overmax_cv::compute_image_hog(&bgra, width, height, 4).map_err(|e| format!("{:?}", e))?;
 
     Ok(ProcessResult {
-        orig_phash: feats.orig_phash,
-        orig_dhash: feats.orig_dhash,
-        orig_ahash: feats.orig_ahash,
-        masked_phash: feats.masked_phash,
-        masked_dhash: feats.masked_dhash,
-        masked_ahash: feats.masked_ahash,
+        orig_phash,
+        orig_dhash,
+        orig_ahash,
         hog,
     })
 }

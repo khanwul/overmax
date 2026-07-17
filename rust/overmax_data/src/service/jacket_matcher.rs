@@ -68,10 +68,11 @@ impl JacketMatcher {
             return None;
         }
 
-        // 1단계: 해시 특징량 계산 (v2 API를 이용해 오리지널과 마스킹 해시 세트 동시 획득)
-        let q_feats = overmax_cv::compute_image_features_v2(data, width, height, channels).ok()?;
+        // 1단계: 해시 특징량 계산
+        let (q_phash, q_dhash, q_ahash) =
+            overmax_cv::compute_image_hashes(data, width, height, channels).ok()?;
 
-        // 구버전 DB 폴백 비교용 비트 마스크 생성
+        // 오염이 집중되는 상단 테두리(y=0), 우측 테두리(x=7), 좌상단 즐겨찾기(y=1, x=0) 비트들을 무력화
         let mut mask_bits: u64 = 0;
         for x in 0..8 {
             mask_bits |= 1 << x; // y = 0
@@ -84,50 +85,24 @@ impl JacketMatcher {
         let hash_mask: u64 = !mask_bits;
         let compare_bits = hash_mask.count_ones() as f32; // 유효 비트 수 (48개)
 
-        // 2단계: 전체 DB 곡에 대해 해시 유사도 스코어링 (루프 분기를 바깥으로 빼서 분기 예측 실패 및 성능 오버헤드 방지)
-        let has_any_metadata = self
+        // 2단계: 전체 DB 곡에 대해 해시 유사도 스코어링 (마스크 반영)
+        let mut candidates = self
             .entries
-            .first()
-            .map(|e| e.has_metadata)
-            .unwrap_or(false);
+            .iter()
+            .enumerate()
+            .map(|(idx, entry)| {
+                let p_dist = (entry.phash ^ q_phash).count_ones(); // phash는 전역 변환이므로 마스크 없음
+                let d_dist = ((entry.dhash ^ q_dhash) & hash_mask).count_ones();
+                let a_dist = ((entry.ahash ^ q_ahash) & hash_mask).count_ones();
 
-        let mut candidates = if has_any_metadata {
-            // 신규 마스킹 해시 직접 대조 직선 루프 (64비트 가용 비트 전체 사용)
-            self.entries
-                .iter()
-                .enumerate()
-                .map(|(idx, entry)| {
-                    let p_dist = (entry.masked_phash ^ q_feats.masked_phash).count_ones();
-                    let d_dist = (entry.masked_dhash ^ q_feats.masked_dhash).count_ones();
-                    let a_dist = (entry.masked_ahash ^ q_feats.masked_ahash).count_ones();
+                let p_sim = 1.0 - (p_dist as f32 / 64.0);
+                let d_sim = 1.0 - (d_dist as f32 / compare_bits);
+                let a_sim = 1.0 - (a_dist as f32 / compare_bits);
 
-                    let p_sim = 1.0 - (p_dist as f32 / 64.0);
-                    let d_sim = 1.0 - (d_dist as f32 / 64.0);
-                    let a_sim = 1.0 - (a_dist as f32 / 64.0);
-
-                    let hash_sim = 0.5 * p_sim + 0.3 * d_sim + 0.2 * a_sim;
-                    (idx, hash_sim)
-                })
-                .collect::<Vec<_>>()
-        } else {
-            // 구버전 DB 폴백 직선 루프: 오리지널 해시 + 비트 마스크 비교
-            self.entries
-                .iter()
-                .enumerate()
-                .map(|(idx, entry)| {
-                    let p_dist = (entry.phash ^ q_feats.orig_phash).count_ones();
-                    let d_dist = ((entry.dhash ^ q_feats.orig_dhash) & hash_mask).count_ones();
-                    let a_dist = ((entry.ahash ^ q_feats.orig_ahash) & hash_mask).count_ones();
-
-                    let p_sim = 1.0 - (p_dist as f32 / 64.0);
-                    let d_sim = 1.0 - (d_dist as f32 / compare_bits);
-                    let a_sim = 1.0 - (a_dist as f32 / compare_bits);
-
-                    let hash_sim = 0.5 * p_sim + 0.3 * d_sim + 0.2 * a_sim;
-                    (idx, hash_sim)
-                })
-                .collect::<Vec<_>>()
-        };
+                let hash_sim = 0.5 * p_sim + 0.3 * d_sim + 0.2 * a_sim;
+                (idx, hash_sim)
+            })
+            .collect::<Vec<_>>();
 
         // 해시 유사도 정렬 (내림차순, 높을수록 가까움)
         candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -140,7 +115,7 @@ impl JacketMatcher {
         let first_hash_sim = candidates[0].1;
 
         // 3단계: HOG 연산 스킵 여부 판정 (유사도 차이가 크거나 HOG 데이터가 없으면 스킵)
-        let skip_hog = if self.config.disable_hog || !self.entries[first_idx].has_hog {
+        let skip_hog = if self.config.disable_hog || self.entries[first_idx].hog.is_empty() {
             true
         } else if candidates.len() > 1 {
             let second_hash_sim = candidates[1].1;
@@ -250,21 +225,14 @@ mod tests {
 
     fn dummy_entry(image_id: &str, phash: u64, hog_val: f32) -> ImageEntry {
         let hog = vec![hog_val; 1764];
-        let raw_norm = (1764.0 * hog_val * hog_val).sqrt();
-        let has_hog = raw_norm > 0.001;
-        let hog_norm = raw_norm.max(1.0);
+        let hog_norm = (1764.0 * hog_val * hog_val).sqrt().max(1.0);
         ImageEntry {
             image_id: image_id.to_string(),
             phash,
             dhash: phash,
             ahash: phash,
-            masked_phash: phash,
-            masked_dhash: phash,
-            masked_ahash: phash,
             hog,
             hog_norm,
-            has_metadata: false,
-            has_hog,
         }
     }
 

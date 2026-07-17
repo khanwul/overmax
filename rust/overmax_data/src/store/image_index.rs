@@ -16,13 +16,8 @@ pub struct ImageEntry {
     pub phash: u64,
     pub dhash: u64,
     pub ahash: u64,
-    pub masked_phash: u64,
-    pub masked_dhash: u64,
-    pub masked_ahash: u64,
     pub hog: Vec<f32>,
     pub hog_norm: f32,
-    pub has_metadata: bool,
-    pub has_hog: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -127,69 +122,29 @@ fn parse_entry(
     dhash: &str,
     ahash: &str,
     hog_blob: &[u8],
-    metadata_str: Option<&str>,
+    _metadata_str: Option<&str>,
 ) -> Option<ImageEntry> {
-    let mut masked_phash = 0;
-    let mut masked_dhash = 0;
-    let mut masked_ahash = 0;
-    let mut has_metadata = false;
+    // 오리지널 해시는 항상 정상 파싱
+    let orig_phash = parse_hash(phash)?;
+    let orig_dhash = parse_hash(dhash)?;
+    let orig_ahash = parse_hash(ahash)?;
 
-    if let Some(meta_str) = metadata_str {
-        if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(meta_str) {
-            if let Some(masked) = meta_json.get("masked_hashes") {
-                if let Some(p) = masked
-                    .get("phash")
-                    .and_then(|v| v.as_str())
-                    .and_then(parse_hash)
-                {
-                    masked_phash = p;
-                }
-                if let Some(d) = masked
-                    .get("dhash")
-                    .and_then(|v| v.as_str())
-                    .and_then(parse_hash)
-                {
-                    masked_dhash = d;
-                }
-                if let Some(a) = masked
-                    .get("ahash")
-                    .and_then(|v| v.as_str())
-                    .and_then(parse_hash)
-                {
-                    masked_ahash = a;
-                }
-                has_metadata = true;
-            }
-        }
+    // HOG 데이터가 존재할 경우 최소한의 크기 검증 수행 (비정상 데이터가 DB에 포함되어 로드가 깨지는 것 방지)
+    if !hog_blob.is_empty() && hog_blob.len() != HOG_LEN * std::mem::size_of::<f32>() {
+        return None;
     }
 
-    let (orig_phash, orig_dhash, orig_ahash, hog, hog_norm, has_hog) = if has_metadata {
-        // 신형 메타데이터가 있으면 무거운 HOG 벡터 디코딩과 V1 해시 파싱을 생략하여 힙 메모리 소모를 극단적으로(곡당 7KB 이상) 억제
-        (0, 0, 0, Vec::new(), 1.0, false)
-    } else {
-        // 메타데이터가 없는 구식 DB의 경우에만 호환성 유지를 위해 정상적으로 HOG와 해시 파싱 수행
-        let hog_data = parse_hog_blob(hog_blob)?;
-        let raw_norm = vector_norm(&hog_data);
-        let has_hog_flag = raw_norm > 0.001;
-        let norm_val = raw_norm.max(1.0);
-        let o_p = parse_hash(phash)?;
-        let o_d = parse_hash(dhash)?;
-        let o_a = parse_hash(ahash)?;
-        (o_p, o_d, o_a, hog_data, norm_val, has_hog_flag)
-    };
+    let hog_data = parse_hog_blob(hog_blob)?;
+    let raw_norm = vector_norm(&hog_data);
+    let norm_val = raw_norm.max(1.0);
 
     Some(ImageEntry {
         image_id,
         phash: orig_phash,
         dhash: orig_dhash,
         ahash: orig_ahash,
-        masked_phash,
-        masked_dhash,
-        masked_ahash,
-        hog,
-        hog_norm,
-        has_metadata,
-        has_hog,
+        hog: hog_data,
+        hog_norm: norm_val,
     })
 }
 
