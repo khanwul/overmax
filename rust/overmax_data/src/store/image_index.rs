@@ -16,8 +16,13 @@ pub struct ImageEntry {
     pub phash: u64,
     pub dhash: u64,
     pub ahash: u64,
+    pub masked_phash: u64,
+    pub masked_dhash: u64,
+    pub masked_ahash: u64,
     pub hog: Vec<f32>,
     pub hog_norm: f32,
+    pub has_metadata: bool,
+    pub has_hog: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -65,6 +70,7 @@ impl ImageIndexDb {
 
     pub fn load(&mut self) -> Result<usize> {
         let conn = Connection::open(&self.db_path)?;
+        let _ = conn.execute("ALTER TABLE images ADD COLUMN metadata TEXT", []);
         self.entries = load_entries(&conn)?;
         Ok(self.entries.len())
     }
@@ -80,7 +86,7 @@ impl ImageIndexDb {
 
 fn load_entries(conn: &Connection) -> Result<Vec<ImageEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT image_id, phash, dhash, ahash, hog
+        "SELECT image_id, phash, dhash, ahash, hog, metadata
          FROM images
          WHERE id IN (SELECT MAX(id) FROM images GROUP BY image_id)
          ORDER BY id ASC",
@@ -95,8 +101,16 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> Result<ImageEntry> {
     let dhash: String = row.get(2)?;
     let ahash: String = row.get(3)?;
     let hog_blob: Vec<u8> = row.get(4)?;
-    parse_entry(image_id, &phash, &dhash, &ahash, &hog_blob)
-        .ok_or_else(|| rusqlite::Error::InvalidQuery)
+    let metadata: Option<String> = row.get(5)?;
+    parse_entry(
+        image_id,
+        &phash,
+        &dhash,
+        &ahash,
+        &hog_blob,
+        metadata.as_deref(),
+    )
+    .ok_or_else(|| rusqlite::Error::InvalidQuery)
 }
 
 fn value_to_string(value: ValueRef<'_>) -> Result<String> {
@@ -113,16 +127,63 @@ fn parse_entry(
     dhash: &str,
     ahash: &str,
     hog_blob: &[u8],
+    metadata_str: Option<&str>,
 ) -> Option<ImageEntry> {
     let hog = parse_hog_blob(hog_blob)?;
-    let hog_norm = vector_norm(&hog).max(1.0);
+    let raw_norm = vector_norm(&hog);
+    let has_hog = raw_norm > 0.001;
+    let hog_norm = raw_norm.max(1.0);
+
+    let orig_phash = parse_hash(phash)?;
+    let orig_dhash = parse_hash(dhash)?;
+    let orig_ahash = parse_hash(ahash)?;
+
+    let mut masked_phash = orig_phash;
+    let mut masked_dhash = orig_dhash;
+    let mut masked_ahash = orig_ahash;
+    let mut has_metadata = false;
+
+    if let Some(meta_str) = metadata_str {
+        if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(meta_str) {
+            if let Some(masked) = meta_json.get("masked_hashes") {
+                if let Some(p) = masked
+                    .get("phash")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_hash)
+                {
+                    masked_phash = p;
+                }
+                if let Some(d) = masked
+                    .get("dhash")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_hash)
+                {
+                    masked_dhash = d;
+                }
+                if let Some(a) = masked
+                    .get("ahash")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_hash)
+                {
+                    masked_ahash = a;
+                }
+                has_metadata = true;
+            }
+        }
+    }
+
     Some(ImageEntry {
         image_id,
-        phash: parse_hash(phash)?,
-        dhash: parse_hash(dhash)?,
-        ahash: parse_hash(ahash)?,
+        phash: orig_phash,
+        dhash: orig_dhash,
+        ahash: orig_ahash,
+        masked_phash,
+        masked_dhash,
+        masked_ahash,
         hog,
         hog_norm,
+        has_metadata,
+        has_hog,
     })
 }
 
@@ -239,7 +300,8 @@ mod tests {
                 dhash TEXT NOT NULL,
                 ahash TEXT NOT NULL,
                 hog BLOB NOT NULL,
-                orb BLOB
+                orb BLOB,
+                metadata TEXT
             )",
             [],
         )
