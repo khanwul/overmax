@@ -129,18 +129,9 @@ fn parse_entry(
     hog_blob: &[u8],
     metadata_str: Option<&str>,
 ) -> Option<ImageEntry> {
-    let hog = parse_hog_blob(hog_blob)?;
-    let raw_norm = vector_norm(&hog);
-    let has_hog = raw_norm > 0.001;
-    let hog_norm = raw_norm.max(1.0);
-
-    let orig_phash = parse_hash(phash)?;
-    let orig_dhash = parse_hash(dhash)?;
-    let orig_ahash = parse_hash(ahash)?;
-
-    let mut masked_phash = orig_phash;
-    let mut masked_dhash = orig_dhash;
-    let mut masked_ahash = orig_ahash;
+    let mut masked_phash = 0;
+    let mut masked_dhash = 0;
+    let mut masked_ahash = 0;
     let mut has_metadata = false;
 
     if let Some(meta_str) = metadata_str {
@@ -171,6 +162,21 @@ fn parse_entry(
             }
         }
     }
+
+    let (orig_phash, orig_dhash, orig_ahash, hog, hog_norm, has_hog) = if has_metadata {
+        // 신형 메타데이터가 있으면 무거운 HOG 벡터 디코딩과 V1 해시 파싱을 생략하여 힙 메모리 소모를 극단적으로(곡당 7KB 이상) 억제
+        (0, 0, 0, Vec::new(), 1.0, false)
+    } else {
+        // 메타데이터가 없는 구식 DB의 경우에만 호환성 유지를 위해 정상적으로 HOG와 해시 파싱 수행
+        let hog_data = parse_hog_blob(hog_blob)?;
+        let raw_norm = vector_norm(&hog_data);
+        let has_hog_flag = raw_norm > 0.001;
+        let norm_val = raw_norm.max(1.0);
+        let o_p = parse_hash(phash)?;
+        let o_d = parse_hash(dhash)?;
+        let o_a = parse_hash(ahash)?;
+        (o_p, o_d, o_a, hog_data, norm_val, has_hog_flag)
+    };
 
     Some(ImageEntry {
         image_id,
