@@ -284,16 +284,12 @@ impl PlayStateDetector {
                 let (rate, tel) = self.process_rate_ocr(frame, rois, ocr, scene, is_result, now);
                 telemetry = tel;
 
-                let mut rate_valid = true;
-                if is_result {
-                    if let Some(r) = self.last_rate_result.0 {
-                        if r < MIN_VALID_RATE {
-                            rate_valid = false;
-                        }
-                    } else {
-                        rate_valid = false;
-                    }
-                }
+                let rate_valid = !is_result
+                    || self
+                        .last_rate_result
+                        .0
+                        .map(|r| r >= MIN_VALID_RATE)
+                        .unwrap_or(false);
 
                 Some(PlayContext {
                     song_id: sid,
