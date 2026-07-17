@@ -59,7 +59,7 @@ fn main() {
 
     // 2. 이미지 DB 로드
     let db_path = "cache/image_index.db";
-    let mut image_db = ImageIndexDb::new(db_path, 0.7)
+    let mut image_db = ImageIndexDb::new(db_path, 0.75)
         .with_disable_hog(false)
         .with_margin_threshold(3.0);
 

@@ -131,7 +131,7 @@ pub fn normalize_settings(settings: &mut Value) {
             let clamped = threshold.clamp(0.0, 1.0);
             jacket.insert("similarity_threshold".to_string(), json!(clamped));
         } else if jacket.contains_key("similarity_threshold") {
-            jacket.insert("similarity_threshold".to_string(), json!(0.6));
+            jacket.insert("similarity_threshold".to_string(), json!(0.75));
         }
 
         if let Some(margin) = jacket.get("margin_threshold").and_then(|v| v.as_f64()) {
@@ -458,7 +458,7 @@ fn default_db_path() -> String {
     "cache/image_index.db".to_string()
 }
 fn default_similarity() -> f64 {
-    0.7
+    0.75
 }
 fn default_margin() -> f64 {
     3.0

@@ -243,7 +243,7 @@ mod tests {
             dummy_entry("song-b", 0xFFFF_FFFF_FFFF_FFFF, 0.2),
         ];
         let config = JacketMatcherConfig {
-            similarity_threshold: 0.7,
+            similarity_threshold: 0.75,
             margin_threshold: 3.0,
             disable_hog: false,
         };
