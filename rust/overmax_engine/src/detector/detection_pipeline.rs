@@ -428,44 +428,40 @@ impl DetectionPipeline {
     }
 }
 
-pub fn detect_freestyle_color_match(mean: (u8, u8, u8)) -> bool {
-    let freestyle_colors = [
-        (118u8, 212u8, 52u8),  // 4B
-        (225u8, 188u8, 72u8),  // 5B
-        (59u8, 146u8, 223u8),  // 6B
-        (244u8, 146u8, 133u8), // 8B
-    ];
-    let max_dist = 60.0f32;
-    for color in &freestyle_colors {
+const FREESTYLE_COLORS: [(u8, u8, u8); 4] = [
+    (118, 212, 52),  // 4B
+    (225, 188, 72),  // 5B
+    (59, 146, 223),  // 6B
+    (244, 146, 133), // 8B
+];
+
+const OPENMATCH_COLORS: [(u8, u8, u8); 4] = [
+    (102, 118, 46), // 4B
+    (147, 136, 95), // 5B
+    (61, 137, 192), // 6B
+    (153, 90, 88),  // 8B
+];
+
+fn get_min_color_distance(mean: (u8, u8, u8), colors: &[(u8, u8, u8)]) -> f32 {
+    let mut min_dist = f32::MAX;
+    for color in colors {
         let db = f32::from(mean.0) - f32::from(color.0);
         let dg = f32::from(mean.1) - f32::from(color.1);
         let dr = f32::from(mean.2) - f32::from(color.2);
         let dist = (db * db + dg * dg + dr * dr).sqrt();
-        if dist <= max_dist {
-            return true;
+        if dist < min_dist {
+            min_dist = dist;
         }
     }
-    false
+    min_dist
+}
+
+pub fn detect_freestyle_color_match(mean: (u8, u8, u8)) -> bool {
+    get_min_color_distance(mean, &FREESTYLE_COLORS) <= 30.0f32
 }
 
 pub fn detect_openmatch_color_match(mean: (u8, u8, u8)) -> bool {
-    let openmatch_colors = [
-        (102u8, 118u8, 46u8), // 4B
-        (147u8, 136u8, 95u8), // 5B
-        (61u8, 137u8, 192u8), // 6B
-        (153u8, 90u8, 88u8),  // 8B
-    ];
-    let max_dist = 60.0f32;
-    for color in &openmatch_colors {
-        let db = f32::from(mean.0) - f32::from(color.0);
-        let dg = f32::from(mean.1) - f32::from(color.1);
-        let dr = f32::from(mean.2) - f32::from(color.2);
-        let dist = (db * db + dg * dg + dr * dr).sqrt();
-        if dist <= max_dist {
-            return true;
-        }
-    }
-    false
+    get_min_color_distance(mean, &OPENMATCH_COLORS) <= 30.0f32
 }
 
 pub fn check_open_match_badge(frame: &CapturedFrame, rois: &RoiManager) -> Option<SceneType> {
@@ -575,7 +571,7 @@ fn detect_freestyle_scene_via_edge(
     frame: &CapturedFrame,
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
-) -> Option<(SceneType, i32)> {
+) -> Option<(SceneType, i32, f32)> {
     let jacket_roi = rois.get_roi_for_scene("jacket", SceneType::Freestyle)?;
     let edge_ok = detect_jacket_edges(frame, jacket_roi)
         .map(|edge_strength| edge_strength >= JACKET_EDGE_THRESHOLD)
@@ -594,7 +590,7 @@ fn detect_freestyle_scene_via_edge(
                 if match_res.similarity >= threshold {
                     if let Ok(song_id) = match_res.image_id.parse::<i32>() {
                         debug_println!("    [detect_freestyle_scene_via_edge] Freestyle screen detected via jacket edge/band and similarity ({:.4})!", match_res.similarity);
-                        return Some((SceneType::Freestyle, song_id));
+                        return Some((SceneType::Freestyle, song_id, match_res.similarity));
                     }
                 }
             }
@@ -607,7 +603,7 @@ fn detect_openmatch_scene_via_edge(
     frame: &CapturedFrame,
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
-) -> Option<(SceneType, i32)> {
+) -> Option<(SceneType, i32, f32)> {
     let jacket_roi = rois.get_roi_for_scene("jacket", SceneType::OpenMatch)?;
     let edge_ok = detect_jacket_edges(frame, jacket_roi)
         .map(|edge_strength| edge_strength >= JACKET_EDGE_THRESHOLD)
@@ -626,7 +622,7 @@ fn detect_openmatch_scene_via_edge(
                 if match_res.similarity >= threshold {
                     if let Ok(song_id) = match_res.image_id.parse::<i32>() {
                         debug_println!("    [detect_openmatch_scene_via_edge] OpenMatch screen detected via jacket edge/band and similarity ({:.4})!", match_res.similarity);
-                        return Some((SceneType::OpenMatch, song_id));
+                        return Some((SceneType::OpenMatch, song_id, match_res.similarity));
                     }
                 }
             }
@@ -646,18 +642,25 @@ fn parse_static_scene(
         return Some((scene, String::new(), Some(song_id)));
     }
 
-    // 2. 프리스타일 선곡창 감지 우선 (Bypass OCR)
-    if let Some((scene, song_id)) = detect_freestyle_scene_via_edge(frame, rois, matcher) {
-        return Some((scene, String::new(), Some(song_id)));
-    }
+    // 2. 프리스타일 및 오픈매치 선곡창 자켓 매칭 동시 비교하여 경합 (Bypass OCR)
+    let freestyle_res = detect_freestyle_scene_via_edge(frame, rois, matcher);
+    let openmatch_res = detect_openmatch_scene_via_edge(frame, rois, matcher);
 
-    // 3. 오픈매치 대기실 감지 우선 (Bypass OCR)
-    if let Some((scene, song_id)) = detect_openmatch_scene_via_edge(frame, rois, matcher) {
-        return Some((scene, String::new(), Some(song_id)));
+    match (freestyle_res, openmatch_res) {
+        (Some((f_scene, f_id, f_sim)), Some((o_scene, o_id, o_sim))) => {
+            // 둘 다 임계치를 넘었을 경우, 유사도(Similarity)가 더 높은 씬을 승자로 채택
+            if f_sim >= o_sim {
+                debug_println!("    [parse_static_scene] Both matched. Freestyle selected by similarity ({:.4} vs {:.4})", f_sim, o_sim);
+                Some((f_scene, String::new(), Some(f_id)))
+            } else {
+                debug_println!("    [parse_static_scene] Both matched. OpenMatch selected by similarity ({:.4} vs {:.4})", o_sim, f_sim);
+                Some((o_scene, String::new(), Some(o_id)))
+            }
+        }
+        (Some((f_scene, f_id, _)), None) => Some((f_scene, String::new(), Some(f_id))),
+        (None, Some((o_scene, o_id, _))) => Some((o_scene, String::new(), Some(o_id))),
+        (None, None) => None,
     }
-
-    // 4. 최종 폴백: Windows OCR을 통한 로고 감지 비활성화
-    Some((SceneType::Unknown, String::new(), None))
 }
 
 pub fn detect_scene_from_logo(

@@ -199,5 +199,6 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-17 | 파이프라인 실시간 검증 도구 도입 | 캡처 이미지 세트를 대상으로 파이프라인의 씬/곡 감지 결과 및 상세 데이터를 검증하는 verify_pipeline 바이너리 추가 | [verify_pipeline.rs](rust/overmax_app/src/bin/verify_pipeline.rs) |
 | 2026-07-17 | 즐겨찾기(Favorite) 마크 영역 마스킹 도입 | 즐겨찾기 마크 오버레이로 인한 자켓 유사도 저하를 막기 위해 좌상단 23% 영역을 마스킹하고 DB를 재구축함 | [image.rs](rust/overmax_cv/src/image.rs) / [lib.rs](rust/overmax_cv/src/lib.rs) |
 | 2026-07-17 | 런타임 해시 및 HOG 마스킹 도입 | 기존 DB 데이터의 무결성을 깨뜨리지 않고 좌상단 즐겨찾기 뱃지 노이즈를 런타임에 소거하기 위해, Hamming Distance 및 HOG 코사인 유사도 연산 시 좌상단/테두리 영역에 해당하는 비트와 원소를 동적으로 AND 마스킹 처리 | [jacket_matcher.rs](rust/overmax_data/src/service/jacket_matcher.rs) |
+| 2026-07-17 | `image_index.db` 스키마 확장 및 자동 마이그레이션 적용 | 확장성 확보를 위한 `metadata` 컬럼을 추가하고 구버전 DB 및 외부 파이프라인(`overmax-image-db`) 증분 빌드 시 스키마 미스매치를 방지하고자 최초 로드 시 `ALTER TABLE` 자동 보정 가드 구현 | [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) / [image_index.rs](rust/overmax_data/src/store/image_index.rs) |
 
 
