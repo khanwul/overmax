@@ -40,6 +40,16 @@ impl HysteresisBuffer {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.history.clear();
+        self.is_active = false;
+        self.is_leaving = false;
+        self.confidence = 0.0;
+        self.hit_count = 0;
+        self.sample_count = 0;
+        self.ratio = 0.0;
+    }
+
     pub fn update(&mut self, is_hit: bool) -> (bool, bool, f32) {
         self.push(is_hit);
         self.update_counts();

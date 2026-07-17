@@ -59,6 +59,7 @@ impl Default for GlobalRoiConfig {
                 "rate" => (891, 608, 129, 32),
                 "mode" => (0, 18, 340, 75),
                 "mode_digit" => (78, 28, 50, 68),
+                "mode_colorbar" => (60, 0, 6, 96),
                 "diff_panel" => (709, 86, 90, 18),
                 "max_combo_badge" => (1024, 521, 75, 75),
                 "score" => (759, 710, 407, 94),
@@ -70,6 +71,7 @@ impl Default for GlobalRoiConfig {
                 "openmatch_diff" => (410, 841, 106, 18),
                 "max_combo_badge" => (437, 591, 75, 75),
                 "score" => (211, 753, 317, 74),
+                "player_panel" => (212, 830, 316, 40),
             },
             SceneType::ResultOpen2 => {
                 "jacket" => (705, 14, 60, 60),
@@ -78,6 +80,7 @@ impl Default for GlobalRoiConfig {
                 "openmatch_diff" => (510, 841, 106, 18),
                 "max_combo_badge" => (537, 591, 75, 75),
                 "score" => (311, 753, 320, 72),
+                "player_panel" => (312, 830, 316, 40),
             },
         ];
 

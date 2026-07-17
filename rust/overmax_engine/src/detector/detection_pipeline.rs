@@ -12,6 +12,7 @@ const JACKET_CHANGE_THRESHOLD: f32 = 2.5;
 const JACKET_FORCE_RECHECK_SEC: f64 = 2.0;
 const JACKET_FORCE_RECHECK_LONG_SEC: f64 = 30.0;
 const JACKET_EDGE_THRESHOLD: f32 = 15.0;
+const STRICT_EDGE_THRESHOLD: f32 = 25.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DetectionOutput {
@@ -80,6 +81,20 @@ impl DetectionPipeline {
             last_detected_result_scene: SceneType::Unknown,
             unknown_since: None,
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.current_song_id = None;
+        self.last_logo_ocr_ts = 0.0;
+        self.last_logo_scene = SceneType::Unknown;
+        self.last_jacket_ts = 0.0;
+        self.last_jacket_match_ts = 0.0;
+        self.last_jacket_thumb = None;
+        self.result_scene_streak = 0;
+        self.last_detected_result_scene = SceneType::Unknown;
+        self.unknown_since = None;
+        self.hysteresis.reset();
+        self.play_state.reset();
     }
 
     pub fn ocr_available(&self) -> bool {
@@ -413,6 +428,26 @@ impl DetectionPipeline {
     }
 }
 
+pub fn detect_freestyle_color_match(mean: (u8, u8, u8)) -> bool {
+    let freestyle_colors = [
+        (118u8, 212u8, 52u8),  // 4B
+        (225u8, 188u8, 72u8),  // 5B
+        (59u8, 146u8, 223u8),  // 6B
+        (244u8, 146u8, 133u8), // 8B
+    ];
+    let max_dist = 60.0f32;
+    for color in &freestyle_colors {
+        let db = f32::from(mean.0) - f32::from(color.0);
+        let dg = f32::from(mean.1) - f32::from(color.1);
+        let dr = f32::from(mean.2) - f32::from(color.2);
+        let dist = (db * db + dg * dg + dr * dr).sqrt();
+        if dist <= max_dist {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn detect_openmatch_color_match(mean: (u8, u8, u8)) -> bool {
     let openmatch_colors = [
         (102u8, 118u8, 46u8), // 4B
@@ -434,19 +469,40 @@ pub fn detect_openmatch_color_match(mean: (u8, u8, u8)) -> bool {
 }
 
 pub fn check_open_match_badge(frame: &CapturedFrame, rois: &RoiManager) -> Option<SceneType> {
-    // 5x5 BGR Color-based Fallback
-    if let Some(color_roi) = rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen3) {
-        let mean = crate::capture::frame_utils::region_mean_bgr(frame, color_roi);
-        if detect_openmatch_color_match(mean) {
-            return Some(SceneType::ResultOpen3);
-        }
-    }
+    // PlayerPanel ROI 엣지 확인
+    let edge_strength_result_open3 = rois
+        .get_roi_for_scene("player_panel", SceneType::ResultOpen3)
+        .and_then(|roi| detect_rect_edges(frame, roi));
 
-    if let Some(color_roi) = rois.get_roi_for_scene("openmatch_mode", SceneType::ResultOpen2) {
-        let mean = crate::capture::frame_utils::region_mean_bgr(frame, color_roi);
-        if detect_openmatch_color_match(mean) {
-            return Some(SceneType::ResultOpen2);
+    let edge_strength_result_open2 = rois
+        .get_roi_for_scene("player_panel", SceneType::ResultOpen2)
+        .and_then(|roi| detect_rect_edges(frame, roi));
+
+    match (edge_strength_result_open2, edge_strength_result_open3) {
+        (Some(strength2), Some(strength3)) => {
+            if strength2 >= STRICT_EDGE_THRESHOLD && strength3 >= STRICT_EDGE_THRESHOLD {
+                return Some(if strength2 > strength3 {
+                    SceneType::ResultOpen2
+                } else {
+                    SceneType::ResultOpen3
+                });
+            } else if strength2 >= STRICT_EDGE_THRESHOLD {
+                return Some(SceneType::ResultOpen2);
+            } else if strength3 >= STRICT_EDGE_THRESHOLD {
+                return Some(SceneType::ResultOpen3);
+            }
         }
+        (Some(strength2), None) => {
+            if strength2 >= STRICT_EDGE_THRESHOLD {
+                return Some(SceneType::ResultOpen2);
+            }
+        }
+        (None, Some(strength3)) => {
+            if strength3 >= STRICT_EDGE_THRESHOLD {
+                return Some(SceneType::ResultOpen3);
+            }
+        }
+        (None, None) => {}
     }
 
     None
@@ -490,10 +546,25 @@ fn detect_result_scene_via_edge(
 
         // 재킷 매칭이 확실히 성공한 경우에만 결과창 씬으로 반환
         if let Some(id) = song_id {
-            if let Some(fallback_scene) = check_open_match_badge(frame, rois) {
-                return Some((fallback_scene, id));
-            } else {
+            let colorbar_roi =
+                rois.get_roi_for_scene("mode_colorbar", SceneType::ResultFreestyle)?;
+            let mean = crate::capture::frame_utils::region_mean_bgr(frame, colorbar_roi);
+            debug_println!(
+                "    [detect_result_scene_via_edge] Result screen detected via jacket edge/band. Colorbar mean BGR={:?}",
+                mean
+            );
+            if detect_freestyle_color_match(mean)
+                && detect_rect_edges(frame, colorbar_roi)
+                    .map(|edge_strength| edge_strength >= STRICT_EDGE_THRESHOLD)
+                    .unwrap_or(false)
+            {
+                debug_println!("    [detect_result_scene_via_edge] Result screen detected via freestyle colorbar!");
                 return Some((SceneType::ResultFreestyle, id));
+            }
+
+            if let Some(fallback_scene) = check_open_match_badge(frame, rois) {
+                debug_println!("    [detect_result_scene_via_edge] Result screen detected via openmatch badge!");
+                return Some((fallback_scene, id));
             }
         }
     }
@@ -575,13 +646,13 @@ fn parse_static_scene(
         return Some((scene, String::new(), Some(song_id)));
     }
 
-    // 2. 오픈매치 대기실 감지 우선 (Bypass OCR)
-    if let Some((scene, song_id)) = detect_openmatch_scene_via_edge(frame, rois, matcher) {
+    // 2. 프리스타일 선곡창 감지 우선 (Bypass OCR)
+    if let Some((scene, song_id)) = detect_freestyle_scene_via_edge(frame, rois, matcher) {
         return Some((scene, String::new(), Some(song_id)));
     }
 
-    // 3. 프리스타일 선곡창 감지 우선 (Bypass OCR)
-    if let Some((scene, song_id)) = detect_freestyle_scene_via_edge(frame, rois, matcher) {
+    // 3. 오픈매치 대기실 감지 우선 (Bypass OCR)
+    if let Some((scene, song_id)) = detect_openmatch_scene_via_edge(frame, rois, matcher) {
         return Some((scene, String::new(), Some(song_id)));
     }
 
@@ -600,11 +671,36 @@ pub fn detect_scene_from_logo(
         .unwrap_or(SceneType::Unknown)
 }
 
+fn detect_rect_edges(frame: &CapturedFrame, roi: crate::detector::roi::RoiRect) -> Option<f32> {
+    let margin = 8;
+    let ext_roi = crate::detector::roi::RoiRect {
+        x1: roi.x1 - margin,
+        y1: roi.y1 - margin,
+        x2: roi.x2 + margin,
+        y2: roi.y2 + margin,
+    };
+    let ext_img = crop_roi(frame, ext_roi)?;
+    overmax_cv::detect_rect_edges(
+        &ext_img.bgra,
+        ext_img.width as usize,
+        ext_img.height as usize,
+        margin as usize,
+    )
+    .ok()
+}
+
 fn detect_jacket_edges(
     frame: &CapturedFrame,
     jacket_roi: crate::detector::roi::RoiRect,
 ) -> Option<f32> {
-    let margin = 8;
+    detect_jacket_edges_with_margin(frame, jacket_roi, 8)
+}
+
+fn detect_jacket_edges_with_margin(
+    frame: &CapturedFrame,
+    jacket_roi: crate::detector::roi::RoiRect,
+    margin: i32,
+) -> Option<f32> {
     let ext_roi = crate::detector::roi::RoiRect {
         x1: jacket_roi.x1 - margin,
         y1: jacket_roi.y1 - margin,
@@ -632,6 +728,19 @@ fn check_category_band_solid(
         x2: jacket_roi.x2 + width,
         y2: jacket_roi.y2,
     };
+
+    if let Some(edge_strength) = detect_jacket_edges_with_margin(frame, band_roi, 4) {
+        debug_println!(
+            "    [check_category_band_solid] Category band edge detected! strength={:.2}",
+            edge_strength
+        );
+        if edge_strength < STRICT_EDGE_THRESHOLD {
+            return false;
+        }
+    } else {
+        debug_println!("    [check_category_band_solid] Category band edge detection failed!");
+        return false;
+    }
 
     let Some(band_img) = crop_roi(frame, band_roi) else {
         return false;
