@@ -81,9 +81,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let dhash_str = format!("{:016x}", res.orig_dhash);
                 let ahash_str = format!("{:016x}", res.orig_ahash);
 
-                // 구버전 클라이언트의 HOG 파싱 규격(1764 * 4 = 7056 바이트)을 충족하기 위한 0f32 더미 HOG 데이터 생성
-                let dummy_hog = vec![0.0f32; 1764];
-                let hog_bytes = f32_vec_to_bytes(&dummy_hog);
+                // 구버전 클라이언트의 코사인 유사도 연산을 만족하기 위한 물리적 HOG 데이터 직렬화
+                let hog_bytes = f32_vec_to_bytes(&res.hog);
 
                 // metadata 컬럼용 JSON 구성 (신형 마스킹 해시 세트 직렬화)
                 let metadata_json = serde_json::json!({
@@ -138,6 +137,7 @@ struct ProcessResult {
     masked_phash: u64,
     masked_dhash: u64,
     masked_ahash: u64,
+    hog: Vec<f32>,
 }
 
 fn process_image(path: &Path) -> Result<ProcessResult, String> {
@@ -159,6 +159,9 @@ fn process_image(path: &Path) -> Result<ProcessResult, String> {
     let feats = overmax_cv::compute_image_features_v2(&bgra, width, height, 4)
         .map_err(|e| format!("{:?}", e))?;
 
+    let hog = overmax_cv::compute_image_hog(&bgra, width, height, 4)
+        .map_err(|e| format!("{:?}", e))?;
+
     Ok(ProcessResult {
         orig_phash: feats.orig_phash,
         orig_dhash: feats.orig_dhash,
@@ -166,6 +169,7 @@ fn process_image(path: &Path) -> Result<ProcessResult, String> {
         masked_phash: feats.masked_phash,
         masked_dhash: feats.masked_dhash,
         masked_ahash: feats.masked_ahash,
+        hog,
     })
 }
 
