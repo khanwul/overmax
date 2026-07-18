@@ -204,5 +204,4 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-17 | OCR 및 PlayState 내 중첩 Option 분기 모나딕 정돈 | `ocr_engine.rs` 및 `play_state.rs` 내 이중 중첩 `if let` 분기들과 중복 폴백 논리를 `and_then`/`unwrap_or`/클로저 조합으로 모나딕하게 캡슐화 및 정돈 | [ocr_engine.rs](rust/overmax_engine/src/detector/ocr_engine.rs) / [play_state.rs](rust/overmax_engine/src/detector/play_state.rs) |
 | 2026-07-17 | `overmax_data` 곡 매칭 및 추천 분기 가드 정돈 | `client.rs` 및 `recommend.rs` 내의 2중 `if let` 중첩들을 `and_then` 모나딕 체인으로 정리하고, `split_once` 및 `let Some = ... else { continue }` 가드 패턴 도입 | [client.rs](rust/overmax_data/src/community/client.rs) / [recommend.rs](rust/overmax_data/src/service/recommend.rs) |
 | 2026-07-17 | V2/Metadata 컬럼 구조 전면 철회 및 V1 비트 매핑 복구 | HOG 생략의 원인이었던 불필요하게 비대해진 metadata 컬럼 및 JSON 직렬화/파싱 코드를 전면 제거하고, V1의 안정적인 런타임 비트 마스크 및 HOG 마스크 대조 구조로 단순화 복귀 | [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) / [image_index.rs](rust/overmax_data/src/store/image_index.rs) / [jacket_matcher.rs](rust/overmax_data/src/service/jacket_matcher.rs) |
-
-
+| 2026-07-18 | db_builder.rs 타입 불일치 빌드 오류 수정 | overmax_cv::compute_image_features 반환값이 4-tuple(phash, dhash, ahash, hog)로 변경됨에 따라, db_builder.rs의 구조 분해 및 중복 HOG 계산 코드를 수정 | [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) |
