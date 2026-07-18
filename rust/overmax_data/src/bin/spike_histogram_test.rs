@@ -1,9 +1,9 @@
+use rayon::prelude::*;
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use rayon::prelude::*;
 
 const HOG_LEN: usize = 1764;
 
@@ -130,8 +130,12 @@ fn stretch_contrast(gray: &mut [u8]) {
     let mut min = 255u8;
     let mut max = 0u8;
     for &val in gray.iter() {
-        if val < min { min = val; }
-        if val > max { max = val; }
+        if val < min {
+            min = val;
+        }
+        if val > max {
+            max = val;
+        }
     }
     let range = max.saturating_sub(min);
     if range > 15 {
@@ -149,9 +153,24 @@ fn load_test_images_from_markdown(md_path: &str) -> Vec<TestImage> {
     let mut test_images = Vec::new();
     let mut current_folder = String::new();
 
-    let freestyle_song_roi = RoiRect { x: 710, y: 533, width: 60, height: 60 };
-    let openmatch_song_roi = RoiRect { x: 664, y: 533, width: 60, height: 60 };
-    let results_roi = RoiRect { x: 705, y: 14, width: 60, height: 60 };
+    let freestyle_song_roi = RoiRect {
+        x: 710,
+        y: 533,
+        width: 60,
+        height: 60,
+    };
+    let openmatch_song_roi = RoiRect {
+        x: 664,
+        y: 533,
+        width: 60,
+        height: 60,
+    };
+    let results_roi = RoiRect {
+        x: 705,
+        y: 14,
+        width: 60,
+        height: 60,
+    };
 
     for line in content.lines() {
         let line = line.trim();
@@ -228,7 +247,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Error: cache/image_index.db not found. Run db_builder or copy it first.");
         return Ok(());
     }
-    
+
     let conn = Connection::open(db_path)?;
     let mut stmt = conn.prepare("SELECT image_id, phash, dhash, ahash, hog FROM images")?;
     let mut hash_map = HashMap::new();
@@ -239,21 +258,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let dhash_str: String = row.get(2)?;
         let ahash_str: String = row.get(3)?;
         let hog_blob: Vec<u8> = row.get(4)?;
-        
+
         let phash = u64::from_str_radix(&phash_str, 16).unwrap_or(0);
         let dhash = u64::from_str_radix(&dhash_str, 16).unwrap_or(0);
         let ahash = u64::from_str_radix(&ahash_str, 16).unwrap_or(0);
         let hog = parse_hog_blob(&hog_blob).unwrap_or_default();
-        
+
         hash_map.insert(image_id, (phash, dhash, ahash, hog));
     }
-    println!("Loaded hashes and HOGs for {} songs from DB.", hash_map.len());
+    println!(
+        "Loaded hashes and HOGs for {} songs from DB.",
+        hash_map.len()
+    );
 
     // 2. scratch/jackets에서 히스토그램 학습 (프리베이크 모사)
     let jackets_dir = "scratch/jackets";
     let mut db_entries = Vec::new();
     let mut missing_hashes = 0;
-    
+
     if Path::new(jackets_dir).exists() {
         for entry in fs::read_dir(jackets_dir)? {
             let entry = entry?;
@@ -265,8 +287,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let img = image::open(&path)?;
                         let mut gray = to_gray(&img);
                         stretch_contrast(&mut gray);
-                        let grid_hist = compute_grid_histogram(&gray, img.width() as usize, img.height() as usize);
-                        
+                        let grid_hist = compute_grid_histogram(
+                            &gray,
+                            img.width() as usize,
+                            img.height() as usize,
+                        );
+
                         db_entries.push(DbEntry {
                             image_id: image_id.to_string(),
                             phash: *phash,
@@ -300,16 +326,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 즐겨찾기 가림 영역 해시 마스킹 비트 정의
     let mut mask_bits: u64 = 0;
-    for x in 0..8 { mask_bits |= 1 << x; } // y = 0
-    for y in 0..8 { mask_bits |= 1 << (y * 8 + 7); } // x = 7
+    for x in 0..8 {
+        mask_bits |= 1 << x;
+    } // y = 0
+    for y in 0..8 {
+        mask_bits |= 1 << (y * 8 + 7);
+    } // x = 7
     mask_bits |= 1 << 8; // y = 1, x = 0
     let hash_mask: u64 = !mask_bits;
 
     // 씬별 자켓 ROI 목록 (교차 오탐지 검사용)
-    let freestyle_song_roi = RoiRect { x: 710, y: 533, width: 60, height: 60 };
-    let openmatch_song_roi = RoiRect { x: 664, y: 533, width: 60, height: 60 };
-    let results_roi = RoiRect { x: 705, y: 14, width: 60, height: 60 };
-    
+    let freestyle_song_roi = RoiRect {
+        x: 710,
+        y: 533,
+        width: 60,
+        height: 60,
+    };
+    let openmatch_song_roi = RoiRect {
+        x: 664,
+        y: 533,
+        width: 60,
+        height: 60,
+    };
+    let results_roi = RoiRect {
+        x: 705,
+        y: 14,
+        width: 60,
+        height: 60,
+    };
+
     let jacket_rois = vec![
         ("FreestyleSongSelect_Jacket", freestyle_song_roi),
         ("OpenMatchSongSelect_Jacket", openmatch_song_roi),
@@ -324,12 +369,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 프로파일링 정밀 분석 변수
     let mut total_hog_extract_ns = 0u64;
     let mut total_hog_match_ns = 0u64;
-    
+
     let mut total_new_extract_ns = 0u64;
     let mut total_new_match_ns = 0u64;
 
     println!("\n--- [START] BENCHMARK SCANS ---");
-    println!("{:<45} | {:<8} | {:<8} | {:<7} | {:<7} | {:<12}", "Image File Path", "Expected", "Matched", "TrueOk", "FalseOk", "Speedup");
+    println!(
+        "{:<45} | {:<8} | {:<8} | {:<7} | {:<7} | {:<12}",
+        "Image File Path", "Expected", "Matched", "TrueOk", "FalseOk", "Speedup"
+    );
     println!("{}", "-".repeat(105));
 
     for test in &test_set {
@@ -347,10 +395,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cropped = img.crop_imm(rx, ry, rw, rh);
         let cropped_64 = cropped.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
         let bgra = to_bgra(&cropped_64);
-        
+
         let mut gray = to_gray(&cropped);
         stretch_contrast(&mut gray);
-        let q_grid_hist = compute_grid_histogram(&gray, cropped.width() as usize, cropped.height() as usize);
+        let q_grid_hist =
+            compute_grid_histogram(&gray, cropped.width() as usize, cropped.height() as usize);
 
         // 1. 기존 매칭 방식: HOG 추출 및 900여개 코사인 유사도 순회 (시간 정밀 분리 측정)
         let t_start_hog_ext = Instant::now();
@@ -387,9 +436,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let p_dist = (entry.phash ^ q_phash).count_ones();
                 let d_dist = ((entry.dhash ^ q_dhash) & hash_mask).count_ones();
                 let a_dist = ((entry.ahash ^ q_ahash) & hash_mask).count_ones();
-                
+
                 let hamming_sum = p_dist + d_dist + a_dist;
-                
+
                 // Early Exit: 해밍 임계치 완화 (42)
                 if hamming_sum > 42 {
                     return None;
@@ -399,7 +448,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for (&e_h, &q_h) in entry.grid_hist.iter().zip(q_grid_hist.iter()) {
                     hist_diff += (e_h as i32 - q_h as i32).unsigned_abs();
                 }
-                
+
                 // 최종 유사도 계산
                 let compare_bits = hash_mask.count_ones() as f32; // 48.0
                 let total_compare_bits = 64.0 + compare_bits * 2.0; // 160.0
@@ -444,7 +493,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let d_dist = ((target_entry.dhash ^ q_dhash) & hash_mask).count_ones();
                 let a_dist = ((target_entry.ahash ^ q_ahash) & hash_mask).count_ones();
                 debug_expected_hamming = p_dist + d_dist + a_dist;
-                
+
                 let mut hist_diff = 0u32;
                 for (&e_h, &q_h) in target_entry.grid_hist.iter().zip(q_grid_hist.iter()) {
                     hist_diff += (e_h as i32 - q_h as i32).unsigned_abs();
@@ -470,22 +519,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             total_false_tests += 1;
             let (fx, fy, fw, fh) = get_scaled_roi(w, h, *base_roi);
             let false_cropped = img.crop_imm(fx, fy, fw, fh);
-            let false_cropped_64 = false_cropped.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
+            let false_cropped_64 =
+                false_cropped.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
             let false_bgra = to_bgra(&false_cropped_64);
-            
+
             let mut false_gray = to_gray(&false_cropped);
             stretch_contrast(&mut false_gray);
-            let false_q_grid_hist = compute_grid_histogram(&false_gray, false_cropped.width() as usize, false_cropped.height() as usize);
+            let false_q_grid_hist = compute_grid_histogram(
+                &false_gray,
+                false_cropped.width() as usize,
+                false_cropped.height() as usize,
+            );
 
-            let (fq_phash, fq_dhash, fq_ahash) = overmax_cv::compute_image_hashes(&false_bgra, 64, 64, 4)?;
-            
+            let (fq_phash, fq_dhash, fq_ahash) =
+                overmax_cv::compute_image_hashes(&false_bgra, 64, 64, 4)?;
+
             let false_matched = db_entries
                 .iter()
                 .filter_map(|entry| {
                     let p_dist = (entry.phash ^ fq_phash).count_ones();
                     let d_dist = ((entry.dhash ^ fq_dhash) & hash_mask).count_ones();
                     let a_dist = ((entry.ahash ^ fq_ahash) & hash_mask).count_ones();
-                    
+
                     let hamming_sum = p_dist + d_dist + a_dist;
                     if hamming_sum > 42 {
                         return None;
@@ -549,7 +604,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // C. 완전한 엉뚱한 이미지 추가 검증 (랜덤 이미지 False Positive 검증)
     println!("\n--- [ADDITIONAL] RANDOM NOISE FALSE POSITIVE TEST ---");
-    
+
     // 100% 랜덤 노이즈 이미지 런타임 빌드 (False Positive 보장용 대안셋)
     let mut noise_img = image::ImageBuffer::new(120, 120);
     for (x, y, pixel) in noise_img.enumerate_pixels_mut() {
@@ -557,7 +612,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         *pixel = image::Rgb([val, val, val]);
     }
     let noise_dynamic = image::DynamicImage::ImageRgb8(noise_img);
-    
+
     // 빈 검정 단색 이미지 빌드
     let black_dynamic = image::DynamicImage::ImageRgb8(image::ImageBuffer::new(120, 120));
 
@@ -569,11 +624,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (name, img) in &random_images {
         total_false_tests += 1;
         let bgra = to_bgra(&img.resize_exact(64, 64, image::imageops::FilterType::Lanczos3));
-        
+
         let mut gray = to_gray(&img);
         stretch_contrast(&mut gray);
-        let q_grid_hist = compute_grid_histogram(&gray, img.width() as usize, img.height() as usize);
-        
+        let q_grid_hist =
+            compute_grid_histogram(&gray, img.width() as usize, img.height() as usize);
+
         let (rq_phash, rq_dhash, rq_ahash) = overmax_cv::compute_image_hashes(&bgra, 64, 64, 4)?;
 
         let matched = db_entries
@@ -595,7 +651,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let hash_sim = 1.0 - (hamming_sum as f32 / total_compare_bits);
                 let hist_sim = 1.0 - (hist_diff as f32 / 256.0).clamp(0.0, 1.0);
                 let similarity = 0.5 * hash_sim + 0.5 * hist_sim;
-                
+
                 let sim_key = (similarity * 1000000.0) as u32;
                 Some((entry.image_id.clone(), sim_key, similarity))
             })
@@ -608,14 +664,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 false_positives += 1;
             }
         }
-        println!("Type: {:<35} -> Match Result: {} (Expect None) | {}", name, if rand_ok { "None (OK)" } else { "Matched (FAIL)" }, if rand_ok { "PASS" } else { "FAIL" });
+        println!(
+            "Type: {:<35} -> Match Result: {} (Expect None) | {}",
+            name,
+            if rand_ok {
+                "None (OK)"
+            } else {
+                "Matched (FAIL)"
+            },
+            if rand_ok { "PASS" } else { "FAIL" }
+        );
     }
 
     // 통계 연산 및 출력 (단위: microsecond)
-    let total_tests_f = total_true_tests as f64;
     let avg_hog_ext_us = (total_hog_extract_ns / total_true_tests) as f64 / 1000.0;
     let avg_hog_match_us = (total_hog_match_ns / total_true_tests) as f64 / 1000.0;
-    
+
     let avg_new_ext_us = (total_new_extract_ns / total_true_tests) as f64 / 1000.0;
     let avg_new_match_us = (total_new_match_ns / total_true_tests) as f64 / 1000.0;
 
@@ -624,23 +688,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== BENCHMARK REPORT SUMMARY ===");
     println!("Total True Tests Checked: {}", total_true_tests);
-    println!("True Positives Matched  : {} / {} ({:.2}%)", true_positives, total_true_tests, (true_positives as f32 / total_true_tests as f32) * 100.0);
+    println!(
+        "True Positives Matched  : {} / {} ({:.2}%)",
+        true_positives,
+        total_true_tests,
+        (true_positives as f32 / total_true_tests as f32) * 100.0
+    );
     println!("Total False Tests Checked: {}", total_false_tests);
-    println!("False Positives Detected: {} / {} ({:.2}%)", false_positives, total_false_tests, (false_positives as f32 / total_false_tests as f32) * 100.0);
+    println!(
+        "False Positives Detected: {} / {} ({:.2}%)",
+        false_positives,
+        total_false_tests,
+        (false_positives as f32 / total_false_tests as f32) * 100.0
+    );
     println!("{}", "-".repeat(60));
     println!("⏱️ [1단계: 쿼리 이미지 특징 추출 시간 비교 (평균)]");
     println!("   - HOG 특징 추출 (1764차원) : {:.2} us", avg_hog_ext_us);
-    println!("   - Hash 특징 추출 (3종 해시)  : {:.2} us (DCT 연산 등 포함)", avg_new_ext_us);
-    println!("   - 특징 추출 부문 Speedup    : {:.2}x", avg_hog_ext_us / avg_new_ext_us);
+    println!(
+        "   - Hash 특징 추출 (3종 해시)  : {:.2} us (DCT 연산 등 포함)",
+        avg_new_ext_us
+    );
+    println!(
+        "   - 특징 추출 부문 Speedup    : {:.2}x",
+        avg_hog_ext_us / avg_new_ext_us
+    );
     println!("{}", "-".repeat(60));
     println!("⏱️ [2단계: 900여개 DB 순회 매칭 연산 시간 비교 (평균)]");
-    println!("   - 기존 HOG 코사인 유사도 900회 : {:.2} us", avg_hog_match_us);
-    println!("   - 신규 1차 Early Exit + 2차 L1  : {:.2} us (Rayon 병렬화)", avg_new_match_us);
-    println!("   - 순수 매칭 부문 Speedup        : {:.2}x faster", match_speedup);
+    println!(
+        "   - 기존 HOG 코사인 유사도 900회 : {:.2} us",
+        avg_hog_match_us
+    );
+    println!(
+        "   - 신규 1차 Early Exit + 2차 L1  : {:.2} us (Rayon 병렬화)",
+        avg_new_match_us
+    );
+    println!(
+        "   - 순수 매칭 부문 Speedup        : {:.2}x faster",
+        match_speedup
+    );
     println!("{}", "-".repeat(60));
     println!("🚀 [종합 파이프라인(추출+매칭) 총 연산 시간 Speedup]");
-    println!("   - 기존 HOG 파이프라인 : {:.2} us", avg_hog_ext_us + avg_hog_match_us);
-    println!("   - 신규 매칭 파이프라인 : {:.2} us", avg_new_ext_us + avg_new_match_us);
+    println!(
+        "   - 기존 HOG 파이프라인 : {:.2} us",
+        avg_hog_ext_us + avg_hog_match_us
+    );
+    println!(
+        "   - 신규 매칭 파이프라인 : {:.2} us",
+        avg_new_ext_us + avg_new_match_us
+    );
     println!("   - 종합 파이프라인 Speedup : {:.2}x", total_speedup);
     println!("=================================");
 

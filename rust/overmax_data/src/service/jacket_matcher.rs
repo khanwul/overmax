@@ -92,16 +92,17 @@ impl JacketMatcher {
         let total_compare_bits = 64.0 + compare_bits * 2.0; // 160.0
 
         // 3. 싱글 스레드 순차 최적화 매칭 순회 (1차 Early Exit + 2차 WTA 유사도 계산)
-        let matched = self.entries
+        let matched = self
+            .entries
             .iter()
             .enumerate()
             .filter_map(|(idx, entry)| {
                 let p_dist = (entry.phash ^ q_phash).count_ones();
                 let d_dist = ((entry.dhash ^ q_dhash) & hash_mask).count_ones();
                 let a_dist = ((entry.ahash ^ q_ahash) & hash_mask).count_ones();
-                
+
                 let hamming_sum = p_dist + d_dist + a_dist;
-                
+
                 // 1차 필터: Early Exit (임계치 42)
                 if hamming_sum > 42 {
                     return None;
@@ -119,7 +120,7 @@ impl JacketMatcher {
                 };
 
                 let hash_sim = 1.0 - (hamming_sum as f32 / total_compare_bits);
-                
+
                 // 가중합 유사도 산출
                 let similarity = if entry.grid_hist.is_some() {
                     0.5 * hash_sim + 0.5 * hist_sim

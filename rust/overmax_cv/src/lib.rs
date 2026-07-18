@@ -214,15 +214,11 @@ pub fn binarize_by_global_contrast(
 }
 
 pub use image::{
-    adaptive_threshold_bradley_roth, binarize_by_luminance, diff_panel_threshold, LumaMethod,
-    stretch_contrast, to_gray,
+    adaptive_threshold_bradley_roth, binarize_by_luminance, diff_panel_threshold, stretch_contrast,
+    to_gray, LumaMethod,
 };
 
-pub fn compute_grid_histogram(
-    gray: &[u8],
-    width: usize,
-    height: usize,
-) -> [u8; 32] {
+pub fn compute_grid_histogram(gray: &[u8], width: usize, height: usize) -> [u8; 32] {
     let mut grid_hist = [0u8; 32];
     if width < 2 || height < 2 {
         return grid_hist;
