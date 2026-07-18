@@ -4,6 +4,9 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct JacketMatcherConfig {
     pub similarity_threshold: f32,
+    /// HOG 매칭이 완전히 제거됨에 따라, `margin_threshold`와 `disable_hog`는
+    /// 더 이상 런타임 매칭에 실질적 영향을 미치지 않지만, 사용자 설정 파일(`settings.user.json`)
+    /// 호환성을 깨지 않고 무해하게 유지하기 위해 필드를 보존합니다.
     pub margin_threshold: f32,
     pub disable_hog: bool,
 }
@@ -20,6 +23,14 @@ pub struct JacketMatcher {
 }
 
 impl JacketMatcher {
+    /// 즐겨찾기(Favorite) 및 테두리 마스킹이 적용된 총 비교 비트(160비트) 중,
+    /// 노이즈가 가장 심한 특수 이미지들(예: Fundamental 등)에서 발생할 수 있는
+    /// 최대 Hamming Distance 불일치 거리가 약 38~40비트 수준입니다.
+    /// 정답이 잘못 걸러지는 누락(False Negative)을 방지하기 위해 통계 마진을 두어
+    /// Early Exit 필터 임계치를 42비트로 정의합니다.
+    /// 95% 이상의 완전 불일치 곡 후보군들은 POPCNT 3번으로 즉시 탈락(Early Exit)됩니다.
+    const HAMMING_EARLY_EXIT_THRESHOLD: u32 = 42;
+
     pub fn new(entries: Vec<ImageEntry>, config: JacketMatcherConfig) -> Self {
         Self {
             entries: Arc::new(entries),
@@ -56,6 +67,9 @@ impl JacketMatcher {
         }
     }
 
+    /// 구버전 매칭 엔진의 public API 시그니처 호환성을 유지하기 위한 메서드입니다.
+    /// HOG Cosine 유사도 매칭이 100% 배제되어 top_k 정렬 후 재대조할 필요가 없어져
+    /// 내부적으로 `_top_k` 매개변수는 무시하고 1-Pass WTA 매칭을 수행합니다.
     pub fn match_jacket_with_top_k(
         &self,
         data: &[u8],
@@ -103,8 +117,8 @@ impl JacketMatcher {
 
                 let hamming_sum = p_dist + d_dist + a_dist;
 
-                // 1차 필터: Early Exit (임계치 42)
-                if hamming_sum > 42 {
+                // 1차 필터: Early Exit (임계치 42비트)
+                if hamming_sum > Self::HAMMING_EARLY_EXIT_THRESHOLD {
                     return None;
                 }
 
@@ -121,19 +135,18 @@ impl JacketMatcher {
 
                 let hash_sim = 1.0 - (hamming_sum as f32 / total_compare_bits);
 
-                // 가중합 유사도 산출
+                // 가중합 유사도 산출 (50:50 비율로 이미지 해시와 분할 히스토그램 가중)
                 let similarity = if entry.grid_hist.is_some() {
                     0.5 * hash_sim + 0.5 * hist_sim
                 } else {
                     hash_sim
                 };
 
-                let sim_key = (similarity * 1000000.0) as u32;
-                Some((idx, sim_key, similarity))
+                Some((idx, similarity))
             })
-            .max_by_key(|&(_, sim_key, _)| sim_key);
+            .max_by(|a, b| a.1.total_cmp(&b.1));
 
-        if let Some((idx, _, similarity)) = matched {
+        if let Some((idx, similarity)) = matched {
             if similarity >= self.config.similarity_threshold {
                 self.update_cache(idx);
                 return Some(ImageMatch {

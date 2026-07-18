@@ -366,9 +366,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_true_tests = 0;
     let mut total_false_tests = 0;
 
+    // 유사도 통계 수집기
+    let mut true_pos_similarities: Vec<f32> = Vec::new();
+    let mut false_pos_similarities: Vec<f32> = Vec::new();
+
     // 프로파일링 정밀 분석 변수
     let mut total_hog_extract_ns = 0u64;
     let mut total_hog_match_ns = 0u64;
+
+    let mut total_real_old_ns = 0u64;
+    let mut total_real_old_skips = 0u64;
 
     let mut total_new_extract_ns = 0u64;
     let mut total_new_match_ns = 0u64;
@@ -396,10 +403,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cropped_64 = cropped.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
         let bgra = to_bgra(&cropped_64);
 
-        let mut gray = to_gray(&cropped);
-        stretch_contrast(&mut gray);
-        let q_grid_hist =
-            compute_grid_histogram(&gray, cropped.width() as usize, cropped.height() as usize);
+        let mut gray = overmax_cv::to_gray(&bgra, 4);
+        overmax_cv::stretch_contrast(&mut gray, 64, 64);
+        let q_grid_hist = overmax_cv::compute_grid_histogram(&gray, 64, 64);
 
         // 1. 기존 매칭 방식: HOG 추출 및 900여개 코사인 유사도 순회 (시간 정밀 분리 측정)
         let t_start_hog_ext = Instant::now();
@@ -415,19 +421,67 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let sim = cosine_similarity(&entry.hog, &q_hog);
                 (entry.image_id.clone(), sim)
             })
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            .max_by(|a, b| a.1.total_cmp(&b.1));
         let t_dur_hog_match = t_start_hog_match.elapsed().as_nanos() as u64;
         total_hog_match_ns += t_dur_hog_match;
 
         let total_hog_ns = t_dur_hog_ext + t_dur_hog_match;
 
-        // 2. 신규 히스토그램 + Early Exit 방식: 해시 추출 및 900여개 매칭 (시간 정밀 분리 측정)
-        let t_start_new_ext = Instant::now();
+        // 해시 추출은 신규 방식과 실제 구버전 skip_hog 방식 모두에서 쓰이므로 여기서 한 번만 추출하고, 소요 시간만 new_ext_ns에 누적합니다.
+        let t_start_hash_ext = Instant::now();
         let (q_phash, q_dhash, q_ahash) = overmax_cv::compute_image_hashes(&bgra, 64, 64, 4)?;
-        // 히스토그램 계산은 쿼리 전처리 시 수행되므로 추출 시간에 합산
-        let t_dur_new_ext = t_start_new_ext.elapsed().as_nanos() as u64;
-        total_new_extract_ns += t_dur_new_ext;
+        let t_dur_hash_ext = t_start_hash_ext.elapsed().as_nanos() as u64;
+        total_new_extract_ns += t_dur_hash_ext;
 
+        // [추가] 실제 구버전 skip_hog 프로덕션 경로 시뮬레이터 측정
+        let t_start_real_old = Instant::now();
+        let compare_bits = hash_mask.count_ones() as f32; // 48.0
+        let mut hash_candidates = db_entries
+            .iter()
+            .map(|entry| {
+                let p_dist = (entry.phash ^ q_phash).count_ones();
+                let d_dist = ((entry.dhash ^ q_dhash) & hash_mask).count_ones();
+                let a_dist = ((entry.ahash ^ q_ahash) & hash_mask).count_ones();
+                let p_sim = 1.0 - (p_dist as f32 / 64.0);
+                let d_sim = 1.0 - (d_dist as f32 / compare_bits);
+                let a_sim = 1.0 - (a_dist as f32 / compare_bits);
+                let hash_sim = 0.5 * p_sim + 0.3 * d_sim + 0.2 * a_sim;
+                (entry, hash_sim)
+            })
+            .collect::<Vec<_>>();
+        hash_candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
+
+        let first_hash_sim = hash_candidates[0].1;
+        let skip_hog = if hash_candidates.len() > 1 {
+            let second_hash_sim = hash_candidates[1].1;
+            let margin = first_hash_sim - second_hash_sim;
+            margin >= 3.0 * 0.1 || first_hash_sim >= 0.99
+        } else {
+            true
+        };
+
+        let real_old_hog_match_time = if skip_hog {
+            total_real_old_skips += 1;
+            0
+        } else {
+            // HOG 연산 실행
+            let ext_time = t_dur_hog_ext;
+            let start_match = Instant::now();
+            let _matched_hog_top_k = hash_candidates
+                .iter()
+                .take(10)
+                .map(|&(entry, hash_sim)| {
+                    let sim = cosine_similarity(&entry.hog, &q_hog);
+                    let similarity = 0.45 * hash_sim + 0.55 * sim;
+                    (entry.image_id.clone(), similarity)
+                })
+                .max_by(|a, b| a.1.total_cmp(&b.1));
+            ext_time + start_match.elapsed().as_nanos() as u64
+        };
+        let t_dur_real_old = t_start_real_old.elapsed().as_nanos() as u64 + t_dur_hash_ext + real_old_hog_match_time;
+        total_real_old_ns += t_dur_real_old;
+
+        // 2. 신규 히스토그램 + Early Exit 방식: 900여개 매칭 (시간 정밀 분리 측정)
         let t_start_new_match = Instant::now();
         // Rayon을 걷어낸 싱글 스레드 순차 매칭 루프 (Early Exit + WTA 유사도 계산)
         let matched = db_entries
@@ -439,7 +493,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let hamming_sum = p_dist + d_dist + a_dist;
 
-                // Early Exit: 해밍 임계치 완화 (42)
+                // Early Exit: 해밍 임계치 완화 (42비트)
                 if hamming_sum > 42 {
                     return None;
                 }
@@ -450,30 +504,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 // 최종 유사도 계산
-                let compare_bits = hash_mask.count_ones() as f32; // 48.0
                 let total_compare_bits = 64.0 + compare_bits * 2.0; // 160.0
                 let hash_sim = 1.0 - (hamming_sum as f32 / total_compare_bits);
                 let hist_sim = 1.0 - (hist_diff as f32 / 256.0).clamp(0.0, 1.0);
                 let similarity = 0.5 * hash_sim + 0.5 * hist_sim;
 
-                // 정밀 비교를 위해 similarity를 키(key)로 삼기 위해 정수화하여 전달
-                let sim_key = (similarity * 1000000.0) as u32;
-
-                Some((entry.image_id.clone(), sim_key, similarity))
+                Some((entry.image_id.clone(), similarity))
             })
-            .max_by_key(|&(_, sim_key, _)| sim_key);
+            .max_by(|a, b| a.1.total_cmp(&b.1));
 
         let t_dur_new_match = t_start_new_match.elapsed().as_nanos() as u64;
         total_new_match_ns += t_dur_new_match;
 
-        let total_new_ns = t_dur_new_ext + t_dur_new_match;
+        let total_new_ns = t_dur_hash_ext + t_dur_new_match;
         let speedup = total_hog_ns as f64 / total_new_ns as f64;
 
         let mut matched_id = "None".to_string();
         let mut true_ok = false;
         let mut matched_sim = 0.0;
-        if let Some((id, _, similarity)) = matched {
+        if let Some((id, similarity)) = matched {
             matched_sim = similarity;
+            true_pos_similarities.push(similarity);
             if similarity >= 0.70 {
                 matched_id = id;
                 if matched_id == test.expected_id {

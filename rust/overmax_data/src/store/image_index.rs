@@ -2,8 +2,6 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, Result};
 use std::path::{Path, PathBuf};
 
-const HOG_LEN: usize = 1764;
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImageMatch {
     pub image_id: String,
@@ -131,15 +129,17 @@ fn parse_entry(
     let orig_ahash = parse_hash(ahash)?;
 
     // HOG 데이터가 존재할 경우 최소한의 크기 검증 수행 (비정상 데이터가 DB에 포함되어 로드가 깨지는 것 방지)
-    if !hog_blob.is_empty() && hog_blob.len() != HOG_LEN * std::mem::size_of::<f32>() {
+    if !hog_blob.is_empty() && hog_blob.len() != 1764 * std::mem::size_of::<f32>() {
         return None;
     }
 
-    let hog_data = parse_hog_blob(hog_blob)?;
-    let raw_norm = vector_norm(&hog_data);
-    let norm_val = raw_norm.max(1.0);
+    // HOG 매칭이 100% 제거되었으므로, 메모리 절약을 위해 HOG 파싱을 완전히 스킵하고 빈 벡터로 상주량을 100% 절감
+    let hog_data = Vec::new();
+    let norm_val = 1.0;
 
     // metadata 파싱 (히스토그램 데이터 획득)
+    // 어제 철회되었던 대용량 마스크별 해시 적재와 달리, 이번 구조는 단 32바이트의 히스토그램 u8 배열만
+    // JSON 문자열(~100바이트)로 파싱하므로 I/O 및 파싱 오버헤드가 극도로 미미함.
     let mut grid_hist = None;
     if let Some(meta_str) = metadata_str {
         if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(meta_str) {
@@ -166,23 +166,8 @@ fn parse_entry(
     })
 }
 
-fn parse_hog_blob(blob: &[u8]) -> Option<Vec<f32>> {
-    if blob.len() != HOG_LEN * std::mem::size_of::<f32>() {
-        return None;
-    }
-    let mut values = Vec::with_capacity(HOG_LEN);
-    for chunk in blob.chunks_exact(4) {
-        values.push(f32::from_le_bytes(chunk.try_into().ok()?));
-    }
-    Some(values)
-}
-
 fn parse_hash(value: &str) -> Option<u64> {
     u64::from_str_radix(value, 16).ok()
-}
-
-fn vector_norm(values: &[f32]) -> f32 {
-    values.iter().map(|value| value * value).sum::<f32>().sqrt()
 }
 
 #[cfg(test)]

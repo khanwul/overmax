@@ -132,24 +132,28 @@ fn process_image(path: &Path) -> Result<ProcessResult, String> {
 
     // 2. Decode using the image crate
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
-    let width = img.width() as usize;
-    let height = img.height() as usize;
 
-    let rgba = img.to_rgba8();
+    // 런타임 쿼리 재킷(60x60 크롭을 64x64로 리사이즈)과의 도메인 미스매치(해상도/블러 특성 차이)를
+    // 원천 방어하기 위해, DB 빌드 시에도 동일하게 64x64 규격으로 Lanczos3 축소 정규화하여 추출합니다.
+    let img_64 = img.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
+    let rgba = img_64.to_rgba8();
     let mut bgra = rgba.into_raw();
     for chunk in bgra.chunks_exact_mut(4) {
         chunk.swap(0, 2); // Swap Red and Blue to get BGRA
     }
 
-    // 3. Compute Features via overmax_cv (guarantees identical logic to overlay runtime)
-    let (orig_phash, orig_dhash, orig_ahash, hog) =
-        overmax_cv::compute_image_features(&bgra, width, height, 4)
+    // 3. Compute Hashes via overmax_cv (HOG 계산을 완전히 우회하여 리소스 방지)
+    let (orig_phash, orig_dhash, orig_ahash) =
+        overmax_cv::compute_image_hashes(&bgra, 64, 64, 4)
             .map_err(|e| format!("{:?}", e))?;
 
-    // 4. Compute Grid Histogram
+    // 4. Compute Grid Histogram (동일한 64x64 해상도의 정규화 공간에서 추출)
     let mut gray = overmax_cv::to_gray(&bgra, 4);
-    overmax_cv::stretch_contrast(&mut gray, width, height);
-    let grid_hist = overmax_cv::compute_grid_histogram(&gray, width, height);
+    overmax_cv::stretch_contrast(&mut gray, 64, 64);
+    let grid_hist = overmax_cv::compute_grid_histogram(&gray, 64, 64);
+
+    // HOG 데이터는 100% 제거되었으므로 빈 벡터를 전달
+    let hog = Vec::new();
 
     Ok(ProcessResult {
         orig_phash,
