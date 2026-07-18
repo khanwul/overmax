@@ -215,4 +215,49 @@ pub fn binarize_by_global_contrast(
 
 pub use image::{
     adaptive_threshold_bradley_roth, binarize_by_luminance, diff_panel_threshold, LumaMethod,
+    stretch_contrast, to_gray,
 };
+
+pub fn compute_grid_histogram(
+    gray: &[u8],
+    width: usize,
+    height: usize,
+) -> [u8; 32] {
+    let mut grid_hist = [0u8; 32];
+    if width < 2 || height < 2 {
+        return grid_hist;
+    }
+
+    let mid_x = width / 2;
+    let mid_y = height / 2;
+
+    for gy in 0..2 {
+        for gx in 0..2 {
+            let start_x = gx * mid_x;
+            let end_x = if gx == 1 { width } else { mid_x };
+            let start_y = gy * mid_y;
+            let end_y = if gy == 1 { height } else { mid_y };
+
+            let mut bins = [0u32; 8];
+            let mut count = 0u32;
+
+            for y in start_y..end_y {
+                let row_offset = y * width;
+                for x in start_x..end_x {
+                    let val = gray[row_offset + x];
+                    let bin = (val / 32) as usize; // 8-bin
+                    bins[bin.min(7)] += 1;
+                    count += 1;
+                }
+            }
+
+            let grid_idx = (gy * 2 + gx) * 8;
+            if count > 0 {
+                for i in 0..8 {
+                    grid_hist[grid_idx + i] = ((bins[i] * 64) / count) as u8;
+                }
+            }
+        }
+    }
+    grid_hist
+}

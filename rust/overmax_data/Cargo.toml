@@ -21,6 +21,12 @@ name = "hash_only_test"
 path = "src/bin/hash_only_test.rs"
 required-features = ["db_builder"]
 
+[[bin]]
+name = "spike_histogram_test"
+path = "src/bin/spike_histogram_test.rs"
+required-features = ["db_builder"]
+
+
 [features]
 default = []
 db_builder = ["dep:clap", "dep:rayon", "dep:image"]
