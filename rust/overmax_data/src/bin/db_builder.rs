@@ -84,17 +84,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // 구버전 클라이언트의 코사인 유사도 연산을 만족하기 위한 물리적 HOG 데이터 직렬화
                 let hog_bytes = f32_vec_to_bytes(&res.hog);
 
+                // 히스토그램을 JSON 직렬화하여 metadata 컬럼에 저장
+                let meta_json = serde_json::json!({
+                    "histogram": res.grid_hist
+                });
+                let meta_str = serde_json::to_string(&meta_json).unwrap_or_default();
+
                 tx.execute(
                     "INSERT INTO images (image_id, phash, dhash, ahash, hog, orb, metadata)
-                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL)
+                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)
                      ON CONFLICT(image_id) DO UPDATE SET
                          phash = excluded.phash,
                          dhash = excluded.dhash,
                          ahash = excluded.ahash,
                          hog   = excluded.hog,
                          orb   = NULL,
-                         metadata = NULL",
-                    params![song_id, phash_str, dhash_str, ahash_str, hog_bytes],
+                         metadata = excluded.metadata",
+                    params![song_id, phash_str, dhash_str, ahash_str, hog_bytes, meta_str],
                 )?;
                 success_count += 1;
             }
@@ -117,6 +123,7 @@ struct ProcessResult {
     orig_dhash: u64,
     orig_ahash: u64,
     hog: Vec<f32>,
+    grid_hist: [u8; 32],
 }
 
 fn process_image(path: &Path) -> Result<ProcessResult, String> {
@@ -139,11 +146,17 @@ fn process_image(path: &Path) -> Result<ProcessResult, String> {
         overmax_cv::compute_image_features(&bgra, width, height, 4)
             .map_err(|e| format!("{:?}", e))?;
 
+    // 4. Compute Grid Histogram
+    let mut gray = overmax_cv::to_gray(&bgra, 4);
+    overmax_cv::stretch_contrast(&mut gray, width, height);
+    let grid_hist = overmax_cv::compute_grid_histogram(&gray, width, height);
+
     Ok(ProcessResult {
         orig_phash,
         orig_dhash,
         orig_ahash,
         hog,
+        grid_hist,
     })
 }
 
