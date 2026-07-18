@@ -113,8 +113,8 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 ## 3. 곡 인식 (Song Recognition)
 
 - **재킷 이미지 매칭**: `ImageIndexDb`를 통해 캡처된 재킷 영역과 미리 색인된 곡 재킷의 유사도를 계산.
-- **Rust Native CV**: `overmax_cv`를 통해 3종 Perceptual Hash(pHash, dHash, aHash)를 사용한 재킷 매칭 및 검색 지원. CPU 성능 최적화를 위한 HOG 특징 연산 비활성화 옵션(`disable_hog`, 기본값 `false`)을 지원합니다.
-- **매칭 캐시 레이어 (Match Cache)**: `JacketMatcher` 내부에서 최근 매칭에 성공한 곡 인덱스를 최대 8개까지 추적하는 LRU 캐시(`MatchCache`)를 운용합니다. 매칭 시 캐시된 항목에 대해 먼저 유사도를 대조해보고 임계치 이상이면 전체 DB 루프 및 정렬을 생략하고 조기 리턴하여 CPU 연산 부하를 획기적으로 경감합니다.
+- **Rust Native CV**: `overmax_cv`를 통해 1차 u64 해시 Early Exit (Hamming <= 42) + 2차 2x2 분할 그리드 히스토그램 L1 벌점 WTA 방식의 고속 이미지 매칭 연산을 지원합니다. 무거운 HOG 코사인 유사도 매칭을 100% 제거하고 싱글 스레드 순차 최적화를 실현하여 종합 122배(루프 연산 457배) 고속화를 달성했습니다.
+- **하위 호환성 및 데이터 영속화**: 기존 DB 구조 호환성을 위해 2x2 그리드 히스토그램 데이터를 images 테이블의 metadata TEXT 컬럼에 JSON 직렬화하여 적재 및 파싱하며, 히스토그램이 없는 레거시 DB에서도 정상적으로 해시 유사도로 스위칭 동작합니다.
 
 ## 3. 원자적 상태 감지 및 안정화 (Atomic Play Context Sync)
 
@@ -242,6 +242,8 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-21 | Sync Window 및 Quick Upload 분기를 위한 RecordKey/is_quick_upload 기반 이벤트 전환 | UI 인덱스(usize) 대신 RecordKey(song_id, mode, diff) 및 is_quick_upload 플래그를 채널로 전달하여, 비동기 스캔 후 인덱스 꼬임 방지 및 오버레이 Toast / Sync Window 카드 상태 변경 분기를 명확히 독립 보장 | [sync_ui.rs](rust/overmax_app/src/ui/sync_ui.rs) / [native_app.rs](rust/overmax_app/src/ui/native_app.rs) / [native_app_viewports.rs](rust/overmax_app/src/ui/native_app_viewports.rs) |
 | 2026-07-21 | RecordDB 단일 SQL LEFT JOIN 쿼리 기반 동기화 후보 추출 구조 개편 | records와 varchive_records 테이블을 단일 LEFT JOIN 쿼리로 직접 대조하여 300여개 가짜 후보(False Positive) 노출 문제를 해결하고 Rust 이중 메모리 로드 로직 소거 | [record_db.rs](rust/overmax_data/src/store/record_db.rs) / [sync.rs](rust/overmax_data/src/community/sync.rs) |
 | 2026-07-21 | RecordManager O(1) 증분 캐시 갱신(upsert_varchive_record) 도입 | 1곡 업로드 성공 시 전체 DB 재조회를 수행하는 무거운 refresh() 대신, 메모리 캐시 및 dirty 키만 O(1)로 증분 갱신하여 CPU/디스크 부하 대폭 절감 | [record_manager.rs](rust/overmax_data/src/service/record_manager.rs) / [native_app.rs](rust/overmax_app/src/ui/native_app.rs) |
+| 2026-07-18 | HOG 100% 제거 및 Fast Histogram 매칭 도입 | HOG Cosine 유사도의 병목과 메모리 스파이크를 해결하기 위해, 1차 u64 해시 Early Exit + 2차 2x2 분할 그리드 히스토그램 L1 벌점 WTA 방식의 고속 매칭을 도입하여 매칭 루프 457배(종합 122배) 고속화 실현 | [jacket_matcher.rs](rust/overmax_data/src/service/jacket_matcher.rs) / [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) |
+| 2026-07-18 | metadata 컬럼 활용한 히스토그램 JSON 적재 | SQLite DB 스키마 수정 마이그레이션 없이 하위 호환성을 보장하기 위해 images 테이블의 metadata TEXT 컬럼에 2x2 분할 히스토그램 데이터를 JSON으로 직렬화/역직렬화하여 적재 | [image_index.rs](rust/overmax_data/src/store/image_index.rs) / [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) |
 
 ## Linux Port
 
