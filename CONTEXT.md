@@ -35,7 +35,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 # Linux Port
 
-- **현재 상태**: XWayland 캡처와 native Wayland overlay 조합의 타당성 검증은 사전 정의한 성능·동작 기준을 통과했다(2026-07-17). 최소 수직 슬라이스 코드는 조립되어 Linux unit/workspace 회귀와 Xvfb 21.1.24 + Openbox 3.6.1 lifecycle을 통과했다. hosted Windows 결과와 수동 E2E 게이트가 남아 있으며, 이 게이트 전에는 Linux 실동작 지원 또는 완료로 간주하지 않는다.
+- **현재 상태**: 최소 수직 슬라이스가 완료됐다(2026-07-18). Linux unit/workspace 회귀, Xvfb 21.1.24 + Openbox 3.6.1 lifecycle, hosted Windows build/test, mpv(X11)+native overlay 수동 검증, 실게임(DJMAX RESPECT V, Proton/XWayland, niri) E2E, 출력 off→on 후 앱 생존·degraded panel 전환을 모두 통과했다. 실게임 E2E에서 발견된 XWayland stale backing pixmap 결함은 per-frame `NameWindowPixmap` 재획득으로 수정 후 재검증했다. 다음 단계는 인식 정확도 holdout 검증이다.
 - **최초 지원 범위**: 같은 `DISPLAY`에서 XID가 관측되는 Proton/XWayland 게임을 exact title로 추적하고, XComposite named pixmap + MIT-SHM으로 캡처해 wlr-layer-shell `Layer::Overlay` surface에 표시한다. borderless fullscreen 단일 출력만 지원하며 capability가 부족하거나 대상이 모호하면 fail closed한다.
 - **제외 범위**: Gamescope/Steam Deck Gaming Mode, native Wayland 게임 surface, wlr-layer-shell 또는 XWayland가 없는 세션, windowed/multi-output, non-SHM 캡처 fallback은 최초 포팅에 포함하지 않는다.
 - **Linux 직접 의존성** (`cfg(target_os = "linux")` 한정): 추적·캡처는 `x11rb 0.13`(`composite`, `shm`)와 `memmap2`, overlay는 `smithay-client-toolkit 0.20`, `wayland-client 0.31`, `wayland-backend 0.3`, `egui-wgpu 0.33.3`, Vulkan 한정 `wgpu 27.0.1`, `raw-window-handle 0.6`, `pollster 0.4`, `rustix 1`을 사용한다. 기존 eframe/Glow와 공용 verified pipeline은 유지한다.
@@ -45,17 +45,17 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 ## 포팅 실행 순서
 
 1. **기술 타당성 검증 — 완료**: XWayland 창 캡처와 native layer overlay가 성능, 캡처 지연, 리소스 사용, Z-order, 입력 및 픽셀 정합 기준을 만족하는지 검증했다.
-2. **최소 수직 슬라이스 — 진행 중**: `창 추적 → 캡처 → 기존 verified pipeline → native overlay`를 Linux에서 end-to-end로 연결한다.
+2. **최소 수직 슬라이스 — 완료 (2026-07-18)**: `창 추적 → 캡처 → 기존 verified pipeline → native overlay`를 Linux에서 end-to-end로 연결했다.
    - [x] Linux 지원 범위, 직접 의존성 및 Windows 호환 원칙 확정
-   - [x] Linux build/test/clippy와 hosted Windows build/test workflow 추가 (최초 hosted 실행 대기)
+   - [x] Linux build/test/clippy와 hosted Windows build/test workflow 추가
    - [x] `WindowSnapshot`, 캡처 대상 전달 및 필요한 detection output 필드의 additive 계약 추가
    - [x] exact-title 창 추적과 단일 snapshot 기반 rect/foreground/fullscreen 판정
-   - [x] persistent XComposite + MIT-SHM 캡처 및 Xvfb+Openbox lifecycle/fail-closed 검증
+   - [x] XComposite + MIT-SHM 캡처(per-frame named pixmap) 및 Xvfb+Openbox lifecycle/fail-closed 검증
    - [x] 캡처 실패 시 pipeline full reset 및 `detecting()` 전송으로 stale verified 상태 차단
    - [x] fontconfig CJK 폰트 로딩과 startup capability probe
    - [x] capability 기반 compact native layer overlay와 기존 UI 연결
    - [x] 기존 재킷/엣지 인식 flow 연결 (새 matcher 및 OCR loop 추가 없음)
-   - 완료 조건: Linux unit/lifecycle, hosted Windows 회귀, mpv(X11)+native overlay 수동 검증, 실게임 E2E, 출력 off→on 후 surface 재생성과 오버레이 재표시를 모두 통과한다.
+   - [x] 완료 조건 충족: Linux unit/lifecycle, hosted Windows 회귀, mpv(X11)+native overlay 수동 검증, 실게임 E2E, 출력 off→on 후 앱 생존·재표시를 모두 통과 (2026-07-18)
 3. **인식 정확도 검증**: 최소 수직 슬라이스 완료 후 독립 holdout으로 기존 공용 인식 flow의 지연·정확도를 평가한다. 실제 실패가 확인되기 전에는 새 matcher를 설계하지 않는다.
 4. **릴리스 보강**: 인식 검증 완료 후 RC 성능 재측정, 사용자 파일 호환, 패키징 및 README를 정리한다.
 
@@ -243,3 +243,4 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-17 | Linux/Windows fork CI workflow 추가 | 첫 공용 계약 변경 전에 양 OS의 컴파일·테스트 회귀를 검증하도록 구성 | [ci.yml](.github/workflows/ci.yml) |
 | 2026-07-17 | LINUX 최소 수직 슬라이스를 fail-closed 경계로 조립 | exact-title snapshot을 persistent XComposite/MIT-SHM 캡처와 기존 verified pipeline, native layer overlay에 연결하고 오류 시 stale 상태를 즉시 초기화하기 위함. 수동·hosted 검증 전에는 M1 완료로 승격하지 않음 | |
 | 2026-07-17 | Xvfb+Openbox lifecycle 게이트 추가 | exact-title/EWMH, BGRA 캡처, resize·remap·recreate와 extension 부재 fail-closed를 재현 가능한 단일 스크립트로 고정 | [linux-m1-lifecycle.sh](.github/scripts/linux-m1-lifecycle.sh) |
+| 2026-07-18 | 캡처 pixmap을 per-frame 재획득으로 전환 | 실게임 E2E에서 XWayland가 fullscreen 게임의 buffer flip/swapchain 재생성 시 map/resize 이벤트 없이 backing pixmap을 교체해, bind 시점의 persistent named pixmap handle이 에러 없이 frozen frame을 반환하는 결함 확인(첫 곡 인식 후 곡 변경 미반영). 캡처 tick마다 NameWindowPixmap→ShmGetImage→FreePixmap으로 stale handle을 원천 차단, SHM·redirect·인플레이스 버퍼는 persistent 유지 | [linux.rs](rust/overmax_engine/src/capture/capture_engine/linux.rs) |
