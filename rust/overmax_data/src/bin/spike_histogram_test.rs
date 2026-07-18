@@ -478,7 +478,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .max_by(|a, b| a.1.total_cmp(&b.1));
             ext_time + start_match.elapsed().as_nanos() as u64
         };
-        let t_dur_real_old = t_start_real_old.elapsed().as_nanos() as u64 + t_dur_hash_ext + real_old_hog_match_time;
+        let t_dur_real_old =
+            t_start_real_old.elapsed().as_nanos() as u64 + t_dur_hash_ext + real_old_hog_match_time;
         total_real_old_ns += t_dur_real_old;
 
         // 2. 신규 히스토그램 + Early Exit 방식: 900여개 매칭 (시간 정밀 분리 측정)

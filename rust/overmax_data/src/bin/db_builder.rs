@@ -144,8 +144,7 @@ fn process_image(path: &Path) -> Result<ProcessResult, String> {
 
     // 3. Compute Hashes via overmax_cv (HOG 계산을 완전히 우회하여 리소스 방지)
     let (orig_phash, orig_dhash, orig_ahash) =
-        overmax_cv::compute_image_hashes(&bgra, 64, 64, 4)
-            .map_err(|e| format!("{:?}", e))?;
+        overmax_cv::compute_image_hashes(&bgra, 64, 64, 4).map_err(|e| format!("{:?}", e))?;
 
     // 4. Compute Grid Histogram (동일한 64x64 해상도의 정규화 공간에서 추출)
     let mut gray = overmax_cv::to_gray(&bgra, 4);
