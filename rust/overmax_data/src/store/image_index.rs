@@ -18,6 +18,7 @@ pub struct ImageEntry {
     pub ahash: u64,
     pub hog: Vec<f32>,
     pub hog_norm: f32,
+    pub grid_hist: Option<[u8; 32]>,
 }
 
 #[derive(Clone, Debug)]
@@ -122,7 +123,7 @@ fn parse_entry(
     dhash: &str,
     ahash: &str,
     hog_blob: &[u8],
-    _metadata_str: Option<&str>,
+    metadata_str: Option<&str>,
 ) -> Option<ImageEntry> {
     // 오리지널 해시는 항상 정상 파싱
     let orig_phash = parse_hash(phash)?;
@@ -138,6 +139,22 @@ fn parse_entry(
     let raw_norm = vector_norm(&hog_data);
     let norm_val = raw_norm.max(1.0);
 
+    // metadata 파싱 (히스토그램 데이터 획득)
+    let mut grid_hist = None;
+    if let Some(meta_str) = metadata_str {
+        if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(meta_str) {
+            if let Some(hist_arr) = meta_json.get("histogram").and_then(|v| v.as_array()) {
+                if hist_arr.len() == 32 {
+                    let mut hist = [0u8; 32];
+                    for (i, v) in hist_arr.iter().enumerate() {
+                        hist[i] = v.as_u64().unwrap_or(0) as u8;
+                    }
+                    grid_hist = Some(hist);
+                }
+            }
+        }
+    }
+
     Some(ImageEntry {
         image_id,
         phash: orig_phash,
@@ -145,6 +162,7 @@ fn parse_entry(
         ahash: orig_ahash,
         hog: hog_data,
         hog_norm: norm_val,
+        grid_hist,
     })
 }
 
