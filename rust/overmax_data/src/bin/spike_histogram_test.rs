@@ -525,7 +525,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some((id, similarity)) = matched {
             matched_sim = similarity;
             true_pos_similarities.push(similarity);
-            if similarity >= 0.70 {
+            if similarity >= 0.65 {
                 matched_id = id;
                 if matched_id == test.expected_id {
                     true_ok = true;
@@ -574,13 +574,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 false_cropped.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
             let false_bgra = to_bgra(&false_cropped_64);
 
-            let mut false_gray = to_gray(&false_cropped);
-            stretch_contrast(&mut false_gray);
-            let false_q_grid_hist = compute_grid_histogram(
-                &false_gray,
-                false_cropped.width() as usize,
-                false_cropped.height() as usize,
-            );
+            let mut false_gray = overmax_cv::to_gray(&false_bgra, 4);
+            overmax_cv::stretch_contrast(&mut false_gray, 64, 64);
+            let false_q_grid_hist = overmax_cv::compute_grid_histogram(&false_gray, 64, 64);
 
             let (fq_phash, fq_dhash, fq_ahash) =
                 overmax_cv::compute_image_hashes(&false_bgra, 64, 64, 4)?;
@@ -608,13 +604,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let hist_sim = 1.0 - (hist_diff as f32 / 256.0).clamp(0.0, 1.0);
                     let similarity = 0.5 * hash_sim + 0.5 * hist_sim;
 
-                    let sim_key = (similarity * 1000000.0) as u32;
-                    Some((entry.image_id.clone(), sim_key, similarity))
+                    Some((entry.image_id.clone(), similarity))
                 })
-                .max_by_key(|&(_, sim_key, _)| sim_key);
+                .max_by(|a, b| a.1.total_cmp(&b.1));
 
-            if let Some((matched_id, _, similarity)) = false_matched {
-                if similarity >= 0.70 {
+            if let Some((matched_id, similarity)) = false_matched {
+                false_pos_similarities.push(similarity);
+                if similarity >= 0.65 {
                     false_ok = false;
                     false_positives += 1;
                     eprintln!(
@@ -676,10 +672,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_false_tests += 1;
         let bgra = to_bgra(&img.resize_exact(64, 64, image::imageops::FilterType::Lanczos3));
 
-        let mut gray = to_gray(&img);
-        stretch_contrast(&mut gray);
-        let q_grid_hist =
-            compute_grid_histogram(&gray, img.width() as usize, img.height() as usize);
+        let mut gray = overmax_cv::to_gray(&bgra, 4);
+        overmax_cv::stretch_contrast(&mut gray, 64, 64);
+        let q_grid_hist = overmax_cv::compute_grid_histogram(&gray, 64, 64);
 
         let (rq_phash, rq_dhash, rq_ahash) = overmax_cv::compute_image_hashes(&bgra, 64, 64, 4)?;
 
@@ -703,14 +698,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let hist_sim = 1.0 - (hist_diff as f32 / 256.0).clamp(0.0, 1.0);
                 let similarity = 0.5 * hash_sim + 0.5 * hist_sim;
 
-                let sim_key = (similarity * 1000000.0) as u32;
-                Some((entry.image_id.clone(), sim_key, similarity))
+                Some((entry.image_id.clone(), similarity))
             })
-            .max_by_key(|&(_, sim_key, _)| sim_key);
+            .max_by(|a, b| a.1.total_cmp(&b.1));
 
         let mut rand_ok = true;
-        if let Some((_, _, similarity)) = matched {
-            if similarity >= 0.70 {
+        if let Some((_, similarity)) = matched {
+            false_pos_similarities.push(similarity);
+            if similarity >= 0.65 {
                 rand_ok = false;
                 false_positives += 1;
             }
