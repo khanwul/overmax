@@ -424,7 +424,8 @@ impl NativeApp {
             .x
             .zip(overlay.position.y)
             .map(|(x, y)| (x as i32, y as i32));
-        self.linux_overlay
+        self.platform
+            .linux_overlay
             .publish(crate::ui::linux_layer_overlay::LinuxOverlaySnapshot {
                 state: self.session.clone(),
                 song_label: self.current_song_label(),

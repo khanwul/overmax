@@ -114,7 +114,7 @@ pub fn draw_overlay_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayAct
         .fill(Theme::PANEL_BG)
         .corner_radius(CornerRadius::same((14.0 * props.scale) as u8))
         .inner_margin(Margin::same(px.panel_margin() as i8))
-        .stroke(egui::Stroke::new(1.0, Theme::PANEL_STROKE))
+        .stroke(egui::Stroke::new(1.0_f32, Theme::PANEL_STROKE))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             OverlayHeader::new(
