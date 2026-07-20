@@ -218,39 +218,59 @@ pub use image::{
     to_gray, LumaMethod,
 };
 
-pub fn compute_grid_histogram(gray: &[u8], width: usize, height: usize) -> [u8; 32] {
-    let mut grid_hist = [0u8; 32];
-    if width < 2 || height < 2 {
+/// 4x4 그리드 × RGB 3채널 × 8-bin 히스토그램 (총 384바이트).
+///
+/// - 입력: BGRA 4채널 이미지 데이터 (channels=4)
+/// - 출력: `[u8; 384]` — 각 셀(16개)에 대해 [B_bins(8), G_bins(8), R_bins(8)] 순서로 배열
+/// - 정규화: 각 채널별 8개 bin의 합이 64가 되도록 L1 정규화
+/// - L1 매칭 시 최대 이론 거리: 64 × 384 = 24576, 실용 정규화 상수: 3072
+pub fn compute_grid_histogram(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    channels: usize,
+) -> [u8; 384] {
+    let mut grid_hist = [0u8; 384];
+    if width < 4 || height < 4 || channels < 3 {
         return grid_hist;
     }
 
-    let mid_x = width / 2;
-    let mid_y = height / 2;
+    let cell_w = width / 4;
+    let cell_h = height / 4;
 
-    for gy in 0..2 {
-        for gx in 0..2 {
-            let start_x = gx * mid_x;
-            let end_x = if gx == 1 { width } else { mid_x };
-            let start_y = gy * mid_y;
-            let end_y = if gy == 1 { height } else { mid_y };
+    for gy in 0..4 {
+        for gx in 0..4 {
+            let start_x = gx * cell_w;
+            let end_x = if gx == 3 { width } else { start_x + cell_w };
+            let start_y = gy * cell_h;
+            let end_y = if gy == 3 { height } else { start_y + cell_h };
 
-            let mut bins = [0u32; 8];
+            let mut b_bins = [0u32; 8];
+            let mut g_bins = [0u32; 8];
+            let mut r_bins = [0u32; 8];
             let mut count = 0u32;
 
             for y in start_y..end_y {
                 let row_offset = y * width;
                 for x in start_x..end_x {
-                    let val = gray[row_offset + x];
-                    let bin = (val / 32) as usize; // 8-bin
-                    bins[bin.min(7)] += 1;
+                    let px = (row_offset + x) * channels;
+                    // BGRA 채널 순서: B=0, G=1, R=2
+                    let b = data[px] as usize;
+                    let g = data[px + 1] as usize;
+                    let r = data[px + 2] as usize;
+                    b_bins[(b / 32).min(7)] += 1;
+                    g_bins[(g / 32).min(7)] += 1;
+                    r_bins[(r / 32).min(7)] += 1;
                     count += 1;
                 }
             }
 
-            let grid_idx = (gy * 2 + gx) * 8;
+            let cell_idx = (gy * 4 + gx) * 24; // 24 = 3ch × 8bins
             if count > 0 {
                 for i in 0..8 {
-                    grid_hist[grid_idx + i] = ((bins[i] * 64) / count) as u8;
+                    grid_hist[cell_idx + i] = ((b_bins[i] * 64) / count) as u8;
+                    grid_hist[cell_idx + 8 + i] = ((g_bins[i] * 64) / count) as u8;
+                    grid_hist[cell_idx + 16 + i] = ((r_bins[i] * 64) / count) as u8;
                 }
             }
         }

@@ -84,9 +84,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // 구버전 클라이언트의 코사인 유사도 연산을 만족하기 위한 물리적 HOG 데이터 직렬화
                 let hog_bytes = f32_vec_to_bytes(&res.hog);
 
-                // 히스토그램을 JSON 직렬화하여 metadata 컬럼에 저장
+                // 히스토그램을 JSON 직렬화하여 metadata 컬럼에 저장 (serde는 [u8;384] 미지원 → Vec로 변환)
                 let meta_json = serde_json::json!({
-                    "histogram": res.grid_hist
+                    "histogram": res.grid_hist.to_vec()
                 });
                 let meta_str = serde_json::to_string(&meta_json).unwrap_or_default();
 
@@ -123,7 +123,7 @@ struct ProcessResult {
     orig_dhash: u64,
     orig_ahash: u64,
     hog: Vec<f32>,
-    grid_hist: [u8; 32],
+    grid_hist: [u8; 384],
 }
 
 fn process_image(path: &Path) -> Result<ProcessResult, String> {
@@ -146,10 +146,8 @@ fn process_image(path: &Path) -> Result<ProcessResult, String> {
     let (orig_phash, orig_dhash, orig_ahash) =
         overmax_cv::compute_image_hashes(&bgra, 64, 64, 4).map_err(|e| format!("{:?}", e))?;
 
-    // 4. Compute Grid Histogram (동일한 64x64 해상도의 정규화 공간에서 추출)
-    let mut gray = overmax_cv::to_gray(&bgra, 4);
-    overmax_cv::stretch_contrast(&mut gray, 64, 64);
-    let grid_hist = overmax_cv::compute_grid_histogram(&gray, 64, 64);
+    // 4. Compute Grid Histogram (4x4 RGB, 동일한 64x64 해상도의 정규화 공간에서 추출)
+    let grid_hist = overmax_cv::compute_grid_histogram(&bgra, 64, 64, 4);
 
     // HOG 데이터는 100% 제거되었으므로 빈 벡터를 전달
     let hog = Vec::new();

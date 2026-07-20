@@ -86,10 +86,8 @@ impl JacketMatcher {
         let (q_phash, q_dhash, q_ahash) =
             overmax_cv::compute_image_hashes(data, width, height, channels).ok()?;
 
-        // 2. 2x2 분할 그리드 히스토그램 추출을 위한 그레이스케일 전처리 및 대비 스트레칭
-        let mut gray = overmax_cv::to_gray(data, channels);
-        overmax_cv::stretch_contrast(&mut gray, width, height);
-        let q_grid_hist = overmax_cv::compute_grid_histogram(&gray, width, height);
+        // 2. 4x4 분할 RGB 그리드 히스토그램 추출 (BGRA 직접 입력, grayscale 변환 불필요)
+        let q_grid_hist = overmax_cv::compute_grid_histogram(data, width, height, channels);
 
         // 오염 영역 비트 마스킹 (상단 y=0, 우측 x=7, 즐겨찾기 y=1, x=0)
         let mut mask_bits: u64 = 0;
@@ -128,7 +126,9 @@ impl JacketMatcher {
                     for (&e_h, &q_h) in e_hist.iter().zip(q_grid_hist.iter()) {
                         hist_diff += (e_h as i32 - q_h as i32).unsigned_abs();
                     }
-                    1.0 - (hist_diff as f32 / 256.0).clamp(0.0, 1.0)
+                    // 4x4 RGB 히스토그램 L1 정규화 상수 3072
+                    // (256 × 384/32 = 3072, 2x2 grayscale 대비 동일한 bin당 민감도 유지)
+                    1.0 - (hist_diff as f32 / 3072.0).clamp(0.0, 1.0)
                 } else {
                     1.0 // 히스토그램이 없는 레거시 DB는 해시 유사도로만 판단
                 };

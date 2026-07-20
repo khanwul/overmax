@@ -16,7 +16,7 @@ pub struct ImageEntry {
     pub ahash: u64,
     pub hog: Vec<f32>,
     pub hog_norm: f32,
-    pub grid_hist: Option<[u8; 32]>,
+    pub grid_hist: Option<[u8; 384]>,
 }
 
 #[derive(Clone, Debug)]
@@ -144,8 +144,8 @@ fn parse_entry(
     if let Some(meta_str) = metadata_str {
         if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(meta_str) {
             if let Some(hist_arr) = meta_json.get("histogram").and_then(|v| v.as_array()) {
-                if hist_arr.len() == 32 {
-                    let mut hist = [0u8; 32];
+                if hist_arr.len() == 384 {
+                    let mut hist = [0u8; 384];
                     for (i, v) in hist_arr.iter().enumerate() {
                         hist[i] = v.as_u64().unwrap_or(0) as u8;
                     }

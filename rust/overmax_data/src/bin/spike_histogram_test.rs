@@ -20,7 +20,7 @@ struct DbEntry {
     phash: u64,
     dhash: u64,
     ahash: u64,
-    grid_hist: [u8; 32],
+    grid_hist: Option<[u8; 384]>,
     hog: Vec<f32>,
 }
 
@@ -65,48 +65,6 @@ fn get_scaled_roi(w: u32, h: u32, base_roi: RoiRect) -> (u32, u32, u32, u32) {
     let rh = base_roi.height as f32 * scale;
 
     (x1 as u32, y1 as u32, rw as u32, rh as u32)
-}
-
-// 2x2 분할 영역별 8-bin 그레이스케일 히스토그램 (총 32바이트)
-fn compute_grid_histogram(gray: &[u8], width: usize, height: usize) -> [u8; 32] {
-    let mut grid_hist = [0u8; 32];
-    if width < 2 || height < 2 {
-        return grid_hist;
-    }
-
-    let mid_x = width / 2;
-    let mid_y = height / 2;
-
-    for gy in 0..2 {
-        for gx in 0..2 {
-            let start_x = gx * mid_x;
-            let end_x = if gx == 1 { width } else { mid_x };
-            let start_y = gy * mid_y;
-            let end_y = if gy == 1 { height } else { mid_y };
-
-            let mut bins = [0u32; 8];
-            let mut count = 0u32;
-
-            for y in start_y..end_y {
-                let row_offset = y * width;
-                for x in start_x..end_x {
-                    let val = gray[row_offset + x];
-                    let bin = (val / 32) as usize; // 8-bin
-                    bins[bin.min(7)] += 1;
-                    count += 1;
-                }
-            }
-
-            let grid_idx = (gy * 2 + gx) * 8;
-            if count > 0 {
-                for i in 0..8 {
-                    // 한 영역당 합이 64가 되도록 L1 정규화 (4개 영역 총합 = 256 근사)
-                    grid_hist[grid_idx + i] = ((bins[i] * 64) / count) as u8;
-                }
-            }
-        }
-    }
-    grid_hist
 }
 
 // DynamicImage -> BGRA u8 변환 헬퍼
@@ -322,6 +280,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut true_pos_similarities: Vec<f32> = Vec::new();
     let mut false_pos_similarities: Vec<f32> = Vec::new();
 
+    // P0: TP 최솟값 곡 특정을 위한 상세 추적
+    let mut tp_details: Vec<(String, String, f32)> = Vec::new(); // (filename, expected_id, similarity)
+
     // 프로파일링 정밀 분석 변수
     let mut total_hog_extract_ns = 0u64;
     let mut total_hog_match_ns = 0u64;
@@ -354,10 +315,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cropped = img.crop_imm(rx, ry, rw, rh);
         let cropped_64 = cropped.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
         let bgra = to_bgra(&cropped_64);
-
-        let mut gray = overmax_cv::to_gray(&bgra, 4);
-        overmax_cv::stretch_contrast(&mut gray, 64, 64);
-        let q_grid_hist = overmax_cv::compute_grid_histogram(&gray, 64, 64);
+        let q_grid_hist = overmax_cv::compute_grid_histogram(&bgra, 64, 64, 4);
 
         // 1. 기존 매칭 방식: HOG 추출 및 900여개 코사인 유사도 순회 (시간 정밀 분리 측정)
         let t_start_hog_ext = Instant::now();
@@ -459,9 +417,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 // 최종 유사도 계산
-                let total_compare_bits = 64.0 + compare_bits * 2.0; // 160.0
+                let total_compare_bits = 64.0 + compare_bits * 2.0;
                 let hash_sim = 1.0 - (hamming_sum as f32 / total_compare_bits);
-                let hist_sim = 1.0 - (hist_diff as f32 / 256.0).clamp(0.0, 1.0);
+                let hist_sim = 1.0 - (hist_diff as f32 / 3072.0).clamp(0.0, 1.0);
                 let similarity = 0.5 * hash_sim + 0.5 * hist_sim;
 
                 Some((entry.image_id.clone(), similarity))
@@ -480,6 +438,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some((id, similarity)) = matched {
             matched_sim = similarity;
             true_pos_similarities.push(similarity);
+            tp_details.push((test.filename.clone(), test.expected_id.clone(), similarity));
             if similarity >= 0.65 {
                 matched_id = id;
                 if matched_id == test.expected_id {
@@ -508,10 +467,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 debug_expected_hist_diff = hist_diff;
 
-                let compare_bits = hash_mask.count_ones() as f32;
+                let hist_sim = 1.0 - (hist_diff as f32 / 3072.0).clamp(0.0, 1.0);
                 let total_compare_bits = 64.0 + compare_bits * 2.0;
                 let hash_sim = 1.0 - (debug_expected_hamming as f32 / total_compare_bits);
-                let hist_sim = 1.0 - (hist_diff as f32 / 256.0).clamp(0.0, 1.0);
+                let hist_sim = 1.0 - (hist_diff as f32 / 3072.0).clamp(0.0, 1.0);
                 debug_expected_sim = 0.5 * hash_sim + 0.5 * hist_sim;
             }
         }
@@ -531,9 +490,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 false_cropped.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
             let false_bgra = to_bgra(&false_cropped_64);
 
-            let mut false_gray = overmax_cv::to_gray(&false_bgra, 4);
-            overmax_cv::stretch_contrast(&mut false_gray, 64, 64);
-            let false_q_grid_hist = overmax_cv::compute_grid_histogram(&false_gray, 64, 64);
+            let false_q_grid_hist = overmax_cv::compute_grid_histogram(&false_bgra, 64, 64, 4);
 
             let (fq_phash, fq_dhash, fq_ahash) =
                 overmax_cv::compute_image_hashes(&false_bgra, 64, 64, 4)?;
@@ -560,7 +517,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let compare_bits = hash_mask.count_ones() as f32;
                     let total_compare_bits = 64.0 + compare_bits * 2.0;
                     let hash_sim = 1.0 - (hamming_sum as f32 / total_compare_bits);
-                    let hist_sim = 1.0 - (hist_diff as f32 / 256.0).clamp(0.0, 1.0);
+                    let hist_sim = 1.0 - (hist_diff as f32 / 3072.0).clamp(0.0, 1.0);
                     let similarity = 0.5 * hash_sim + 0.5 * hist_sim;
 
                     Some((entry.image_id.clone(), similarity))
@@ -630,10 +587,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (name, img) in &random_images {
         total_false_tests += 1;
         let bgra = to_bgra(&img.resize_exact(64, 64, image::imageops::FilterType::Lanczos3));
-
-        let mut gray = overmax_cv::to_gray(&bgra, 4);
-        overmax_cv::stretch_contrast(&mut gray, 64, 64);
-        let q_grid_hist = overmax_cv::compute_grid_histogram(&gray, 64, 64);
+        let q_grid_hist = overmax_cv::compute_grid_histogram(&bgra, 64, 64, 4);
 
         let (rq_phash, rq_dhash, rq_ahash) = overmax_cv::compute_image_hashes(&bgra, 64, 64, 4)?;
 
@@ -653,10 +607,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for (&e_h, &q_h) in e_grid_hist.iter().zip(q_grid_hist.iter()) {
                     hist_diff += (e_h as i32 - q_h as i32).unsigned_abs();
                 }
-                let compare_bits = hash_mask.count_ones() as f32;
-                let total_compare_bits = 64.0 + compare_bits * 2.0;
+                let hist_sim = 1.0 - (hist_diff as f32 / 3072.0).clamp(0.0, 1.0);
+                let total_compare_bits = 64.0 + hash_mask.count_ones() as f32 * 2.0;
                 let hash_sim = 1.0 - (hamming_sum as f32 / total_compare_bits);
-                let hist_sim = 1.0 - (hist_diff as f32 / 256.0).clamp(0.0, 1.0);
                 let similarity = 0.5 * hash_sim + 0.5 * hist_sim;
 
                 Some((entry.image_id.clone(), similarity))
@@ -744,6 +697,153 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         avg_new_ext_us + avg_new_match_us
     );
     println!("   - 종합 파이프라인 Speedup : {:.2}x", total_speedup);
+    println!("=================================");
+
+    // ===== P0-1: TP 최솟값 곡 특정 =====
+    if !tp_details.is_empty() {
+        tp_details.sort_by(|a, b| a.2.total_cmp(&b.2));
+        println!("\n📊 [P0] TP 유사도 하위 5곡 (하드 케이스 특정)");
+        println!(
+            "{:<45} | {:<8} | {:<10} | {}",
+            "File", "SongID", "Similarity", "Margin to 0.65"
+        );
+        println!("{}", "-".repeat(85));
+        for (filename, expected_id, sim) in tp_details.iter().take(5) {
+            let margin = sim - 0.65;
+            println!(
+                "{:<45} | {:<8} | {:.4}     | {:.4} {}",
+                filename,
+                expected_id,
+                sim,
+                margin,
+                if margin < 0.02 { "⚠️  THIN" } else { "" }
+            );
+        }
+        println!();
+        println!(
+            "TP 최솟값 곡: ID={}, Sim={:.4}, Margin={:.4}",
+            tp_details[0].1,
+            tp_details[0].2,
+            tp_details[0].2 - 0.65
+        );
+    }
+
+    // ===== P0-2: 곡 간 Confusion Matrix (교차 유사도 검증) =====
+    println!("\n--- [P0] CROSS-SONG CONFUSION MATRIX TEST ---");
+    println!("Testing all DB entry pairs for cross-song false positives...\n");
+
+    let mut cross_pairs: Vec<(String, String, f32)> = Vec::new();
+    let mut cross_fp_count = 0u32;
+    let mut cross_max_sim = 0.0f32;
+    let mut cross_max_pair = (String::new(), String::new());
+    let mut cross_tested = 0u64;
+    let mut cross_early_exit = 0u64;
+
+    let n = db_entries.len();
+    for i in 0..n {
+        let entry_a = &db_entries[i];
+        let Some(hist_a) = entry_a.grid_hist.as_ref() else {
+            continue;
+        };
+
+        for j in (i + 1)..n {
+            let entry_b = &db_entries[j];
+            let Some(hist_b) = entry_b.grid_hist.as_ref() else {
+                continue;
+            };
+
+            cross_tested += 1;
+
+            let p_dist = (entry_a.phash ^ entry_b.phash).count_ones();
+            let d_dist = ((entry_a.dhash ^ entry_b.dhash) & hash_mask).count_ones();
+            let a_dist = ((entry_a.ahash ^ entry_b.ahash) & hash_mask).count_ones();
+            let hamming_sum = p_dist + d_dist + a_dist;
+
+            if hamming_sum > 42 {
+                cross_early_exit += 1;
+                continue;
+            }
+
+            let mut hist_diff = 0u32;
+            for (&h_a, &h_b) in hist_a.iter().zip(hist_b.iter()) {
+                hist_diff += (h_a as i32 - h_b as i32).unsigned_abs();
+            }
+            let hist_sim = 1.0 - (hist_diff as f32 / 3072.0).clamp(0.0, 1.0);
+            let compare_bits_f = hash_mask.count_ones() as f32;
+            let total_compare_bits_f = 64.0 + compare_bits_f * 2.0;
+            let hash_sim = 1.0 - (hamming_sum as f32 / total_compare_bits_f);
+            let hist_sim = 1.0 - (hist_diff as f32 / 3072.0).clamp(0.0, 1.0);
+            let similarity = 0.5 * hash_sim + 0.5 * hist_sim;
+
+            if similarity >= 0.65 {
+                cross_fp_count += 1;
+                eprintln!(
+                    "  [CROSS-FP] {} ↔ {} → Sim {:.4} (ABOVE THRESHOLD!)",
+                    entry_a.image_id, entry_b.image_id, similarity
+                );
+            }
+
+            if similarity > cross_max_sim {
+                cross_max_sim = similarity;
+                cross_max_pair = (entry_a.image_id.clone(), entry_b.image_id.clone());
+            }
+
+            // Early exit을 통과한 쌍만 수집 (유사도가 의미 있는 범위)
+            cross_pairs.push((
+                entry_a.image_id.clone(),
+                entry_b.image_id.clone(),
+                similarity,
+            ));
+        }
+    }
+
+    cross_pairs.sort_by(|a, b| b.2.total_cmp(&a.2));
+    println!("Top-10 most similar cross-song pairs:");
+    for (i, (id_a, id_b, sim)) in cross_pairs.iter().take(10).enumerate() {
+        let status = if *sim >= 0.65 {
+            "⚠️  ABOVE THRESHOLD"
+        } else {
+            "OK"
+        };
+        println!(
+            "  {:>2}. {} ↔ {} → {:.4} {}",
+            i + 1,
+            id_a,
+            id_b,
+            sim,
+            status
+        );
+    }
+
+    println!("\n📊 Cross-song confusion summary:");
+    println!("  Total pairs tested: {}", cross_tested);
+    println!(
+        "  Early exit filtered: {} ({:.1}%)",
+        cross_early_exit,
+        if cross_tested > 0 {
+            cross_early_exit as f64 / cross_tested as f64 * 100.0
+        } else {
+            0.0
+        }
+    );
+    println!("  Pairs surviving early exit: {}", cross_pairs.len());
+    println!("  Pairs above threshold (0.65): {}", cross_fp_count);
+    if !cross_pairs.is_empty() {
+        println!(
+            "  Max cross-song similarity: {:.4} ({} ↔ {})",
+            cross_max_sim, cross_max_pair.0, cross_max_pair.1
+        );
+        let margin = 0.65 - cross_max_sim;
+        println!(
+            "  Margin to threshold: {:.4} ({})",
+            margin,
+            if margin > 0.0 {
+                "✅ SAFE"
+            } else {
+                "❌ UNSAFE"
+            }
+        );
+    }
     println!("=================================");
 
     Ok(())
