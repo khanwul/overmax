@@ -239,6 +239,11 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-17 | `overmax_data` 곡 매칭 및 추천 분기 가드 정돈 | `client.rs` 및 `recommend.rs` 내의 2중 `if let` 중첩들을 `and_then` 모나딕 체인으로 정리하고, `split_once` 및 `let Some = ... else { continue }` 가드 패턴 도입 | [client.rs](rust/overmax_data/src/community/client.rs) / [recommend.rs](rust/overmax_data/src/service/recommend.rs) |
 | 2026-07-17 | V2/Metadata 컬럼 구조 전면 철회 및 V1 비트 매핑 복구 | HOG 생략의 원인이었던 불필요하게 비대해진 metadata 컬럼 및 JSON 직렬화/파싱 코드를 전면 제거하고, V1의 안정적인 런타임 비트 마스크 및 HOG 마스크 대조 구조로 단순화 복귀 | [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) / [image_index.rs](rust/overmax_data/src/store/image_index.rs) / [jacket_matcher.rs](rust/overmax_data/src/service/jacket_matcher.rs) |
 | 2026-07-18 | db_builder.rs 타입 불일치 빌드 오류 수정 | overmax_cv::compute_image_features 반환값이 4-tuple(phash, dhash, ahash, hog)로 변경됨에 따라, db_builder.rs의 구조 분해 및 중복 HOG 계산 코드를 수정 | [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) |
+
+## Linux Port
+
+| 날짜 | 결정 | 이유 | 참조 |
+|------|------|------|------|
 | 2026-07-17 | Linux 최초 포팅 범위·의존성·fork CI 전제 확정 | Linux 포팅이 Windows 전용 제약과 충돌하지 않도록 최초 지원 범위와 additive 변경 원칙을 SSOT에 명시 | [Linux Port](#linux-port) |
 | 2026-07-17 | Linux/Windows fork CI workflow 추가 | 첫 공용 계약 변경 전에 양 OS의 컴파일·테스트 회귀를 검증하도록 구성 | [ci.yml](.github/workflows/ci.yml) |
 | 2026-07-17 | LINUX 최소 수직 슬라이스를 fail-closed 경계로 조립 | exact-title snapshot을 persistent XComposite/MIT-SHM 캡처와 기존 verified pipeline, native layer overlay에 연결하고 오류 시 stale 상태를 즉시 초기화하기 위함. 수동·hosted 검증 전에는 최소 수직 슬라이스 완료로 승격하지 않음 | |
