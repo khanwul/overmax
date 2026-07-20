@@ -14,20 +14,10 @@ impl NativeApp {
                 *rate_ocr = output.ocr_telemetry.clone();
             }
             if let Ok(mut r) = self.game_rect.lock() {
-                #[cfg(target_os = "windows")]
-                {
-                    *r = output.game_rect;
-                }
-                #[cfg(target_os = "linux")]
-                {
-                    *r = output.window_snapshot.map(|snapshot| snapshot.rect);
-                }
+                *r = output.game_rect;
             }
-            #[cfg(target_os = "linux")]
-            {
-                self.window_snapshot = output.window_snapshot;
-                self.capture_fatal = output.capture_fatal.clone();
-            }
+            self.window_snapshot = output.window_snapshot;
+            self.capture_fatal = output.capture_fatal.clone();
             if !output.is_song_select {
                 self.recorded_states.clear();
             }

@@ -5,8 +5,7 @@ use crate::ui::overlay_recommend_ui::{
 use crate::ui::overlay_theme::Theme;
 use crate::ui::ui_command::UiCommand;
 use eframe::egui::{
-    self, Align, Button, Color32, CornerRadius, FontId, Frame, Layout, Margin, Rect, RichText,
-    Vec2,
+    self, Align, Button, Color32, CornerRadius, FontId, Frame, Layout, Margin, Rect, RichText, Vec2,
 };
 use overmax_core::GameSessionState;
 use overmax_data::RecommendResult;
@@ -250,8 +249,6 @@ mod tests {
         install_cjk_fonts(&ctx);
         // If it reaches here without panicking, the logic is sound.
     }
-
-
 
     #[test]
     fn test_header_height_constancy() {

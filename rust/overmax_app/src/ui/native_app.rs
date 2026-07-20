@@ -198,9 +198,7 @@ pub struct NativeApp {
     pub(crate) sync_state: SharedSyncState,
     pub(crate) log_rx: Option<Receiver<String>>,
     pub(crate) game_rect: Arc<Mutex<Option<overmax_engine::capture::window_tracker::WindowRect>>>,
-    #[cfg(target_os = "linux")]
     pub(crate) window_snapshot: Option<overmax_engine::capture::window_tracker::WindowSnapshot>,
-    #[cfg(target_os = "linux")]
     pub(crate) capture_fatal: Option<String>,
     pub(crate) session: GameSessionState,
     pub(crate) confidence: f32,
@@ -399,9 +397,7 @@ impl NativeApp {
             sync_state,
             log_rx: Some(log_rx),
             game_rect: Arc::new(Mutex::new(None)),
-            #[cfg(target_os = "linux")]
             window_snapshot: None,
-            #[cfg(target_os = "linux")]
             capture_fatal: None,
             session: GameSessionState::detecting(),
             confidence: 0.0,

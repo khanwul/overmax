@@ -5,8 +5,7 @@ use serde_json::Value;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-    SM_YVIRTUALSCREEN,
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
 };
 
 use crate::ui::tray_icon::{force_cleanup_tray, TrayIcon};
@@ -245,10 +244,22 @@ pub fn draw_custom_cursor(painter: &egui::Painter, p: egui::Pos2) {
     let len = 6.0;
 
     let stroke_black = Stroke::new(2.5, Color32::BLACK);
-    painter.line_segment([egui::pos2(p.x - len, p.y), egui::pos2(p.x + len, p.y)], stroke_black);
-    painter.line_segment([egui::pos2(p.x, p.y - len), egui::pos2(p.x, p.y + len)], stroke_black);
+    painter.line_segment(
+        [egui::pos2(p.x - len, p.y), egui::pos2(p.x + len, p.y)],
+        stroke_black,
+    );
+    painter.line_segment(
+        [egui::pos2(p.x, p.y - len), egui::pos2(p.x, p.y + len)],
+        stroke_black,
+    );
 
     let stroke_white = Stroke::new(1.0, Color32::WHITE);
-    painter.line_segment([egui::pos2(p.x - len, p.y), egui::pos2(p.x + len, p.y)], stroke_white);
-    painter.line_segment([egui::pos2(p.x, p.y - len), egui::pos2(p.x, p.y + len)], stroke_white);
+    painter.line_segment(
+        [egui::pos2(p.x - len, p.y), egui::pos2(p.x + len, p.y)],
+        stroke_white,
+    );
+    painter.line_segment(
+        [egui::pos2(p.x, p.y - len), egui::pos2(p.x, p.y + len)],
+        stroke_white,
+    );
 }
