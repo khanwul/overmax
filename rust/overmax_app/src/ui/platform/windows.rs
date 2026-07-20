@@ -1,11 +1,12 @@
 //! Windows-specific UI platform implementation.
 
-use eframe::egui::{self, ViewportBuilder};
+use eframe::egui::{self, FontData, FontDefinitions, FontFamily, ViewportBuilder};
 use serde_json::Value;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+    SM_YVIRTUALSCREEN,
 };
 
 use crate::ui::tray_icon::{force_cleanup_tray, TrayIcon};
@@ -39,6 +40,70 @@ pub fn init_platform_on_startup() -> Result<(), String> {
 
 pub fn show_startup_error(message: &str) {
     eprintln!("[Startup Error] {message}");
+}
+
+pub fn install_cjk_fonts(ctx: &egui::Context) -> bool {
+    let mut fonts = FontDefinitions::default();
+
+    let font_names = [
+        ("malgun", "malgun.ttf"),
+        ("msgothic", "msgothic.ttc"),
+        ("msyh", "msyh.ttc"),
+        ("meiryo", "meiryo.ttc"),
+        ("gulim", "gulim.ttc"),
+    ];
+
+    let font_dirs = get_platform_font_dirs();
+    let mut loaded_fonts = Vec::new();
+
+    for (name, filename) in font_names {
+        for dir in &font_dirs {
+            let path = dir.join(filename);
+            if let Ok(bytes) = std::fs::read(&path) {
+                let mut font_data = FontData::from_owned(bytes);
+                if filename.ends_with(".ttc") {
+                    font_data.index = 0;
+                }
+                fonts
+                    .font_data
+                    .insert(name.to_string(), std::sync::Arc::new(font_data));
+                loaded_fonts.push(name.to_string());
+                break;
+            }
+        }
+    }
+
+    if loaded_fonts.is_empty() {
+        return false;
+    }
+
+    for family in [FontFamily::Proportional, FontFamily::Monospace] {
+        let family_fonts = fonts.families.entry(family).or_default();
+        for name in &loaded_fonts {
+            family_fonts.push(name.clone());
+        }
+    }
+
+    ctx.set_fonts(fonts);
+    true
+}
+
+fn get_platform_font_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+
+    if let Ok(windir) = std::env::var("SystemRoot") {
+        dirs.push(std::path::PathBuf::from(windir).join("Fonts"));
+    } else if let Ok(windir) = std::env::var("WINDIR") {
+        dirs.push(std::path::PathBuf::from(windir).join("Fonts"));
+    } else {
+        dirs.push(std::path::PathBuf::from(r"C:\Windows\Fonts"));
+    }
+
+    if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+        dirs.push(std::path::PathBuf::from(localappdata).join(r"Microsoft\Windows\Fonts"));
+    }
+
+    dirs
 }
 
 pub fn is_position_on_screen(x: f32, y: f32) -> bool {
@@ -180,22 +245,10 @@ pub fn draw_custom_cursor(painter: &egui::Painter, p: egui::Pos2) {
     let len = 6.0;
 
     let stroke_black = Stroke::new(2.5, Color32::BLACK);
-    painter.line_segment(
-        [egui::pos2(p.x - len, p.y), egui::pos2(p.x + len, p.y)],
-        stroke_black,
-    );
-    painter.line_segment(
-        [egui::pos2(p.x, p.y - len), egui::pos2(p.x, p.y + len)],
-        stroke_black,
-    );
+    painter.line_segment([egui::pos2(p.x - len, p.y), egui::pos2(p.x + len, p.y)], stroke_black);
+    painter.line_segment([egui::pos2(p.x, p.y - len), egui::pos2(p.x, p.y + len)], stroke_black);
 
     let stroke_white = Stroke::new(1.0, Color32::WHITE);
-    painter.line_segment(
-        [egui::pos2(p.x - len, p.y), egui::pos2(p.x + len, p.y)],
-        stroke_white,
-    );
-    painter.line_segment(
-        [egui::pos2(p.x, p.y - len), egui::pos2(p.x, p.y + len)],
-        stroke_white,
-    );
+    painter.line_segment([egui::pos2(p.x - len, p.y), egui::pos2(p.x + len, p.y)], stroke_white);
+    painter.line_segment([egui::pos2(p.x, p.y - len), egui::pos2(p.x, p.y + len)], stroke_white);
 }

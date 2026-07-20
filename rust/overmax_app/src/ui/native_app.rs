@@ -157,7 +157,6 @@ pub(crate) struct SyncWorkerChannels {
 }
 
 pub struct AppStateTracker {
-    #[cfg(target_os = "linux")]
     pub prev_debug_open: Changed<bool>,
     pub prev_settings_open: Changed<bool>,
     pub prev_sync_open: Changed<bool>,
@@ -178,7 +177,6 @@ impl Default for AppStateTracker {
 impl AppStateTracker {
     pub fn new() -> Self {
         Self {
-            #[cfg(target_os = "linux")]
             prev_debug_open: Changed::new(false),
             prev_settings_open: Changed::new(false),
             prev_sync_open: Changed::new(false),
@@ -190,16 +188,6 @@ impl AppStateTracker {
             prev_mouse_pos: Changed::new(None),
         }
     }
-}
-
-#[cfg(target_os = "windows")]
-#[derive(Default)]
-pub struct WindowsWindowCache {
-    pub cached_hwnd: Option<isize>,
-    pub cached_game_hwnd: Option<isize>,
-    pub last_applied_opacity: Option<f32>,
-    pub logged_opacity_fail: bool,
-    pub prev_snap_geometry: Option<(i32, i32, i32, i32)>,
 }
 
 pub struct NativeApp {

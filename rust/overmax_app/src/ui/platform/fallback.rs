@@ -15,6 +15,10 @@ pub fn show_startup_error(message: &str) {
     eprintln!("[Startup Error] {message}");
 }
 
+pub fn install_cjk_fonts(_ctx: &egui::Context) -> bool {
+    false
+}
+
 pub fn native_options(_settings: &overmax_data::Settings) -> eframe::NativeOptions {
     eframe::NativeOptions::default()
 }

@@ -5,8 +5,8 @@ use crate::ui::overlay_recommend_ui::{
 use crate::ui::overlay_theme::Theme;
 use crate::ui::ui_command::UiCommand;
 use eframe::egui::{
-    self, Align, Button, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
-    Frame, Layout, Margin, Rect, RichText, Vec2,
+    self, Align, Button, Color32, CornerRadius, FontId, Frame, Layout, Margin, Rect, RichText,
+    Vec2,
 };
 use overmax_core::GameSessionState;
 use overmax_data::RecommendResult;
@@ -75,125 +75,7 @@ impl Px {
     }
 }
 
-#[cfg(target_os = "linux")]
-pub fn install_cjk_fonts(ctx: &egui::Context) -> bool {
-    let Ok(output) = std::process::Command::new("fc-match")
-        .args(["-f", "%{file}\n%{index}", ":lang=ko"])
-        .output()
-    else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    let Ok(output) = String::from_utf8(output.stdout) else {
-        return false;
-    };
-    let Some((file, index)) = parse_fontconfig_match(&output) else {
-        return false;
-    };
-    let Ok(bytes) = std::fs::read(file) else {
-        return false;
-    };
-
-    let mut fonts = FontDefinitions::default();
-    let mut font = FontData::from_owned(bytes);
-    font.index = index;
-    fonts.font_data.insert("cjk".into(), Arc::new(font));
-    for family in [FontFamily::Proportional, FontFamily::Monospace] {
-        fonts.families.entry(family).or_default().push("cjk".into());
-    }
-    ctx.set_fonts(fonts);
-    true
-}
-
-#[cfg(target_os = "linux")]
-fn parse_fontconfig_match(output: &str) -> Option<(&str, u32)> {
-    let mut lines = output.lines();
-    let file = lines.next()?.trim();
-    let index = lines.next()?.trim().parse().ok()?;
-    (!file.is_empty()).then_some((file, index))
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn install_cjk_fonts(ctx: &egui::Context) -> bool {
-    let mut fonts = FontDefinitions::default();
-
-    let font_names = [
-        ("malgun", "malgun.ttf"),
-        ("msgothic", "msgothic.ttc"),
-        ("msyh", "msyh.ttc"),
-        ("meiryo", "meiryo.ttc"),
-        ("gulim", "gulim.ttc"),
-    ];
-
-    let font_dirs = get_platform_font_dirs();
-    let mut loaded_fonts = Vec::new();
-
-    for (name, filename) in font_names {
-        for dir in &font_dirs {
-            let path = dir.join(filename);
-            if let Ok(bytes) = std::fs::read(&path) {
-                let mut font_data = FontData::from_owned(bytes);
-                if filename.ends_with(".ttc") {
-                    font_data.index = 0;
-                }
-                fonts
-                    .font_data
-                    .insert(name.to_string(), std::sync::Arc::new(font_data));
-                loaded_fonts.push(name.to_string());
-                break; // Found this font, move to the next name
-            }
-        }
-    }
-
-    if loaded_fonts.is_empty() {
-        return false;
-    }
-
-    for family in [FontFamily::Proportional, FontFamily::Monospace] {
-        let family_fonts = fonts.families.entry(family).or_default();
-        for name in &loaded_fonts {
-            family_fonts.push(name.clone());
-        }
-    }
-
-    ctx.set_fonts(fonts);
-    true
-}
-
-#[cfg(not(target_os = "linux"))]
-fn get_platform_font_dirs() -> Vec<std::path::PathBuf> {
-    let mut dirs = Vec::new();
-
-    #[cfg(target_os = "windows")]
-    {
-        // 1. System Font Folder (usually C:\Windows\Fonts)
-        if let Ok(windir) = std::env::var("SystemRoot") {
-            dirs.push(std::path::PathBuf::from(windir).join("Fonts"));
-        } else if let Ok(windir) = std::env::var("WINDIR") {
-            dirs.push(std::path::PathBuf::from(windir).join("Fonts"));
-        } else {
-            dirs.push(std::path::PathBuf::from(r"C:\Windows\Fonts"));
-        }
-
-        // 2. User Font Folder (introduced in Windows 10)
-        if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
-            dirs.push(std::path::PathBuf::from(localappdata).join(r"Microsoft\Windows\Fonts"));
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        dirs.push(std::path::PathBuf::from("/Library/Fonts"));
-        dirs.push(std::path::PathBuf::from("/System/Library/Fonts"));
-        if let Ok(home) = std::env::var("HOME") {
-            dirs.push(std::path::PathBuf::from(home).join("Library/Fonts"));
-        }
-    }
-
-    dirs
-}
+pub use crate::ui::platform::install_cjk_fonts;
 
 pub struct OverlayProps<'a> {
     pub state: &'a GameSessionState,
@@ -369,14 +251,7 @@ mod tests {
         // If it reaches here without panicking, the logic is sound.
     }
 
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn parses_fontconfig_match_with_face_index() {
-        assert_eq!(
-            super::parse_fontconfig_match("fonts/NotoSansCJK.ttc\n7\n"),
-            Some(("fonts/NotoSansCJK.ttc", 7))
-        );
-    }
+
 
     #[test]
     fn test_header_height_constancy() {

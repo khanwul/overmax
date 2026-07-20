@@ -312,90 +312,94 @@ impl eframe::App for NativeApp {
 
         self.poll_and_drain_events(ctx);
 
-        #[cfg(target_os = "linux")]
-        {
-            self.show_debug_viewport(ctx);
-            self.show_settings_viewport(ctx);
-            self.show_sync_viewport(ctx);
-            self.publish_linux_overlay(ctx);
-        }
+        self.show_debug_viewport(ctx);
+        self.show_settings_viewport(ctx);
+        self.show_sync_viewport(ctx);
 
-        #[cfg(target_os = "windows")]
-        {
-            let ovs = read_overlay_settings(&self.settings.merged);
-            let scale = ovs.scale;
-            let opacity = ovs.opacity;
-            let snap_position = ovs.snap_position;
-
-            let height = if ovs.is_lite {
-                overlay_ui::LITE_BASE_HEIGHT
-            } else {
-                overlay_ui::BASE_HEIGHT
-            };
-
-            // game_rect 락 단 1회 획득으로 통합하여 경합 방지
-            let game_rect_val = *overmax_core::lock_or_recover(&self.game_rect);
-            let game_found = game_rect_val.is_some();
-            let overlay_on = game_found && self.confidence > 0.1;
-
-            let overlay_on_changed = self.state_tracker.prev_overlay_on.update(overlay_on);
-
-            let mut force_topmost = self.update_overlay_geometry(
-                ctx,
-                scale,
-                height,
-                &snap_position,
-                game_rect_val,
-                overlay_on,
-                overlay_on_changed,
-            );
-
-            self.show_debug_viewport(ctx);
-            self.show_settings_viewport(ctx);
-            self.show_sync_viewport(ctx);
-
-            self.render_overlay_panel(
-                ctx,
-                scale,
-                height,
-                &snap_position,
-                overlay_on,
-                &mut force_topmost,
-            );
-
-            // Windows 전용: 전체 창 투명도 및 최상위 권한 적용
-            if overlay_on {
-                let found = self.apply_window_opacity(opacity, force_topmost);
-                if !found && !self.platform.win_cache.logged_opacity_fail {
-                    debug_ui::push_log(
-                        &self.debug_state.log_lines,
-                        self.max_log_lines(),
-                        format!(
-                            "[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})",
-                            opacity
-                        ),
-                    );
-                    self.platform.win_cache.logged_opacity_fail = true;
-                }
-            } else {
-                // 숨겨질 때: 투명도를 즉시 0.0(완전 투명)으로 덮어씌워 윈도우 잔상 소멸을 보장
-                if let Some(hwnd) = self.find_overlay_window() {
-                    unsafe {
-                        windows_sys::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes(
-                            hwnd as _, 0, 0, 0x00000002,
-                        );
-                    }
-                }
-                self.platform.win_cache.cached_hwnd = None;
-                self.platform.win_cache.last_applied_opacity = None;
-            }
-        }
+        self.update_platform_overlay(ctx);
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         // [R, G, B, A] - 윈도우 버퍼를 완전 투명하게 설정.
         // OS 레벨의 전역 투명도(Layered Window Alpha)와 함께 작동함.
         [0.0, 0.0, 0.0, 0.0]
+    }
+}
+
+impl NativeApp {
+    fn update_platform_overlay(&mut self, ctx: &egui::Context) {
+        #[cfg(target_os = "linux")]
+        self.publish_linux_overlay(ctx);
+
+        #[cfg(target_os = "windows")]
+        self.render_windows_overlay(ctx);
+    }
+
+    #[cfg(target_os = "windows")]
+    fn render_windows_overlay(&mut self, ctx: &egui::Context) {
+        let ovs = read_overlay_settings(&self.settings.merged);
+        let scale = ovs.scale;
+        let opacity = ovs.opacity;
+        let snap_position = ovs.snap_position;
+
+        let height = if ovs.is_lite {
+            overlay_ui::LITE_BASE_HEIGHT
+        } else {
+            overlay_ui::BASE_HEIGHT
+        };
+
+        // game_rect 락 단 1회 획득으로 통합하여 경합 방지
+        let game_rect_val = *overmax_core::lock_or_recover(&self.game_rect);
+        let game_found = game_rect_val.is_some();
+        let overlay_on = game_found && self.confidence > 0.1;
+
+        let overlay_on_changed = self.state_tracker.prev_overlay_on.update(overlay_on);
+
+        let mut force_topmost = self.update_overlay_geometry(
+            ctx,
+            scale,
+            height,
+            &snap_position,
+            game_rect_val,
+            overlay_on,
+            overlay_on_changed,
+        );
+
+        self.render_overlay_panel(
+            ctx,
+            scale,
+            height,
+            &snap_position,
+            overlay_on,
+            &mut force_topmost,
+        );
+
+        // Windows 전용: 전체 창 투명도 및 최상위 권한 적용
+        if overlay_on {
+            let found = self.apply_window_opacity(opacity, force_topmost);
+            if !found && !self.platform.win_cache.logged_opacity_fail {
+                debug_ui::push_log(
+                    &self.debug_state.log_lines,
+                    self.max_log_lines(),
+                    format!(
+                        "[Overlay] 투명도 조절용 창 핸들을 찾지 못함 (Opacity: {:.2})",
+                        opacity
+                    ),
+                );
+                self.platform.win_cache.logged_opacity_fail = true;
+            }
+        } else {
+            // 숨겨질 때: 투명도를 즉시 0.0(완전 투명)으로 덮어씌워 윈도우 잔상 소멸을 보장
+            if let Some(hwnd) = self.find_overlay_window() {
+                unsafe {
+                    windows_sys::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes(
+                        hwnd as _, 0, 0, 0x00000002,
+                    );
+                }
+            }
+            self.platform.win_cache.cached_hwnd = None;
+            self.platform.win_cache.last_applied_opacity = None;
+        }
     }
 }
 
@@ -444,12 +448,10 @@ impl NativeApp {
     }
 
     fn poll_and_drain_events(&mut self, ctx: &egui::Context) {
-        #[cfg(target_os = "linux")]
         let debug_on = self.ui_state.debug_open.load(Ordering::Relaxed);
         let settings_on = self.ui_state.settings_open.load(Ordering::Relaxed);
         let sync_on = self.ui_state.sync_open.load(Ordering::Relaxed);
 
-        #[cfg(target_os = "linux")]
         let debug_open_changed = self.state_tracker.prev_debug_open.update(debug_on);
         let settings_open_changed = self.state_tracker.prev_settings_open.update(settings_on);
         if settings_on && settings_open_changed {
@@ -464,7 +466,6 @@ impl NativeApp {
             self.refresh_steam_session("동기화 창 열림");
         }
 
-        #[cfg(target_os = "linux")]
         if (debug_open_changed && !debug_on)
             || (settings_open_changed && !settings_on)
             || (sync_open_changed && !sync_on)
