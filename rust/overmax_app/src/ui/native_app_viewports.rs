@@ -697,10 +697,6 @@ impl NativeApp {
                     },
                 );
 
-                if actions.command == Some(crate::ui::ui_command::UiCommand::UploadCurrentPattern) {
-                    self.upload_current_pattern(ctx.clone());
-                }
-
                 if actions.start_drag {
                     self.platform.is_dragging = true;
                 }
