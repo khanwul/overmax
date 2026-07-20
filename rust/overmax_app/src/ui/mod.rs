@@ -10,6 +10,7 @@ pub mod native_app_viewports;
 pub mod overlay_recommend_ui;
 pub mod overlay_theme;
 pub mod overlay_ui;
+pub mod platform;
 pub mod settings_ui;
 pub mod sync_ui;
 #[cfg(target_os = "windows")]

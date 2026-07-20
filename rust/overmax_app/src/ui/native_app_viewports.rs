@@ -23,67 +23,6 @@ fn game_window_title(settings: &overmax_data::Settings) -> &str {
         .unwrap_or("DJMAX RESPECT V")
 }
 
-#[cfg(target_os = "windows")]
-fn get_local_mouse_pos(ctx: &egui::Context, hwnd_opt: Option<isize>) -> Option<egui::Pos2> {
-    {
-        let hwnd_val = hwnd_opt?;
-        use windows_sys::Win32::Foundation::HWND;
-        use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
-        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-
-        let hwnd = hwnd_val as HWND;
-        let mut pos = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
-        unsafe {
-            if GetCursorPos(&mut pos) == 0 {
-                return None;
-            }
-            if ScreenToClient(hwnd, &mut pos) == 0 {
-                return None;
-            }
-        }
-
-        let ppi = ctx.pixels_per_point();
-        let local_pos = egui::pos2(pos.x as f32 / ppi, pos.y as f32 / ppi);
-
-        if let Some(rect) = ctx.input(|i| i.viewport().outer_rect) {
-            let size = rect.size();
-            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-            if bounds.contains(local_pos) {
-                return Some(local_pos);
-            }
-        }
-        None
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn draw_custom_cursor(painter: &egui::Painter, p: egui::Pos2) {
-    use egui::{Color32, Stroke};
-    let len = 6.0;
-
-    // 1. 대비 효과용 검은색 십자 (두껍게)
-    let stroke_black = Stroke::new(2.5, Color32::BLACK);
-    painter.line_segment(
-        [p - egui::vec2(len, 0.0), p + egui::vec2(len, 0.0)],
-        stroke_black,
-    );
-    painter.line_segment(
-        [p - egui::vec2(0.0, len), p + egui::vec2(0.0, len)],
-        stroke_black,
-    );
-
-    // 2. 가시성 확보용 흰색 십자 (얇게)
-    let stroke_white = Stroke::new(1.0, Color32::WHITE);
-    painter.line_segment(
-        [p - egui::vec2(len, 0.0), p + egui::vec2(len, 0.0)],
-        stroke_white,
-    );
-    painter.line_segment(
-        [p - egui::vec2(0.0, len), p + egui::vec2(0.0, len)],
-        stroke_white,
-    );
-}
-
 impl NativeApp {
     fn auxiliary_viewport(title: &str, size: [f32; 2]) -> ViewportBuilder {
         ViewportBuilder::default()
@@ -357,9 +296,9 @@ impl eframe::App for NativeApp {
         }
 
         #[cfg(target_os = "linux")]
-        if let Some(error) = self.linux_overlay.take_runtime_failure() {
+        if let Some(error) = self.platform.linux_overlay.take_runtime_failure() {
             let error = format!("Linux overlay stopped: {error}");
-            crate::ui::native_app::show_linux_startup_error(&error);
+            crate::ui::platform::show_startup_error(&error);
             self.exit_requested.store(true, Ordering::Relaxed);
         }
 
@@ -427,7 +366,7 @@ impl eframe::App for NativeApp {
             // Windows 전용: 전체 창 투명도 및 최상위 권한 적용
             if overlay_on {
                 let found = self.apply_window_opacity(opacity, force_topmost);
-                if !found && !self.win_cache.logged_opacity_fail {
+                if !found && !self.platform.win_cache.logged_opacity_fail {
                     debug_ui::push_log(
                         &self.debug_state.log_lines,
                         self.max_log_lines(),
@@ -436,7 +375,7 @@ impl eframe::App for NativeApp {
                             opacity
                         ),
                     );
-                    self.win_cache.logged_opacity_fail = true;
+                    self.platform.win_cache.logged_opacity_fail = true;
                 }
             } else {
                 // 숨겨질 때: 투명도를 즉시 0.0(완전 투명)으로 덮어씌워 윈도우 잔상 소멸을 보장
@@ -447,8 +386,8 @@ impl eframe::App for NativeApp {
                         );
                     }
                 }
-                self.win_cache.cached_hwnd = None;
-                self.win_cache.last_applied_opacity = None;
+                self.platform.win_cache.cached_hwnd = None;
+                self.platform.win_cache.last_applied_opacity = None;
             }
         }
     }
@@ -601,9 +540,10 @@ impl NativeApp {
         }
 
         // 마우스가 오버레이 영역 위에 있을 때만 상호작용 가능하게 함 (보조창 조작을 위해)
-        let local_mouse = get_local_mouse_pos(ctx, self.win_cache.cached_hwnd);
+        let local_mouse =
+            crate::ui::platform::get_local_mouse_pos(ctx, self.platform.win_cache.cached_hwnd);
 
-        let is_over = local_mouse.is_some() || self.is_dragging;
+        let is_over = local_mouse.is_some() || self.platform.is_dragging;
         let passthrough = !overlay_on || !is_over;
         if self
             .state_tracker
@@ -615,7 +555,7 @@ impl NativeApp {
 
         // 비활성 윈도우(WS_EX_NOACTIVATE) 상태에서 마우스가 위에 있고, 마우스가 실제로 움직였거나 드래그 중일 때만 렌더링 강제
         let mouse_moved = self.state_tracker.prev_mouse_pos.update(local_mouse);
-        if overlay_on && is_over && (mouse_moved || self.is_dragging) {
+        if overlay_on && is_over && (mouse_moved || self.platform.is_dragging) {
             ctx.request_repaint();
         }
 
@@ -624,9 +564,10 @@ impl NativeApp {
         #[cfg(target_os = "windows")]
         {
             if overlay_on && snap_position != "manual" {
-                if let (Some(overlay_hwnd), Some(game_hwnd)) =
-                    (self.win_cache.cached_hwnd, self.win_cache.cached_game_hwnd)
-                {
+                if let (Some(overlay_hwnd), Some(game_hwnd)) = (
+                    self.platform.win_cache.cached_hwnd,
+                    self.platform.win_cache.cached_game_hwnd,
+                ) {
                     unsafe {
                         let fg = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
                         if fg == overlay_hwnd as windows_sys::Win32::Foundation::HWND {
@@ -648,7 +589,7 @@ impl NativeApp {
         #[cfg(target_os = "windows")]
         {
             if overlay_on && snap_position != "manual" {
-                if let Some(hwnd_val) = self.win_cache.cached_hwnd {
+                if let Some(hwnd_val) = self.platform.win_cache.cached_hwnd {
                     if let Some(g_rect) = game_rect_val {
                         use windows_sys::Win32::UI::WindowsAndMessaging::*;
                         let hwnd = hwnd_val as HWND;
@@ -679,7 +620,8 @@ impl NativeApp {
 
                         // 이전 설정 좌표 및 크기와 다른 경우에만 SetWindowPos 호출
                         let current_geom = (px, py, overlay_w_px, overlay_h_px);
-                        let geom_changed = self.win_cache.prev_snap_geometry != Some(current_geom);
+                        let geom_changed =
+                            self.platform.win_cache.prev_snap_geometry != Some(current_geom);
 
                         if geom_changed {
                             unsafe {
@@ -693,7 +635,7 @@ impl NativeApp {
                                     SWP_NOACTIVATE,
                                 );
                             }
-                            self.win_cache.prev_snap_geometry = Some(current_geom);
+                            self.platform.win_cache.prev_snap_geometry = Some(current_geom);
                         }
                     }
                 }
@@ -713,12 +655,13 @@ impl NativeApp {
         overlay_on: bool,
         force_topmost: &mut bool,
     ) {
-        let local_mouse = get_local_mouse_pos(ctx, self.win_cache.cached_hwnd);
+        let local_mouse =
+            crate::ui::platform::get_local_mouse_pos(ctx, self.platform.win_cache.cached_hwnd);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(Color32::from_rgba_unmultiplied(0, 0, 0, 0)))
             .show(ctx, |ui| {
                 if !overlay_on {
-                    self.last_painted_rect = None;
+                    self.platform.last_painted_rect = None;
                     return;
                 }
 
@@ -758,10 +701,10 @@ impl NativeApp {
                 }
 
                 if actions.start_drag {
-                    self.is_dragging = true;
+                    self.platform.is_dragging = true;
                 }
                 if actions.restore_game_focus || ctx.input(|i| !i.pointer.any_down()) {
-                    self.is_dragging = false;
+                    self.platform.is_dragging = false;
                 }
 
                 self.handle_window_drag(ctx, actions.start_drag);
@@ -788,9 +731,9 @@ impl NativeApp {
                 }
                 if let Some(mouse_pos) = local_mouse {
                     // 비활성 윈도우 마우스 커서 숨김 제약을 우회하기 위해 가상 커서를 마우스 위치에 직접 렌더링
-                    draw_custom_cursor(ui.painter(), mouse_pos);
+                    crate::ui::platform::draw_custom_cursor(ui.painter(), mouse_pos);
                 }
-                self.last_painted_rect = actions.response_rect;
+                self.platform.last_painted_rect = actions.response_rect;
             });
     }
 }
@@ -910,14 +853,14 @@ impl NativeApp {
 
     fn game_hwnd_cached(&mut self) -> Option<HWND> {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        let mut g_hwnd = self.win_cache.cached_game_hwnd.map(|h| h as HWND);
+        let mut g_hwnd = self.platform.win_cache.cached_game_hwnd.map(|h| h as HWND);
         let is_valid = g_hwnd.map(|h| unsafe { IsWindow(h) } != 0).unwrap_or(false);
         if !is_valid {
             let settings = self.settings.get_merged();
             let game_title = game_window_title(&settings).to_string();
             let title_wide = window_tracker::encode_wide(&game_title);
             g_hwnd = window_tracker::find_hwnd_by_title(&title_wide);
-            self.win_cache.cached_game_hwnd = g_hwnd.map(|h| h as isize);
+            self.platform.win_cache.cached_game_hwnd = g_hwnd.map(|h| h as isize);
         }
         g_hwnd
     }
@@ -959,7 +902,7 @@ impl NativeApp {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
         // 1. 캐싱된 핸들이 있고 투명도가 올바르게 유지되고 있다면 조기 반환
-        if let Some(hwnd_val) = self.win_cache.cached_hwnd {
+        if let Some(hwnd_val) = self.platform.win_cache.cached_hwnd {
             let hwnd = hwnd_val as HWND;
             let game_hwnd = self.game_hwnd_cached();
 
@@ -1009,7 +952,7 @@ impl NativeApp {
 
             // 캐시된 핸들은 유효하나 스타일이나 투명도가 풀린 경우: 바로 재적용 시도
             if Self::apply_style_and_opacity(hwnd, is_active, opacity) {
-                self.win_cache.last_applied_opacity = Some(opacity);
+                self.platform.win_cache.last_applied_opacity = Some(opacity);
                 return true;
             }
         }
@@ -1036,8 +979,8 @@ impl NativeApp {
             let is_active = self.determine_active_state(game_hwnd);
 
             if Self::apply_style_and_opacity(hwnd, is_active, opacity) {
-                self.win_cache.cached_hwnd = Some(hwnd as isize);
-                self.win_cache.last_applied_opacity = Some(opacity);
+                self.platform.win_cache.cached_hwnd = Some(hwnd as isize);
+                self.platform.win_cache.last_applied_opacity = Some(opacity);
                 return true;
             }
         }

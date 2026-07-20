@@ -1,6 +1,5 @@
 //! Single `eframe` app: overlay + deferred debug / settings / sync viewports.
 
-use eframe::egui::ViewportBuilder;
 use overmax_core::{Changed, GameSessionState};
 use overmax_data::{
     build_candidates, load_base_settings, load_merged_settings, normalize_settings,
@@ -24,52 +23,24 @@ use crate::system::updater::{self, AppUpdateConfig};
 use crate::system::varchive_upload;
 use crate::ui::debug_ui;
 use crate::ui::overlay_ui;
-#[cfg(target_os = "windows")]
-use crate::ui::tray_icon::TrayIcon;
+use crate::ui::platform;
 use crate::ui::ui_command::UiCommand;
 use eframe::egui;
 use overmax_engine::detector::detection_pipeline::DetectionOutput;
 use overmax_engine::detector::detection_worker;
 use overmax_engine::detector::ocr_engine::OcrTelemetry;
 
-#[cfg(target_os = "windows")]
-fn load_icon() -> Option<eframe::egui::IconData> {
-    let icon_bytes = include_bytes!("../../../../assets/overmax.ico");
-    if let Ok(img) = image::load_from_memory(icon_bytes) {
-        let rgba = img.to_rgba8();
-        let (width, height) = rgba.dimensions();
-        return Some(eframe::egui::IconData {
-            rgba: rgba.into_raw(),
-            width,
-            height,
-        });
-    }
-    None
-}
-
-#[cfg(target_os = "windows")]
-unsafe extern "system" fn console_ctrl_handler(_ctrl_type: u32) -> i32 {
-    crate::ui::tray_icon::force_cleanup_tray();
-    0 // FALSE
-}
-
 pub fn run_native_app() -> eframe::Result<()> {
-    #[cfg(target_os = "windows")]
-    unsafe {
-        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(console_ctrl_handler), 1);
+    if let Err(error) = platform::init_platform_on_startup() {
+        platform::show_startup_error(&error);
+        return Err(eframe::Error::AppCreation(Box::new(std::io::Error::other(
+            error,
+        ))));
     }
 
     let Some(_single) = SingleInstanceGuard::try_acquire() else {
         std::process::exit(0);
     };
-
-    #[cfg(target_os = "linux")]
-    if let Err(error) = linux_environment_probe() {
-        show_linux_startup_error(&error);
-        return Err(eframe::Error::AppCreation(Box::new(std::io::Error::other(
-            error,
-        ))));
-    }
 
     let root = std::env::current_dir().unwrap_or_else(|e| {
         eprintln!("cwd: {e}");
@@ -111,133 +82,23 @@ pub fn run_native_app() -> eframe::Result<()> {
         }
     }
 
-    let options = native_options(&app_settings);
+    let options = platform::native_options(&app_settings);
 
     eframe::run_native(
         "Overmax",
         options,
         Box::new(|cc| {
             cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
-            #[cfg(target_os = "linux")]
-            if !overlay_ui::install_cjk_fonts(&cc.egui_ctx) {
-                let error = "No Korean font was found. Install a CJK font and fontconfig, then restart Overmax.";
-                show_linux_startup_error(error);
-                return Err(Box::new(std::io::Error::other(error))
-                    as Box<dyn std::error::Error + Send + Sync>);
-            }
-            #[cfg(target_os = "windows")]
             let _ = overlay_ui::install_cjk_fonts(&cc.egui_ctx);
             NativeApp::new(cc.egui_ctx.clone())
                 .map(|app| Box::new(app) as Box<dyn eframe::App>)
                 .map_err(|e| {
                     eprintln!("native app init: {e}");
-                    #[cfg(target_os = "linux")]
-                    show_linux_startup_error(&e);
+                    platform::show_startup_error(&e);
                     Box::new(std::io::Error::other(e)) as Box<dyn std::error::Error + Send + Sync>
                 })
         }),
     )
-}
-
-#[cfg(target_os = "linux")]
-fn linux_environment_probe() -> Result<(), String> {
-    for name in ["DISPLAY", "WAYLAND_DISPLAY"] {
-        if std::env::var_os(name).is_none_or(|value| value.is_empty()) {
-            return Err(format!(
-                "{name} is not set. Overmax requires XWayland and Wayland."
-            ));
-        }
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn show_linux_startup_error(message: &str) {
-    eprintln!("[Startup] {message}");
-    let _ = rfd::MessageDialog::new()
-        .set_title("Overmax cannot continue")
-        .set_description(message)
-        .set_level(rfd::MessageLevel::Error)
-        .set_buttons(rfd::MessageButtons::Ok)
-        .show();
-}
-
-#[cfg(target_os = "windows")]
-fn is_position_on_screen(x: f32, y: f32) -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-        SM_YVIRTUALSCREEN,
-    };
-    unsafe {
-        let vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        let vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        let vwidth = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        let vheight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-
-        if vwidth > 0 && vheight > 0 {
-            let px = x as i32;
-            let py = y as i32;
-            px >= vx && px < (vx + vwidth) && py >= vy && py < (vy + vheight)
-        } else {
-            x >= 0.0 && y >= 0.0
-        }
-    }
-}
-
-fn native_options(settings: &overmax_data::Settings) -> eframe::NativeOptions {
-    #[cfg(target_os = "linux")]
-    {
-        let _ = settings;
-        eframe::NativeOptions {
-            viewport: ViewportBuilder::default()
-                .with_title("Overmax")
-                .with_inner_size([1.0, 1.0])
-                .with_min_inner_size([1.0, 1.0])
-                .with_max_inner_size([1.0, 1.0])
-                .with_resizable(false)
-                .with_decorations(false)
-                .with_transparent(true)
-                .with_taskbar(false)
-                .with_mouse_passthrough(true),
-            ..Default::default()
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let overlay = settings.overlay();
-        let is_lite = overlay.lite_mode;
-
-        let mut builder = ViewportBuilder::default()
-            .with_title("Overmax")
-            .with_inner_size([overlay_ui::BASE_WIDTH, overlay_ui::BASE_HEIGHT])
-            .with_resizable(true)
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_taskbar(false)
-            .with_always_on_top()
-            .with_visible(!is_lite);
-
-        if let Some(icon) = load_icon() {
-            builder = builder.with_icon(icon);
-        }
-
-        if !is_lite {
-            let pos = &overlay.position;
-            if let (Some(x), Some(y)) = (pos.x, pos.y) {
-                let px = x as f32;
-                let py = y as f32;
-                if is_position_on_screen(px, py) {
-                    builder = builder.with_position(eframe::egui::pos2(px, py));
-                }
-            }
-        }
-
-        eframe::NativeOptions {
-            viewport: builder,
-            ..Default::default()
-        }
-    }
 }
 
 pub struct SharedSettings {
@@ -365,8 +226,6 @@ pub struct NativeApp {
     pub(crate) recommendations: RecommendResult,
     pub(crate) pattern_tabs: Vec<crate::ui::overlay_recommend_ui::PatternTabInfo>,
     pub(crate) state_tracker: AppStateTracker,
-    #[cfg(target_os = "windows")]
-    pub(crate) is_dragging: bool,
     pub(crate) record_db: Arc<RecordDB>,
     pub(crate) record_manager: Arc<RecordManager>,
     pub(crate) recommender: Arc<Recommender>,
@@ -374,14 +233,7 @@ pub struct NativeApp {
     pub(crate) exit_requested: Arc<AtomicBool>,
     pub(crate) ctx_holder: Arc<Mutex<Option<egui::Context>>>,
     pub(crate) session_initial_record: Option<overmax_data::RecordValue>,
-    #[cfg(target_os = "linux")]
-    pub(crate) linux_overlay: crate::ui::linux_layer_overlay::LinuxLayerOverlayHandle,
-    #[cfg(target_os = "windows")]
-    pub(crate) _tray: Option<TrayIcon>,
-    #[cfg(target_os = "windows")]
-    pub(crate) win_cache: WindowsWindowCache,
-    #[cfg(target_os = "windows")]
-    pub(crate) last_painted_rect: Option<egui::Rect>,
+    pub(crate) platform: platform::PlatformState,
     pub(crate) toast: Option<crate::ui::components::ToastMessage>,
 }
 
@@ -487,27 +339,9 @@ impl NativeApp {
             }
         }
 
-        #[cfg(target_os = "linux")]
-        let initial_ctx = Some(initial_ctx);
-        #[cfg(target_os = "windows")]
-        let initial_ctx = {
-            let _ = initial_ctx;
-            None
-        };
-        let ctx_holder: Arc<Mutex<Option<egui::Context>>> = Arc::new(Mutex::new(initial_ctx));
+        let ctx_holder: Arc<Mutex<Option<egui::Context>>> = Arc::new(Mutex::new(Some(initial_ctx)));
 
-        #[cfg(target_os = "linux")]
-        let linux_overlay = {
-            let ctx_holder = ctx_holder.clone();
-            let repaint = Arc::new(move || {
-                if let Ok(holder) = ctx_holder.lock() {
-                    if let Some(ctx) = &*holder {
-                        ctx.request_repaint();
-                    }
-                }
-            });
-            crate::ui::linux_layer_overlay::spawn(ui_cmd_tx.clone(), repaint)?
-        };
+        let platform = platform::PlatformState::new(&ctx_holder, &merged_settings, &ui_cmd_tx)?;
 
         let ctx_holder_clone = ctx_holder.clone();
 
@@ -605,8 +439,6 @@ impl NativeApp {
             recommendations: RecommendResult::empty(),
             pattern_tabs: Vec::new(),
             state_tracker: AppStateTracker::new(),
-            #[cfg(target_os = "windows")]
-            is_dragging: false,
             record_db,
             record_manager,
             recommender,
@@ -614,18 +446,7 @@ impl NativeApp {
             exit_requested: exit_requested.clone(),
             ctx_holder: ctx_holder.clone(),
             session_initial_record: None,
-            #[cfg(target_os = "linux")]
-            linux_overlay,
-            #[cfg(target_os = "windows")]
-            _tray: Some(TrayIcon::spawn(
-                ui_cmd_tx,
-                merged_settings.clone(),
-                ctx_holder,
-            )),
-            #[cfg(target_os = "windows")]
-            win_cache: WindowsWindowCache::default(),
-            #[cfg(target_os = "windows")]
-            last_painted_rect: None,
+            platform,
             toast: None,
         };
 
@@ -1172,7 +993,7 @@ impl NativeApp {
 
 #[cfg(test)]
 mod tests {
-    use super::native_options;
+    use crate::ui::platform::native_options;
 
     #[test]
     fn main_overlay_stays_out_of_taskbar() {
