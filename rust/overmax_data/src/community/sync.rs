@@ -142,56 +142,40 @@ fn sort_key(c: &SyncCandidate) -> (i8, f64) {
     }
 }
 
-/// Builds sync candidates for one Steam id using local `record.db` and on-disk V-Archive cache.
+/// Builds sync candidates for one Steam id using SQL LEFT JOIN on local `record.db`.
 pub fn build_candidates(
     varchive_db: &VArchiveDB,
     record_db: &RecordDB,
     steam_id: &str,
-    varchive_cache_root: &Path,
+    _varchive_cache_root: &Path,
 ) -> Vec<SyncCandidate> {
-    let local_map = record_db.all_records_for_steam(steam_id);
-    if local_map.is_empty() {
+    let raw_rows = record_db.query_sync_candidates(steam_id);
+    if raw_rows.is_empty() {
         return Vec::new();
     }
-    let varchive_cache = load_varchive_record_cache(varchive_cache_root, steam_id);
-    let mut candidates = Vec::new();
+    let mut candidates = Vec::with_capacity(raw_rows.len());
 
-    for ((song_id, mode, diff), (local_rate, local_mc)) in local_map {
-        if local_rate <= 0.0 {
-            continue;
-        }
-        let v_entry = varchive_cache.get(&(song_id, mode.clone(), diff.clone()));
-        let v_rate = v_entry.map(|e| e.0);
-        let v_mc = v_entry.map(|e| e.1);
-
-        let is_candidate = match v_rate {
-            None => true,
-            Some(vr) => (local_rate - vr as f64) >= 0.01,
-        };
-        if !is_candidate {
-            continue;
-        }
-
-        let (song_name, composer, dlc) = match varchive_db.search_by_id(song_id) {
+    for row in raw_rows {
+        let (song_name, composer, dlc) = match varchive_db.search_by_id(row.song_id) {
             Some(s) => (
                 s.name.clone(),
                 s.composer.to_string(),
                 s.dlc_code.to_string(),
             ),
-            None => (song_id.to_string(), String::new(), String::new()),
+            None => (row.song_id.to_string(), String::new(), String::new()),
         };
 
         candidates.push(SyncCandidate {
-            song_id,
+            song_id: row.song_id,
             song_name,
             composer,
             dlc,
-            button_mode: mode,
-            difficulty: diff,
-            overmax_rate: local_rate,
-            overmax_mc: local_mc,
-            varchive_rate: v_rate.map(|r| r as f64),
-            varchive_mc: v_mc,
+            button_mode: row.button_mode,
+            difficulty: row.difficulty,
+            overmax_rate: row.local_rate,
+            overmax_mc: row.local_mc,
+            varchive_rate: row.varchive_rate,
+            varchive_mc: row.varchive_mc,
             upload_status: String::new(),
             upload_message: String::new(),
         });
@@ -202,6 +186,7 @@ pub fn build_candidates(
             .partial_cmp(&sort_key(b))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+
     candidates
 }
 
@@ -585,6 +570,43 @@ mod tests {
 
         let m = load_varchive_record_cache(&dir, "765611");
         assert_eq!(m.get(&(0, "4B".into(), "NM".into())), Some(&(88.0, false)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_build_candidates_filters_already_synced_records_from_sqlite_db() {
+        let dir = std::env::temp_dir().join(format!("varch-build-cand-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let db_path = dir.join("record.db");
+        let mut rdb = RecordDB::new(&db_path, Some("76561198000000000"));
+        assert!(rdb.initialize());
+
+        // 1. Insert local records into record.db
+        rdb.upsert(1, "4B", "MX", 99.5, true, false); // Already synced identical score
+        rdb.upsert(2, "4B", "MX", 98.0, false, false); // Local is 98.0%, V-Archive has 95.0% (Improved!)
+        rdb.upsert(3, "4B", "MX", 99.0, false, false); // Unregistered on V-Archive
+
+        // 2. Insert V-Archive records into SQLite table
+        let v_payload = json!({
+            "records": [
+                {"title": "1", "pattern": "MX", "score": 99.5, "maxCombo": true},
+                {"title": "2", "pattern": "MX", "score": 95.0, "maxCombo": false}
+            ]
+        });
+        rdb.merge_varchive_fetched_records("76561198000000000", 4, &v_payload, false)
+            .unwrap();
+
+        let vdb = VArchiveDB::new();
+        let candidates = build_candidates(&vdb, &rdb, "76561198000000000", &dir);
+
+        // Candidate 1 (synced) should be FILTERED OUT!
+        // Candidate 2 (improved score) and Candidate 3 (unregistered) should be PRESENT!
+        assert_eq!(candidates.len(), 2);
+        let ids: Vec<i32> = candidates.iter().map(|c| c.song_id).collect();
+        assert!(ids.contains(&2));
+        assert!(ids.contains(&3));
+        assert!(!ids.contains(&1));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -4,6 +4,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+#[derive(Debug, Clone)]
+pub struct RawSyncCandidateRow {
+    pub song_id: i32,
+    pub button_mode: String,
+    pub difficulty: String,
+    pub local_rate: f64,
+    pub local_mc: bool,
+    pub varchive_rate: Option<f64>,
+    pub varchive_mc: Option<bool>,
+}
+
 pub struct RecordDB {
     db_path: PathBuf,
     steam_id: Mutex<String>,
@@ -388,6 +399,76 @@ impl RecordDB {
             );
         }
         Ok(map)
+    }
+
+    /// Direct SQL LEFT JOIN query to fetch sync candidates directly from SQLite DB.
+    pub fn query_sync_candidates(&self, steam_id: &str) -> Vec<RawSyncCandidateRow> {
+        let mut list = Vec::new();
+        if !self.is_ready || steam_id.is_empty() || steam_id == Self::UNKNOWN_STEAM_ID {
+            return list;
+        }
+        let Ok(conn) = Connection::open(&self.db_path) else {
+            return list;
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT 
+                r.song_id,
+                r.button_mode,
+                r.difficulty,
+                r.rate,
+                r.is_max_combo,
+                v.score,
+                v.max_combo
+             FROM records r
+             LEFT JOIN varchive_records v 
+                ON r.steam_id = v.steam_id 
+               AND r.song_id = v.song_id 
+               AND r.button_mode = v.button_mode 
+               AND r.difficulty = v.difficulty
+             WHERE r.steam_id = ?1
+               AND r.rate > 0
+               AND (
+                   v.song_id IS NULL 
+                   OR (r.rate - v.score) >= 0.01 
+                   OR (r.is_max_combo = 1 AND COALESCE(v.max_combo, 0) = 0)
+               )",
+        ) {
+            Ok(s) => s,
+            Err(_) => return list,
+        };
+
+        let mut rows = match stmt.query(params![steam_id]) {
+            Ok(r) => r,
+            Err(_) => return list,
+        };
+
+        while let Ok(Some(row)) = rows.next() {
+            let song_id_str: String = match row.get(0) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let Ok(song_id) = song_id_str.parse::<i32>() else {
+                continue;
+            };
+            let button_mode: String = row.get(1).unwrap_or_default();
+            let difficulty: String = row.get(2).unwrap_or_default();
+            let local_rate: f64 = row.get(3).unwrap_or(0.0);
+            let local_mc: i32 = row.get(4).unwrap_or(0);
+            let v_score: Option<f64> = row.get(5).ok();
+            let v_mc_int: Option<i32> = row.get(6).ok();
+
+            list.push(RawSyncCandidateRow {
+                song_id,
+                button_mode,
+                difficulty,
+                local_rate,
+                local_mc: local_mc != 0,
+                varchive_rate: v_score,
+                varchive_mc: v_mc_int.map(|m| m != 0),
+            });
+        }
+
+        list
     }
 
     pub fn merge_varchive_fetched_records(
