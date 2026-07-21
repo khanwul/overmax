@@ -564,7 +564,11 @@ impl NativeApp {
                 });
             }
             if success {
-                self.record_manager.refresh();
+                if let Some(val) = self.record_manager.get_local_record(key.0, &key.1, &key.2) {
+                    self.record_manager.upsert_varchive_record(key, val);
+                } else {
+                    self.record_manager.refresh();
+                }
                 refreshed = true;
             }
         }

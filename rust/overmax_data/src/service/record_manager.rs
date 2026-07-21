@@ -44,6 +44,16 @@ impl RecordManager {
         self.data_revision.fetch_add(1, Ordering::SeqCst);
     }
 
+    pub fn upsert_varchive_record(&self, key: RecordKey, value: RecordValue) {
+        if let Ok(mut guard) = self.varchive_cache.lock() {
+            guard.insert(key.clone(), value);
+        }
+        if let Ok(mut guard) = self.dirty_record_keys.lock() {
+            guard.insert(key);
+        }
+        self.data_revision.fetch_add(1, Ordering::SeqCst);
+    }
+
     pub fn set_steam_id(&self, steam_id: Option<&str>) -> (bool, String, String) {
         let result = self.record_db.set_steam_id(steam_id);
         if result.0 {
@@ -170,6 +180,7 @@ impl RecordSource for RecordManager {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -326,6 +337,29 @@ mod tests {
             Some((99.5, true))
         );
         assert_eq!(manager.get_varchive_cache_record(42, "4B", "NM"), None);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_upsert_varchive_record_incremental_update() {
+        let dir = test_dir("record-manager-incremental");
+        let db_path = dir.join("record.db");
+        let mut db = RecordDB::new(&db_path, Some("765611"));
+        assert!(db.initialize());
+
+        let db = Arc::new(db);
+        let manager = RecordManager::new(db);
+
+        assert_eq!(manager.get_varchive_cache_record(50, "6B", "MX"), None);
+
+        // Perform O(1) incremental update
+        manager.upsert_varchive_record((50, "6B".into(), "MX".into()), (99.85, true));
+
+        assert_eq!(
+            manager.get_varchive_cache_record(50, "6B", "MX"),
+            Some((99.85, true))
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }
