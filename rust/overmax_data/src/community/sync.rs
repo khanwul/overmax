@@ -25,6 +25,22 @@ pub struct SyncCandidate {
 }
 
 impl SyncCandidate {
+    pub fn key(&self) -> RecordKey {
+        (
+            self.song_id,
+            self.button_mode.clone(),
+            self.difficulty.clone(),
+        )
+    }
+
+    pub fn key_ref(&self) -> (i32, &str, &str) {
+        (self.song_id, &self.button_mode, &self.difficulty)
+    }
+
+    pub fn matches_key(&self, key: &RecordKey) -> bool {
+        self.song_id == key.0 && self.button_mode == key.1 && self.difficulty == key.2
+    }
+
     pub fn reason_label(&self) -> String {
         let mut parts = Vec::new();
         if self.varchive_rate.is_none() {

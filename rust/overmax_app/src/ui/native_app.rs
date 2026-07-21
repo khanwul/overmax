@@ -144,16 +144,16 @@ pub struct SharedSyncState {
 pub(crate) struct SyncWorkerChannels {
     pub(crate) sync_rx: Receiver<Result<Vec<SyncCandidate>, String>>,
     pub(crate) sync_tx: Sender<Result<Vec<SyncCandidate>, String>>,
-    pub(crate) upload_req_rx: Receiver<usize>,
-    pub(crate) upload_req_tx: Sender<usize>,
-    pub(crate) upload_res_rx: Receiver<(usize, String, String)>,
-    pub(crate) upload_res_tx: Sender<(usize, String, String)>,
+    pub(crate) upload_req_rx: Receiver<overmax_data::RecordKey>,
+    pub(crate) upload_req_tx: Sender<overmax_data::RecordKey>,
+    pub(crate) upload_res_rx: Receiver<(overmax_data::RecordKey, bool, String, String)>,
+    pub(crate) upload_res_tx: Sender<(overmax_data::RecordKey, bool, String, String)>,
     pub(crate) fetch_req_rx: Receiver<(String, String, i32)>,
     pub(crate) fetch_req_tx: Sender<(String, String, i32)>,
     pub(crate) fetch_res_rx: Receiver<(String, i32, Result<usize, String>)>,
     pub(crate) fetch_res_tx: Sender<(String, i32, Result<usize, String>)>,
-    pub(crate) delete_req_rx: Receiver<usize>,
-    pub(crate) delete_req_tx: Sender<usize>,
+    pub(crate) delete_req_rx: Receiver<overmax_data::RecordKey>,
+    pub(crate) delete_req_tx: Sender<overmax_data::RecordKey>,
 }
 
 pub struct AppStateTracker {
@@ -308,7 +308,7 @@ impl NativeApp {
         let (sync_tx, sync_rx) = mpsc::channel();
         let (upload_req_tx, upload_req_rx) = mpsc::channel();
         let (upload_res_tx, upload_res_rx) = mpsc::channel();
-        let (delete_req_tx, delete_req_rx) = mpsc::channel::<usize>();
+        let (delete_req_tx, delete_req_rx) = mpsc::channel::<overmax_data::RecordKey>();
         let (ui_cmd_tx, ui_cmd_rx) = mpsc::channel();
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         let _ = &ui_cmd_tx;
@@ -439,13 +439,13 @@ impl NativeApp {
     }
 
     pub(crate) fn poll_delete_requests(&mut self, ctx: &egui::Context) {
-        while let Ok(idx) = self.sync_channels.delete_req_rx.try_recv() {
+        while let Ok(key) = self.sync_channels.delete_req_rx.try_recv() {
             let cand = self
                 .sync_state
                 .candidates
                 .lock()
                 .ok()
-                .and_then(|g| g.get(idx).cloned());
+                .and_then(|g| g.iter().find(|c| c.matches_key(&key)).cloned());
             if let Some(c) = cand {
                 if self
                     .record_manager
@@ -506,15 +506,15 @@ impl NativeApp {
     }
 
     pub(crate) fn poll_upload_requests(&mut self, ctx: &egui::Context) {
-        while let Ok(idx) = self.sync_channels.upload_req_rx.try_recv() {
+        while let Ok(key) = self.sync_channels.upload_req_rx.try_recv() {
             let cand = self
                 .sync_state
                 .candidates
                 .lock()
                 .ok()
-                .and_then(|g| g.get(idx).cloned());
+                .and_then(|g| g.iter().find(|c| c.matches_key(&key)).cloned());
             if let Some(c) = cand {
-                self.spawn_upload(idx, c, ctx.clone());
+                self.spawn_upload(c, false, ctx.clone());
             }
         }
     }
@@ -542,9 +542,19 @@ impl NativeApp {
 
     pub(crate) fn drain_upload_results(&mut self) {
         let mut refreshed = false;
-        while let Ok((idx, status, msg)) = self.sync_channels.upload_res_rx.try_recv() {
+        while let Ok((key, is_quick_upload, status, msg)) =
+            self.sync_channels.upload_res_rx.try_recv()
+        {
             let success = status == "success";
-            if idx == 999999 {
+            let mut matched_candidate = false;
+            if let Ok(mut list) = self.sync_state.candidates.lock() {
+                if let Some(c) = list.iter_mut().find(|item| item.matches_key(&key)) {
+                    c.upload_status = status.clone();
+                    c.upload_message = msg.clone();
+                    matched_candidate = true;
+                }
+            }
+            if is_quick_upload || !matched_candidate {
                 let toast_text = if success {
                     format!("V-Archive: {}", msg)
                 } else {
@@ -555,11 +565,6 @@ impl NativeApp {
                     is_success: success,
                     expires_at: std::time::Instant::now() + std::time::Duration::from_secs(3),
                 });
-            } else if let Ok(mut list) = self.sync_state.candidates.lock() {
-                if let Some(c) = list.get_mut(idx) {
-                    c.upload_status = status;
-                    c.upload_message = msg;
-                }
             }
             if success {
                 self.record_manager.refresh();
@@ -634,7 +639,8 @@ impl NativeApp {
         });
     }
 
-    fn spawn_upload(&self, index: usize, candidate: SyncCandidate, ctx: egui::Context) {
+    fn spawn_upload(&self, candidate: SyncCandidate, is_quick_upload: bool, ctx: egui::Context) {
+        let key = candidate.key();
         let settings = self.settings.get_merged();
         let steam = self
             .sync_state
@@ -649,12 +655,22 @@ impl NativeApp {
         std::thread::spawn(move || {
             let path = Path::new(&account_path);
             if account_path.is_empty() || !path.exists() {
-                let _ = tx.send((index, "error".into(), "account.txt 경로 없음".into()));
+                let _ = tx.send((
+                    key.clone(),
+                    is_quick_upload,
+                    "error".into(),
+                    "account.txt 경로 없음".into(),
+                ));
                 ctx.request_repaint();
                 return;
             }
             let Some(account) = varchive_upload::parse_account_file(path) else {
-                let _ = tx.send((index, "error".into(), "account.txt 파싱 실패".into()));
+                let _ = tx.send((
+                    key.clone(),
+                    is_quick_upload,
+                    "error".into(),
+                    "account.txt 파싱 실패".into(),
+                ));
                 ctx.request_repaint();
                 return;
             };
@@ -758,18 +774,19 @@ impl NativeApp {
 
                 match success_message {
                     Ok(msg) => {
-                        let _ = tx.send((index, "success".into(), msg));
+                        let _ = tx.send((key, is_quick_upload, "success".into(), msg));
                     }
                     Err(err_msg) => {
                         let _ = tx.send((
-                            index,
+                            key,
+                            is_quick_upload,
                             "success".into(),
                             format!("업로드 OK, 캐시 갱신 오류: {err_msg}"),
                         ));
                     }
                 }
             } else {
-                let _ = tx.send((index, "error".into(), res.message));
+                let _ = tx.send((key, is_quick_upload, "error".into(), res.message));
             }
             ctx.request_repaint();
         });
@@ -849,7 +866,7 @@ impl NativeApp {
             upload_message: String::new(),
         };
 
-        self.spawn_upload(999999, candidate, ctx);
+        self.spawn_upload(candidate, true, ctx);
     }
 
     pub(crate) fn handle_auto_refresh(&mut self) {

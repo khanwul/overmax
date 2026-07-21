@@ -210,11 +210,11 @@ impl NativeApp {
                         on_scan: || {
                             scan_pending.store(true, Ordering::Relaxed);
                         },
-                        on_upload: |i| {
-                            let _ = upload_tx.send(i);
+                        on_upload: |key| {
+                            let _ = upload_tx.send(key);
                         },
-                        on_delete: |i| {
-                            let _ = delete_tx.send(i);
+                        on_delete: |key| {
+                            let _ = delete_tx.send(key);
                         },
                     },
                 );

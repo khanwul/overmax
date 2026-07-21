@@ -4,15 +4,15 @@ use crate::ui::overlay_theme::{apply_secondary_window_style, Theme};
 use eframe::egui::{
     self, Color32, CornerRadius, Frame, Margin, RichText, ScrollArea, Stroke, ViewportClass,
 };
-use overmax_data::SyncCandidate;
+use overmax_data::{RecordKey, SyncCandidate};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 pub struct SyncProps<'a, F1, F2, F3>
 where
     F1: Fn(),
-    F2: Fn(usize) + Copy,
-    F3: Fn(usize) + Copy,
+    F2: Fn(RecordKey) + Copy,
+    F3: Fn(RecordKey) + Copy,
 {
     pub steam_id: &'a mut String,
     pub status: &'a str,
@@ -29,8 +29,8 @@ pub fn render_sync<F1, F2, F3>(
     props: SyncProps<F1, F2, F3>,
 ) where
     F1: Fn(),
-    F2: Fn(usize) + Copy,
-    F3: Fn(usize) + Copy,
+    F2: Fn(RecordKey) + Copy,
+    F3: Fn(RecordKey) + Copy,
 {
     let mut body = |ui: &mut egui::Ui| {
         apply_secondary_window_style(ui.ctx());
@@ -171,28 +171,27 @@ pub fn render_sync<F1, F2, F3>(
         });
         ui.add_space(12.0);
 
-        let mut sorted_candidates: Vec<(usize, &SyncCandidate)> =
-            props.candidates.iter().enumerate().collect();
+        let mut sorted_candidates: Vec<&SyncCandidate> = props.candidates.iter().collect();
 
         match sort_mode {
             SyncSortMode::Title => {
                 sorted_candidates.sort_by(|a, b| {
-                    let mode_cmp = a.1.button_mode.cmp(&b.1.button_mode);
+                    let mode_cmp = a.button_mode.cmp(&b.button_mode);
                     if mode_cmp != std::cmp::Ordering::Equal {
                         return mode_cmp;
                     }
-                    a.1.song_name.cmp(&b.1.song_name)
+                    a.song_name.cmp(&b.song_name)
                 });
             }
             SyncSortMode::RateDiff => {
                 sorted_candidates.sort_by(|a, b| {
-                    let diff_a = match a.1.varchive_rate {
-                        None => a.1.overmax_rate,
-                        Some(vr) => a.1.overmax_rate - vr,
+                    let diff_a = match a.varchive_rate {
+                        None => a.overmax_rate,
+                        Some(vr) => a.overmax_rate - vr,
                     };
-                    let diff_b = match b.1.varchive_rate {
-                        None => b.1.overmax_rate,
-                        Some(vr) => b.1.overmax_rate - vr,
+                    let diff_b = match b.varchive_rate {
+                        None => b.overmax_rate,
+                        Some(vr) => b.overmax_rate - vr,
                     };
                     diff_b
                         .partial_cmp(&diff_a)
@@ -205,8 +204,8 @@ pub fn render_sync<F1, F2, F3>(
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.style_mut().spacing.item_spacing.y = 12.0;
-                for (orig_idx, c) in sorted_candidates {
-                    candidate_row(ui, orig_idx, c, props.on_upload, props.on_delete);
+                for c in sorted_candidates {
+                    candidate_row(ui, c, props.on_upload, props.on_delete);
                 }
             });
     };
@@ -224,9 +223,8 @@ pub fn render_sync<F1, F2, F3>(
     }
 }
 
-fn candidate_row<F: Fn(usize), D: Fn(usize)>(
+fn candidate_row<F: Fn(RecordKey), D: Fn(RecordKey)>(
     ui: &mut egui::Ui,
-    index: usize,
     c: &SyncCandidate,
     on_upload: F,
     on_delete: D,
@@ -278,7 +276,7 @@ fn candidate_row<F: Fn(usize), D: Fn(usize)>(
                             .stroke(Stroke::new(1.0_f32, Theme::STROKE))
                             .corner_radius(CornerRadius::same(Theme::R_SM));
                     if ui.add(upload_btn).clicked() {
-                        on_upload(index);
+                        on_upload(c.key());
                     }
 
                     ui.add_space(4.0);
@@ -289,7 +287,7 @@ fn candidate_row<F: Fn(usize), D: Fn(usize)>(
                         .stroke(Stroke::new(1.0_f32, Theme::STROKE))
                         .corner_radius(CornerRadius::same(Theme::R_SM));
                     if ui.add(del_btn).clicked() {
-                        on_delete(index);
+                        on_delete(c.key());
                     }
                 });
             });
