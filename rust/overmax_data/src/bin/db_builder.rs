@@ -142,15 +142,15 @@ fn process_image(path: &Path) -> Result<ProcessResult, String> {
         chunk.swap(0, 2); // Swap Red and Blue to get BGRA
     }
 
-    // 3. Compute Hashes via overmax_cv (HOG 계산을 완전히 우회하여 리소스 방지)
+    // 3. Compute Hashes via overmax_cv
     let (orig_phash, orig_dhash, orig_ahash) =
         overmax_cv::compute_image_hashes(&bgra, 64, 64, 4).map_err(|e| format!("{:?}", e))?;
 
     // 4. Compute Grid Histogram (4x4 RGB, 동일한 64x64 해상도의 정규화 공간에서 추출)
     let grid_hist = overmax_cv::compute_grid_histogram(&bgra, 64, 64, 4);
 
-    // HOG 데이터는 100% 제거되었으므로 빈 벡터를 전달
-    let hog = Vec::new();
+    // 5. Compute HOG Feature (구버전 클라이언트 및 외부 파이프라인과의 하위 호환성을 위해 1764차원 HOG 계산)
+    let hog = overmax_cv::compute_image_hog(&bgra, 64, 64, 4).map_err(|e| format!("{:?}", e))?;
 
     Ok(ProcessResult {
         orig_phash,

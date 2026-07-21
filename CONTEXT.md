@@ -245,6 +245,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 | 2026-07-18 | HOG 100% 제거 및 Fast Histogram 매칭 도입 | HOG Cosine 유사도의 병목과 메모리 스파이크를 해결하기 위해, 1차 u64 해시 Early Exit + 2차 2x2 분할 그리드 히스토그램 L1 벌점 WTA 방식의 고속 매칭을 도입하여 매칭 루프 457배(종합 122배) 고속화 실현 | [jacket_matcher.rs](rust/overmax_data/src/service/jacket_matcher.rs) / [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) |
 | 2026-07-18 | metadata 컬럼 활용한 히스토그램 JSON 적재 | SQLite DB 스키마 수정 마이그레이션 없이 하위 호환성을 보장하기 위해 images 테이블의 metadata TEXT 컬럼에 2x2 분할 히스토그램 데이터를 JSON으로 직렬화/역직렬화하여 적재 | [image_index.rs](rust/overmax_data/src/store/image_index.rs) / [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) |
 | 2026-07-18 | 64x64 해상도 히스토그램 추출 공간 일치 및 HOG 메모리 완전 배제 | DB 빌드와 런타임 간의 히스토그램 해상도/도메인 미스매치를 해결하기 위해 양쪽 모두 64x64 축소 해상도(Lanczos3)에서 히스토그램을 추출하도록 일치시킴. DB 로딩 시 HOG float 데이터 blob 파싱을 스킵하여 상주 메모리 6MB를 100% 절감했으며, similarity_threshold의 통계적 정합성 보정을 위해 임계치를 0.65로 조정하여 정확도 100.00%/오탐률 0.00%를 달성함 | [image_index.rs](rust/overmax_data/src/store/image_index.rs) / [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) / [jacket_matcher.rs](rust/overmax_data/src/service/jacket_matcher.rs) / [settings.rs](rust/overmax_data/src/config/settings.rs) |
+| 2026-07-21 | db_builder 내 하위 호환용 HOG 계산 복구 | 구버전 OverMax 클라이언트 및 HOG 특징 벡터를 참조하는 외부 파이프라인/도구와의 하위 호환성 보장을 위해 db_builder 실행 시 1,764차원 HOG feature BLOB(7,056 bytes) 계산 및 적재 복구 | [db_builder.rs](rust/overmax_data/src/bin/db_builder.rs) |
 
 ## Linux Port
 
