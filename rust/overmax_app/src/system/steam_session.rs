@@ -61,7 +61,11 @@ pub fn most_recent_steam_id() -> Option<String> {
         VdfVal::Obj(m) => m,
         _ => return None,
     };
+    let mut first_id = None;
     for (steam_id, user_data) in users {
+        if first_id.is_none() {
+            first_id = Some(steam_id.clone());
+        }
         let attrs = match user_data {
             VdfVal::Obj(m) => m,
             _ => continue,
@@ -72,7 +76,7 @@ pub fn most_recent_steam_id() -> Option<String> {
             }
         }
     }
-    None
+    first_id
 }
 
 fn read_loginusers_vdf() -> Option<String> {

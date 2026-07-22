@@ -3,9 +3,14 @@ use std::path::Path;
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
 use winreg::RegKey;
 
+fn has_loginusers_vdf(path: &Path) -> bool {
+    path.join("config").join("loginusers.vdf").exists()
+}
+
 pub(super) fn find_steam_path() -> Option<String> {
     for path in [r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam"] {
-        if Path::new(path).exists() {
+        let p = Path::new(path);
+        if has_loginusers_vdf(p) {
             return Some(path.to_string());
         }
     }
@@ -17,7 +22,8 @@ pub(super) fn find_steam_path() -> Option<String> {
                 .trim()
                 .trim_end_matches('/')
                 .trim_end_matches('\\');
-            if !trimmed.is_empty() {
+            let p = Path::new(trimmed);
+            if !trimmed.is_empty() && has_loginusers_vdf(p) {
                 return Some(trimmed.to_string());
             }
         }
@@ -32,7 +38,8 @@ pub(super) fn find_steam_path() -> Option<String> {
                         .trim()
                         .trim_end_matches('/')
                         .trim_end_matches('\\');
-                    if !trimmed.is_empty() {
+                    let p = Path::new(trimmed);
+                    if !trimmed.is_empty() && has_loginusers_vdf(p) {
                         return Some(trimmed.to_string());
                     }
                 }
@@ -40,7 +47,12 @@ pub(super) fn find_steam_path() -> Option<String> {
         }
     }
 
-    find_steam_from_processes()
+    let proc_path = find_steam_from_processes()?;
+    if has_loginusers_vdf(Path::new(&proc_path)) {
+        Some(proc_path)
+    } else {
+        None
+    }
 }
 
 fn find_steam_from_processes() -> Option<String> {
