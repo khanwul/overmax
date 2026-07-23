@@ -700,7 +700,7 @@ fn check_category_band_solid(
     frame: &CapturedFrame,
     jacket_roi: crate::detector::roi::RoiRect,
 ) -> bool {
-    let width = 5;
+    let width = 4;
     let band_roi = crate::detector::roi::RoiRect {
         x1: jacket_roi.x2,
         y1: jacket_roi.y1,
@@ -709,65 +709,84 @@ fn check_category_band_solid(
     };
 
     // 띠 경계선 엣지 검사 우회 (자켓과 띠의 색상이 유사해 엣지가 뭉개지는 케이스 방지)
-    // 내부 단색(Solid) 여부와 최소 밝기만으로 띠를 판별하고, 오인식은 최종 자켓 해시 매칭에서 필터링하도록 설계
+    // 3단계 통계 기준(최소 밝기 >= 60, 수직 편차 <= 20, 채도/무채색 정합성)으로 띠를 판별
 
-    band_roi.and_then(frame, |band_img| {
-        let total_pixels = (band_img.width * band_img.height) as usize;
-        if total_pixels == 0 {
-            return Some(false);
-        }
+    band_roi
+        .and_then(frame, |band_img| {
+            let total_pixels = (band_img.width * band_img.height) as usize;
+            if total_pixels == 0 {
+                return Some(false);
+            }
 
-        let mut sum_b = 0.0;
-        let mut sum_g = 0.0;
-        let mut sum_r = 0.0;
+            let mut sum_b = 0.0;
+            let mut sum_g = 0.0;
+            let mut sum_r = 0.0;
 
-        for y in 0..band_img.height as usize {
-            for x in 0..band_img.width as usize {
-                let idx = (y * band_img.width as usize + x) * 4;
-                if idx + 2 < band_img.bgra.len() {
-                    sum_b += band_img.bgra[idx] as f64;
-                    sum_g += band_img.bgra[idx + 1] as f64;
-                    sum_r += band_img.bgra[idx + 2] as f64;
+            for y in 0..band_img.height as usize {
+                for x in 0..band_img.width as usize {
+                    let idx = (y * band_img.width as usize + x) * 4;
+                    if idx + 2 < band_img.bgra.len() {
+                        sum_b += band_img.bgra[idx] as f64;
+                        sum_g += band_img.bgra[idx + 1] as f64;
+                        sum_r += band_img.bgra[idx + 2] as f64;
+                    }
                 }
             }
-        }
 
-        let mean_b = sum_b / total_pixels as f64;
-        let mean_g = sum_g / total_pixels as f64;
-        let mean_r = sum_r / total_pixels as f64;
+            let mean_b = sum_b / total_pixels as f64;
+            let mean_g = sum_g / total_pixels as f64;
+            let mean_r = sum_r / total_pixels as f64;
 
-        // "딱 검은색이 아닌" 조건: 평균 밝기가 20.0 이상이어야 함
-        let brightness = 0.114 * mean_b + 0.587 * mean_g + 0.299 * mean_r;
-        if brightness < 20.0 {
-            return Some(false);
-        }
+            // 1. Brightness 가드 (>= 60.0)
+            let brightness = 0.114 * mean_b + 0.587 * mean_g + 0.299 * mean_r;
+            if brightness < 60.0 {
+                return Some(false);
+            }
 
-        // 단색 여부 판정: 각 픽셀의 채널별 평균 대비 절대 편차의 평균이 작아야 함
-        let mut diff_sum = 0.0;
-        for y in 0..band_img.height as usize {
-            for x in 0..band_img.width as usize {
-                let idx = (y * band_img.width as usize + x) * 4;
-                if idx + 2 < band_img.bgra.len() {
-                    let b = band_img.bgra[idx] as f64;
-                    let g = band_img.bgra[idx + 1] as f64;
-                    let r = band_img.bgra[idx + 2] as f64;
-                    diff_sum += (b - mean_b).abs() + (g - mean_g).abs() + (r - mean_r).abs();
+            // 2. AvgDiff 수직 단색성 가드 (<= 20.0)
+            let mut diff_sum = 0.0;
+            for y in 0..band_img.height as usize {
+                for x in 0..band_img.width as usize {
+                    let idx = (y * band_img.width as usize + x) * 4;
+                    if idx + 2 < band_img.bgra.len() {
+                        let b = band_img.bgra[idx] as f64;
+                        let g = band_img.bgra[idx + 1] as f64;
+                        let r = band_img.bgra[idx + 2] as f64;
+                        diff_sum += (b - mean_b).abs() + (g - mean_g).abs() + (r - mean_r).abs();
+                    }
                 }
             }
-        }
 
-        let avg_diff = diff_sum / (total_pixels * 3) as f64;
+            let avg_diff = diff_sum / (total_pixels * 3) as f64;
+            if avg_diff > 20.0 {
+                return Some(false);
+            }
 
-        // 5x60 띠 내부 글자로 인한 픽셀 편차를 고려하여 임계치를 25.0 이하로 설정
-        let is_solid = avg_diff <= 25.0;
-        if is_solid {
+            // 3. Saturation 및 무채색(Gray) 채널 균등성 검증
+            let max_c = mean_r.max(mean_g).max(mean_b);
+            let min_c = mean_r.min(mean_g).min(mean_b);
+            let saturation = if max_c > 0.0 {
+                (max_c - min_c) / max_c
+            } else {
+                0.0
+            };
+
+            if saturation < 0.15 {
+                let diff_rg = (mean_r - mean_g).abs();
+                let diff_gb = (mean_g - mean_b).abs();
+                let diff_rb = (mean_r - mean_b).abs();
+                if diff_rg > 15.0 || diff_gb > 15.0 || diff_rb > 15.0 {
+                    return Some(false);
+                }
+            }
+
             debug_println!(
                 "    [check_category_band_solid] Category band solid detected! brightness={:.1}, avg_diff={:.2}",
                 brightness, avg_diff
             );
-        }
-        Some(is_solid)
-    }).unwrap_or(false)
+            Some(true)
+        })
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

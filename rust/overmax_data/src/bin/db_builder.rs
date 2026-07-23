@@ -84,17 +84,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // 구버전 클라이언트의 코사인 유사도 연산을 만족하기 위한 물리적 HOG 데이터 직렬화
                 let hog_bytes = f32_vec_to_bytes(&res.hog);
 
+                // 히스토그램을 JSON 직렬화하여 metadata 컬럼에 저장 (serde는 [u8;384] 미지원 → Vec로 변환)
+                let meta_json = serde_json::json!({
+                    "histogram": res.grid_hist.to_vec()
+                });
+                let meta_str = serde_json::to_string(&meta_json).unwrap_or_default();
+
                 tx.execute(
                     "INSERT INTO images (image_id, phash, dhash, ahash, hog, orb, metadata)
-                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL)
+                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)
                      ON CONFLICT(image_id) DO UPDATE SET
                          phash = excluded.phash,
                          dhash = excluded.dhash,
                          ahash = excluded.ahash,
                          hog   = excluded.hog,
                          orb   = NULL,
-                         metadata = NULL",
-                    params![song_id, phash_str, dhash_str, ahash_str, hog_bytes],
+                         metadata = excluded.metadata",
+                    params![song_id, phash_str, dhash_str, ahash_str, hog_bytes, meta_str],
                 )?;
                 success_count += 1;
             }
@@ -117,6 +123,7 @@ struct ProcessResult {
     orig_dhash: u64,
     orig_ahash: u64,
     hog: Vec<f32>,
+    grid_hist: [u8; 384],
 }
 
 fn process_image(path: &Path) -> Result<ProcessResult, String> {
@@ -125,25 +132,32 @@ fn process_image(path: &Path) -> Result<ProcessResult, String> {
 
     // 2. Decode using the image crate
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
-    let width = img.width() as usize;
-    let height = img.height() as usize;
 
-    let rgba = img.to_rgba8();
+    // 런타임 쿼리 재킷(60x60 크롭을 64x64로 리사이즈)과의 도메인 미스매치(해상도/블러 특성 차이)를
+    // 원천 방어하기 위해, DB 빌드 시에도 동일하게 64x64 규격으로 Lanczos3 축소 정규화하여 추출합니다.
+    let img_64 = img.resize_exact(64, 64, image::imageops::FilterType::Lanczos3);
+    let rgba = img_64.to_rgba8();
     let mut bgra = rgba.into_raw();
     for chunk in bgra.chunks_exact_mut(4) {
         chunk.swap(0, 2); // Swap Red and Blue to get BGRA
     }
 
-    // 3. Compute Features via overmax_cv (guarantees identical logic to overlay runtime)
-    let (orig_phash, orig_dhash, orig_ahash, hog) =
-        overmax_cv::compute_image_features(&bgra, width, height, 4)
-            .map_err(|e| format!("{:?}", e))?;
+    // 3. Compute Hashes via overmax_cv
+    let (orig_phash, orig_dhash, orig_ahash) =
+        overmax_cv::compute_image_hashes(&bgra, 64, 64, 4).map_err(|e| format!("{:?}", e))?;
+
+    // 4. Compute Grid Histogram (4x4 RGB, 동일한 64x64 해상도의 정규화 공간에서 추출)
+    let grid_hist = overmax_cv::compute_grid_histogram(&bgra, 64, 64, 4);
+
+    // 5. Compute HOG Feature (구버전 클라이언트 및 외부 파이프라인과의 하위 호환성을 위해 1764차원 HOG 계산)
+    let hog = overmax_cv::compute_image_hog(&bgra, 64, 64, 4).map_err(|e| format!("{:?}", e))?;
 
     Ok(ProcessResult {
         orig_phash,
         orig_dhash,
         orig_ahash,
         hog,
+        grid_hist,
     })
 }
 
