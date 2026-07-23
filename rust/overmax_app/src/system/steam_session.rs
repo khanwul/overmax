@@ -61,7 +61,13 @@ pub fn most_recent_steam_id() -> Option<String> {
         VdfVal::Obj(m) => m,
         _ => return None,
     };
+
+    let mut most_recent_id = None;
+    let mut auto_login_id = None;
+    let mut max_timestamp: u64 = 0;
+    let mut max_timestamp_id = None;
     let mut first_id = None;
+
     for (steam_id, user_data) in users {
         if first_id.is_none() {
             first_id = Some(steam_id.clone());
@@ -70,13 +76,38 @@ pub fn most_recent_steam_id() -> Option<String> {
             VdfVal::Obj(m) => m,
             _ => continue,
         };
+
         if let Some(VdfVal::Str(s)) = attrs.get("mostrecent") {
             if s == "1" {
-                return Some(steam_id.clone());
+                most_recent_id = Some(steam_id.clone());
+            }
+        }
+
+        if let Some(VdfVal::Str(s)) = attrs.get("autologin") {
+            if s == "1" {
+                auto_login_id = Some(steam_id.clone());
+            }
+        }
+
+        if let Some(VdfVal::Str(s)) = attrs.get("timestamp") {
+            if let Ok(ts) = s.parse::<u64>() {
+                if ts >= max_timestamp {
+                    max_timestamp = ts;
+                    max_timestamp_id = Some(steam_id.clone());
+                }
             }
         }
     }
-    first_id
+
+    if let Some(id) = most_recent_id {
+        Some(id)
+    } else if let Some(id) = auto_login_id {
+        Some(id)
+    } else if max_timestamp > 0 {
+        max_timestamp_id
+    } else {
+        first_id
+    }
 }
 
 fn read_loginusers_vdf() -> Option<String> {
