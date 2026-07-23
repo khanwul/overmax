@@ -101,6 +101,7 @@ pub fn run_native_app() -> eframe::Result<()> {
     )
 }
 
+#[derive(Clone)]
 pub struct SharedSettings {
     pub defaults: Arc<Value>,
     pub base: Arc<Mutex<Value>>,
@@ -115,6 +116,46 @@ impl SharedSettings {
             Err(_) => serde_json::Value::Object(serde_json::Map::new()),
         };
         serde_json::from_value(val).unwrap_or_default()
+    }
+
+    pub fn update_sync_filter(
+        &self,
+        root: &std::path::Path,
+        filter: &overmax_data::SyncFilterSettings,
+    ) {
+        let base_g = match self.base.lock() {
+            Ok(g) => g.clone(),
+            Err(e) => e.into_inner().clone(),
+        };
+        let mut merged_g = match self.merged.lock() {
+            Ok(g) => g.clone(),
+            Err(e) => e.into_inner().clone(),
+        };
+        let mut draft_g = match self.draft.lock() {
+            Ok(g) => g.clone(),
+            Err(e) => e.into_inner().clone(),
+        };
+
+        if let Ok(filter_val) = serde_json::to_value(filter) {
+            if let Value::Object(ref mut map) = draft_g {
+                map.insert("sync_filter".to_string(), filter_val);
+            }
+            if let Ok(mut g) = self.draft.lock() {
+                *g = draft_g.clone();
+            }
+
+            let root_buf = root.to_path_buf();
+            let defaults = self.defaults.clone();
+            std::thread::spawn(move || {
+                let _ = crate::ui::settings_ui::save_settings_to_disk(
+                    &root_buf,
+                    &defaults,
+                    &base_g,
+                    &mut draft_g,
+                    &mut merged_g,
+                );
+            });
+        }
     }
 }
 
@@ -851,6 +892,8 @@ impl NativeApp {
             None => (None, None),
         };
 
+        let pattern_level = song.get_pattern(mode, diff).and_then(|p| p.level);
+
         let candidate = overmax_data::SyncCandidate {
             song_id,
             song_name: song.name.clone(),
@@ -858,6 +901,7 @@ impl NativeApp {
             dlc: song.dlc_code.to_string(),
             button_mode: mode.clone(),
             difficulty: diff.clone(),
+            pattern_level,
             overmax_rate: overmax_rate as f64,
             overmax_mc,
             varchive_rate: v_rate.map(|r| r as f64),

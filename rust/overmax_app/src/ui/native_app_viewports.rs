@@ -182,9 +182,14 @@ impl NativeApp {
         let upload_tx = self.sync_channels.upload_req_tx.clone();
         let delete_tx = self.sync_channels.delete_req_tx.clone();
         let sync_state = self.sync_state.clone();
+        let root = self.root.clone();
+        let settings = self.settings.clone();
+        let app_settings = settings.get_merged();
+        let filter = app_settings.sync_filter();
+
         ctx.show_viewport_deferred(
             native_helpers::vp_sync(),
-            Self::auxiliary_viewport("V-Archive 동기화", [520.0, 560.0]),
+            Self::auxiliary_viewport("V-Archive 동기화", [560.0, 720.0]),
             move |ctx, class| {
                 ctx.set_pixels_per_point(1.0);
                 #[cfg(debug_assertions)]
@@ -207,6 +212,7 @@ impl NativeApp {
                         status: &status_s,
                         candidates: &list,
                         steam_users: &users,
+                        initial_filter: &filter,
                         on_scan: || {
                             scan_pending.store(true, Ordering::Relaxed);
                         },
@@ -215,6 +221,9 @@ impl NativeApp {
                         },
                         on_delete: |key| {
                             let _ = delete_tx.send(key);
+                        },
+                        on_filter_change: |new_filter| {
+                            settings.update_sync_filter(&root, &new_filter);
                         },
                     },
                 );

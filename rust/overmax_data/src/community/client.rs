@@ -113,6 +113,26 @@ pub struct Song {
     pub patterns: [[Option<PatternInfo>; 4]; 4],
 }
 
+impl Song {
+    pub fn get_pattern(&self, mode: &str, diff: &str) -> Option<&PatternInfo> {
+        let m_idx = match mode {
+            "4B" => 0,
+            "5B" => 1,
+            "6B" => 2,
+            "8B" => 3,
+            _ => return None,
+        };
+        let d_idx = match diff {
+            "NM" => 0,
+            "HD" => 1,
+            "MX" => 2,
+            "SC" => 3,
+            _ => return None,
+        };
+        self.patterns[m_idx][d_idx].as_ref()
+    }
+}
+
 pub struct VArchiveDB {
     pub songs: Vec<Song>,
     pub dlcs: Vec<Dlc>,

@@ -154,6 +154,21 @@ pub fn normalize_settings(settings: &mut Value) {
             }
         }
     }
+
+    if let Some(Value::Object(sf)) = map.get_mut("sync_filter") {
+        if let Some(min_idx) = sf.get("min_level_idx").and_then(|v| v.as_u64()) {
+            sf.insert("min_level_idx".to_string(), json!(min_idx.min(29)));
+        }
+        if let Some(max_idx) = sf.get("max_level_idx").and_then(|v| v.as_u64()) {
+            sf.insert("max_level_idx".to_string(), json!(max_idx.min(29)));
+        }
+        if let Some(min_r) = sf.get("min_rate").and_then(|v| v.as_f64()) {
+            sf.insert("min_rate".to_string(), json!(min_r.clamp(0.0, 100.0)));
+        }
+        if let Some(max_r) = sf.get("max_rate").and_then(|v| v.as_f64()) {
+            sf.insert("max_rate".to_string(), json!(max_r.clamp(0.0, 100.0)));
+        }
+    }
 }
 
 pub fn diff_settings(base: &Value, current: &Value) -> Value {
@@ -595,6 +610,81 @@ impl Default for VArchiveSettings {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SyncFilterSettings {
+    #[serde(default)]
+    pub open: bool,
+
+    #[serde(default = "default_true")]
+    pub mode_4b: bool,
+    #[serde(default = "default_true")]
+    pub mode_5b: bool,
+    #[serde(default = "default_true")]
+    pub mode_6b: bool,
+    #[serde(default = "default_true")]
+    pub mode_8b: bool,
+
+    #[serde(default = "default_true")]
+    pub diff_nm: bool,
+    #[serde(default = "default_true")]
+    pub diff_hd: bool,
+    #[serde(default = "default_true")]
+    pub diff_mx: bool,
+    #[serde(default = "default_true")]
+    pub diff_sc: bool,
+
+    #[serde(default = "default_min_level_idx")]
+    pub min_level_idx: usize,
+    #[serde(default = "default_max_level_idx")]
+    pub max_level_idx: usize,
+
+    #[serde(default = "default_min_rate")]
+    pub min_rate: f64,
+    #[serde(default = "default_max_rate")]
+    pub max_rate: f64,
+
+    #[serde(default)]
+    pub require_mc_not_on_varchive: bool,
+
+    #[serde(default)]
+    pub exclude_unuploaded: bool,
+}
+
+fn default_min_level_idx() -> usize {
+    0
+}
+fn default_max_level_idx() -> usize {
+    29
+}
+fn default_min_rate() -> f64 {
+    0.0
+}
+fn default_max_rate() -> f64 {
+    100.0
+}
+
+impl Default for SyncFilterSettings {
+    fn default() -> Self {
+        Self {
+            open: false,
+            mode_4b: true,
+            mode_5b: true,
+            mode_6b: true,
+            mode_8b: true,
+            diff_nm: true,
+            diff_hd: true,
+            diff_mx: true,
+            diff_sc: true,
+            min_level_idx: 0,
+            max_level_idx: 29,
+            min_rate: 0.0,
+            max_rate: 100.0,
+            require_mc_not_on_varchive: false,
+            exclude_unuploaded: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
 pub struct Settings {
     #[serde(default)]
@@ -611,6 +701,8 @@ pub struct Settings {
     pub app_update: Option<AppUpdateSettings>,
     #[serde(default)]
     pub varchive: Option<VArchiveSettings>,
+    #[serde(default)]
+    pub sync_filter: Option<SyncFilterSettings>,
 }
 
 impl Settings {
@@ -634,5 +726,8 @@ impl Settings {
     }
     pub fn varchive(&self) -> VArchiveSettings {
         self.varchive.clone().unwrap_or_default()
+    }
+    pub fn sync_filter(&self) -> SyncFilterSettings {
+        self.sync_filter.clone().unwrap_or_default()
     }
 }

@@ -12,12 +12,82 @@ pub struct SyncCandidate {
     pub dlc: String,
     pub button_mode: String,
     pub difficulty: String,
+    pub pattern_level: Option<u32>,
     pub overmax_rate: f64,
     pub overmax_mc: bool,
     pub varchive_rate: Option<f64>,
     pub varchive_mc: Option<bool>,
     pub upload_status: String,
     pub upload_message: String,
+}
+
+pub const LEVEL_LABELS: [&str; 30] = [
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "SC1", "SC2",
+    "SC3", "SC4", "SC5", "SC6", "SC7", "SC8", "SC9", "SC10", "SC11", "SC12", "SC13", "SC14",
+    "SC15",
+];
+
+pub fn pattern_level_index(difficulty: &str, level: Option<u32>) -> Option<usize> {
+    let lvl = level?;
+    if lvl == 0 || lvl > 15 {
+        return None;
+    }
+    if difficulty == "SC" {
+        Some(15 + (lvl as usize - 1))
+    } else {
+        Some(lvl as usize - 1)
+    }
+}
+
+pub fn matches_filter(
+    c: &SyncCandidate,
+    filter: &crate::config::settings::SyncFilterSettings,
+) -> bool {
+    let mode_ok = match c.button_mode.as_str() {
+        "4B" => filter.mode_4b,
+        "5B" => filter.mode_5b,
+        "6B" => filter.mode_6b,
+        "8B" => filter.mode_8b,
+        _ => true,
+    };
+    if !mode_ok {
+        return false;
+    }
+
+    let diff_ok = match c.difficulty.as_str() {
+        "NM" => filter.diff_nm,
+        "HD" => filter.diff_hd,
+        "MX" => filter.diff_mx,
+        "SC" => filter.diff_sc,
+        _ => true,
+    };
+    if !diff_ok {
+        return false;
+    }
+
+    if let Some(lvl_idx) = pattern_level_index(&c.difficulty, c.pattern_level) {
+        if lvl_idx < filter.min_level_idx || lvl_idx > filter.max_level_idx {
+            return false;
+        }
+    }
+
+    if c.overmax_rate < filter.min_rate || c.overmax_rate > filter.max_rate {
+        return false;
+    }
+
+    if filter.require_mc_not_on_varchive {
+        if !c.overmax_mc || c.varchive_mc == Some(true) {
+            return false;
+        }
+    }
+
+    if filter.exclude_unuploaded {
+        if c.varchive_rate.is_none() {
+            return false;
+        }
+    }
+
+    true
 }
 
 impl SyncCandidate {
@@ -83,13 +153,16 @@ pub fn build_candidates(
     let mut candidates = Vec::with_capacity(raw_rows.len());
 
     for row in raw_rows {
-        let (song_name, composer, dlc) = match varchive_db.search_by_id(row.song_id) {
+        let (song_name, composer, dlc, pattern_level) = match varchive_db.search_by_id(row.song_id)
+        {
             Some(s) => (
                 s.name.clone(),
                 s.composer.to_string(),
                 s.dlc_code.to_string(),
+                s.get_pattern(&row.button_mode, &row.difficulty)
+                    .and_then(|p| p.level),
             ),
-            None => (row.song_id.to_string(), String::new(), String::new()),
+            None => (row.song_id.to_string(), String::new(), String::new(), None),
         };
 
         candidates.push(SyncCandidate {
@@ -99,6 +172,7 @@ pub fn build_candidates(
             dlc,
             button_mode: row.button_mode,
             difficulty: row.difficulty,
+            pattern_level,
             overmax_rate: row.local_rate,
             overmax_mc: row.local_mc,
             varchive_rate: row.varchive_rate,
@@ -157,5 +231,82 @@ mod tests {
         assert!(!ids.contains(&1));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_sync_filter_matching() {
+        use crate::config::settings::SyncFilterSettings;
+
+        let cand1 = SyncCandidate {
+            song_id: 1,
+            song_name: "Test 1".to_string(),
+            composer: "Comp".to_string(),
+            dlc: "R".to_string(),
+            button_mode: "4B".to_string(),
+            difficulty: "SC".to_string(),
+            pattern_level: Some(5), // SC5 -> level index 19
+            overmax_rate: 99.5,
+            overmax_mc: true,
+            varchive_rate: Some(98.0),
+            varchive_mc: Some(false), // Local MC true, V-Archive MC false
+            upload_status: String::new(),
+            upload_message: String::new(),
+        };
+
+        let cand2 = SyncCandidate {
+            song_id: 2,
+            song_name: "Test 2".to_string(),
+            composer: "Comp".to_string(),
+            dlc: "R".to_string(),
+            button_mode: "8B".to_string(),
+            difficulty: "MX".to_string(),
+            pattern_level: Some(14), // MX 14 -> level index 13
+            overmax_rate: 97.0,
+            overmax_mc: false,
+            varchive_rate: None, // Unregistered
+            varchive_mc: None,
+            upload_status: String::new(),
+            upload_message: String::new(),
+        };
+
+        let mut filter = SyncFilterSettings::default();
+        assert!(matches_filter(&cand1, &filter));
+        assert!(matches_filter(&cand2, &filter));
+
+        // Test Mode Filter
+        filter.mode_4b = false;
+        assert!(!matches_filter(&cand1, &filter));
+        assert!(matches_filter(&cand2, &filter));
+        filter.mode_4b = true;
+
+        // Test Diff Filter
+        filter.diff_mx = false;
+        assert!(matches_filter(&cand1, &filter));
+        assert!(!matches_filter(&cand2, &filter));
+        filter.diff_mx = true;
+
+        // Test Level Filter
+        filter.min_level_idx = 15; // SC1 ~ SC15
+        filter.max_level_idx = 29;
+        assert!(matches_filter(&cand1, &filter)); // SC5 is index 19
+        assert!(!matches_filter(&cand2, &filter)); // MX14 is index 13
+        filter = SyncFilterSettings::default();
+
+        // Test Rate Filter
+        filter.min_rate = 98.0;
+        assert!(matches_filter(&cand1, &filter));
+        assert!(!matches_filter(&cand2, &filter));
+        filter = SyncFilterSettings::default();
+
+        // Test MC filter
+        filter.require_mc_not_on_varchive = true;
+        assert!(matches_filter(&cand1, &filter)); // cand1 has local MC true, varchive MC false
+        assert!(!matches_filter(&cand2, &filter)); // cand2 local MC is false
+        filter = SyncFilterSettings::default();
+
+        // Test Exclude Unuploaded filter
+        filter.exclude_unuploaded = true;
+        assert!(matches_filter(&cand1, &filter)); // cand1 varchive_rate is Some(98.0)
+        assert!(!matches_filter(&cand2, &filter)); // cand2 varchive_rate is None
     }
 }
