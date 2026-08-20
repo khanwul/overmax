@@ -476,7 +476,13 @@ impl PlayStateDetector {
             };
 
             let mut verified_event = None;
-            if stable_ctx.rate >= MIN_VALID_RATE {
+            let should_emit = if is_result {
+                stable_ctx.rate >= MIN_VALID_RATE
+            } else {
+                stable_ctx.rate >= MIN_VALID_RATE || stable_ctx.rate == 0.0
+            };
+
+            if should_emit {
                 let event_key = (
                     (stable_ctx.song_id, stable_ctx.mode, stable_ctx.diff),
                     is_result,
