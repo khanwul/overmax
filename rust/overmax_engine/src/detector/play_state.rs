@@ -154,7 +154,7 @@ pub struct PlayStateDetector {
     rate_cache: RoiCache<RecordKey, RateInputChecksums, PatternRecord>,
     result_mode_diff: ResultModeDiffLatch,
     result_rate_window: VecDeque<f32>,
-    last_emitted_event: Option<(RecordKey, bool)>,
+    last_emitted_event: Option<VerifiedPlayEvent>,
 }
 
 impl PlayStateDetector {
@@ -483,20 +483,41 @@ impl PlayStateDetector {
             };
 
             if should_emit {
-                let event_key = (
-                    (stable_ctx.song_id, stable_ctx.mode, stable_ctx.diff),
-                    is_result,
-                );
-                if self.last_emitted_event != Some(event_key) {
-                    self.last_emitted_event = Some(event_key);
-                    verified_event = Some(VerifiedPlayEvent {
-                        song_id: stable_ctx.song_id,
-                        mode: stable_ctx.mode,
-                        diff: stable_ctx.diff,
-                        rate: stable_ctx.rate,
-                        is_max_combo: stable_ctx.is_max_combo,
-                        is_result_screen: is_result,
-                    });
+                let current_event = VerifiedPlayEvent {
+                    song_id: stable_ctx.song_id,
+                    mode: stable_ctx.mode,
+                    diff: stable_ctx.diff,
+                    rate: stable_ctx.rate,
+                    is_max_combo: stable_ctx.is_max_combo,
+                    is_result_screen: is_result,
+                };
+
+                let should_fire = match &self.last_emitted_event {
+                    None => true,
+                    Some(last) => {
+                        let is_same_pattern = last.song_id == current_event.song_id
+                            && last.mode == current_event.mode
+                            && last.diff == current_event.diff
+                            && last.is_result_screen == current_event.is_result_screen;
+
+                        if !is_same_pattern {
+                            true
+                        } else if is_result {
+                            // 결과창에서는 기록 개선(MAX COMBO 추가 달성 또는 더 높은 Rate) 시 재방출 허용
+                            let mc_improved = !last.is_max_combo && current_event.is_max_combo;
+                            let rate_improved = current_event.rate > last.rate + 0.001;
+                            mc_improved || rate_improved
+                        } else {
+                            // 선곡창에서는 미플레이 교정이나 점수/맥스콤보 변경 시 재방출 허용
+                            (last.rate != current_event.rate)
+                                || (last.is_max_combo != current_event.is_max_combo)
+                        }
+                    }
+                };
+
+                if should_fire {
+                    self.last_emitted_event = Some(current_event);
+                    verified_event = Some(current_event);
                 }
             }
 
@@ -869,6 +890,78 @@ mod tests {
         assert_eq!(new_event.mode, super::Mode::B6);
         assert_eq!(new_event.diff, super::Difficulty::HD);
         assert_eq!(new_event.rate, 98.0);
+    }
+
+    #[test]
+    fn test_verified_play_event_re_emits_when_max_combo_or_rate_improves() {
+        let mut detector = PlayStateDetector::new(1);
+        detector.result_mode_diff.mode.update(Some(super::Mode::B4));
+        detector
+            .result_mode_diff
+            .diff
+            .update(Some(super::Difficulty::NM));
+
+        let frame = blank_frame();
+        let mut rois = RoiManager::new(1920, 1080);
+        rois.set_scene(SceneType::ResultFreestyle);
+
+        // 1. 점수 롤링 중 95.0% 감지 (MC=false)
+        detector.rate_cache.set(
+            Some(PatternRecord::Played {
+                rate: 95.0,
+                is_max_combo: false,
+            }),
+            None,
+            0.0,
+        );
+        let (state1, event1) = detector.detect(&frame, &rois, Some(10), 1.0);
+        assert!(state1.is_stable);
+        assert!(event1.is_some());
+        let e1 = event1.unwrap();
+        assert_eq!(e1.rate, 95.0);
+        assert!(!e1.is_max_combo);
+
+        // 2. 동일 상태 유지 -> 이벤트 미방출
+        let (_, event2) = detector.detect(&frame, &rois, Some(10), 1.1);
+        assert!(event2.is_none());
+
+        // 3. 점수 연출 완료로 99.5% 도달 (rate 향상) -> 이벤트 재방출!
+        detector.rate_cache.set(
+            Some(PatternRecord::Played {
+                rate: 99.5,
+                is_max_combo: false,
+            }),
+            None,
+            0.0,
+        );
+        let (_, event3) = detector.detect(&frame, &rois, Some(10), 1.2);
+        assert!(event3.is_some());
+        let e3 = event3.unwrap();
+        assert_eq!(e3.rate, 99.5);
+        assert!(!e3.is_max_combo);
+
+        // 4. MAX COMBO 뱃지 연출 등장 (MC: false -> true 개선) -> 이벤트 재방출!
+        let stable_mc = Some(overmax_core::PlayContext {
+            song_id: 10,
+            mode: super::Mode::B4,
+            diff: super::Difficulty::NM,
+            rate: 99.5,
+            is_max_combo: true,
+        });
+        let (_, event4) = detector.build_session_state_and_event(
+            SceneType::ResultFreestyle,
+            stable_mc.clone(),
+            stable_mc.clone(),
+        );
+        assert!(event4.is_some());
+        let e4 = event4.unwrap();
+        assert_eq!(e4.rate, 99.5);
+        assert!(e4.is_max_combo);
+
+        // 5. MAX COMBO 상태 유지 -> 이벤트 미방출
+        let (_, event5) =
+            detector.build_session_state_and_event(SceneType::ResultFreestyle, None, stable_mc);
+        assert!(event5.is_none());
     }
 
     #[test]
