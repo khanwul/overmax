@@ -113,24 +113,37 @@ struct RawPlayState {
     context: Option<PlayContext>,
 }
 
-/// 결과창 mode·diff 인식 결과 캐시.
-struct ModeDiffCache {
-    result_mode: Changed<Option<Mode>>,
-    result_diff: Changed<Option<Difficulty>>,
+/// 결과창 애니메이션/노이즈 보정용 mode·diff 래치 (Sample-and-Hold Latch).
+#[derive(Default)]
+struct ResultModeDiffLatch {
+    mode: Changed<Option<Mode>>,
+    diff: Changed<Option<Difficulty>>,
 }
 
-impl ModeDiffCache {
+impl ResultModeDiffLatch {
     fn new() -> Self {
-        Self {
-            result_mode: Changed::new(None),
-            result_diff: Changed::new(None),
+        Self::default()
+    }
+
+    /// 결과창 템플릿 매칭 결과가 Some일 때 래치 업데이트 (자가 보정)
+    fn update_if_some(&mut self, detected_mode: Option<Mode>, detected_diff: Option<Difficulty>) {
+        if detected_mode.is_some() {
+            self.mode.update(detected_mode);
+        }
+        if detected_diff.is_some() {
+            self.diff.update(detected_diff);
         }
     }
 
-    /// 결과창 -> 선곡창 복귀 시 결과창 인식값을 초기화한다.
-    fn clear_result_cache(&mut self) {
-        self.result_mode.update(None);
-        self.result_diff.update(None);
+    /// 현재 래치된 모드/난이도 반환
+    fn get(&self) -> (Option<Mode>, Option<Difficulty>) {
+        (*self.mode.get(), *self.diff.get())
+    }
+
+    /// 결과창 -> 선곡창 복귀 시 래치 해제
+    fn clear(&mut self) {
+        self.mode.update(None);
+        self.diff.update(None);
     }
 }
 
@@ -140,7 +153,7 @@ pub struct PlayStateDetector {
     last_stable_state: Option<GameSessionState>,
     mode_diff_cache: RoiCache<(), ModeDiffChecksums, (Option<Mode>, Option<Difficulty>, bool)>,
     rate_cache: RoiCache<RecordKey, RateInputChecksums, PatternRecord>,
-    cache: ModeDiffCache,
+    result_mode_diff: ResultModeDiffLatch,
     last_song_id: Changed<Option<i32>>,
     result_rate_window: VecDeque<f32>,
     event_emitted_for_session: bool,
@@ -297,7 +310,7 @@ impl PlayStateDetector {
             last_stable_state: None,
             mode_diff_cache: RoiCache::new(0.0),
             rate_cache: RoiCache::new(RATE_DETECTION_INTERVAL_SEC),
-            cache: ModeDiffCache::new(),
+            result_mode_diff: ResultModeDiffLatch::new(),
             last_song_id: Changed::new(None),
             result_rate_window: VecDeque::new(),
             event_emitted_for_session: false,
@@ -309,14 +322,14 @@ impl PlayStateDetector {
         self.last_stable_state = None;
         self.mode_diff_cache.clear();
         self.rate_cache.clear();
-        // 결과창 진입 시 복구용(result_mode/diff) 캐시는 reset 시에도 보존합니다.
+        // 결과창 진입 시 복구용 래치(result_mode_diff)는 reset 시에도 보존합니다.
         self.last_song_id.update(None);
         self.result_rate_window.clear();
         self.event_emitted_for_session = false;
     }
 
     pub fn clear_detected_cache(&mut self) {
-        self.cache.clear_result_cache();
+        self.result_mode_diff.clear();
         self.event_emitted_for_session = false;
         self.rate_cache.clear();
         self.result_rate_window.clear();
@@ -324,13 +337,13 @@ impl PlayStateDetector {
 
     #[cfg(test)]
     pub(crate) fn seed_detected_cache_for_test(&mut self) {
-        self.cache.result_mode.update(Some(Mode::B4));
-        self.cache.result_diff.update(Some(Difficulty::NM));
+        self.result_mode_diff.mode.update(Some(Mode::B4));
+        self.result_mode_diff.diff.update(Some(Difficulty::NM));
     }
 
     #[cfg(test)]
     pub(crate) fn detected_cache_is_empty_for_test(&self) -> bool {
-        self.cache.result_mode.get().is_none() && self.cache.result_diff.get().is_none()
+        self.result_mode_diff.mode.get().is_none() && self.result_mode_diff.diff.get().is_none()
     }
 
     fn resolve_result_mode_diff(
@@ -339,41 +352,28 @@ impl PlayStateDetector {
         frame: &CapturedFrame,
         rois: &RoiManager,
     ) -> (Option<Mode>, Option<Difficulty>) {
-        let mut detected_mode = None;
-        let mut detected_diff = None;
-
-        // 1. 결과창 실시간 템플릿 매칭 우선 시도
-        match scene {
-            overmax_core::SceneType::ResultFreestyle => {
-                detected_mode =
-                    rois.and_then_roi(frame, "mode_digit", templates::detect_freestyle_mode);
-                detected_diff =
-                    rois.and_then_roi(frame, "diff_panel", templates::detect_result_difficulty);
-            }
-            overmax_core::SceneType::ResultOpen3 | overmax_core::SceneType::ResultOpen2 => {
-                detected_mode = detect_button_mode_from_roi(frame, rois, "openmatch_mode");
-                detected_diff = rois.and_then_roi(
+        let (detected_mode, detected_diff) = match scene {
+            overmax_core::SceneType::ResultFreestyle => (
+                rois.and_then_roi(frame, "mode_digit", templates::detect_freestyle_mode),
+                rois.and_then_roi(frame, "diff_panel", templates::detect_result_difficulty),
+            ),
+            overmax_core::SceneType::ResultOpen3 | overmax_core::SceneType::ResultOpen2 => (
+                detect_button_mode_from_roi(frame, rois, "openmatch_mode"),
+                rois.and_then_roi(
                     frame,
                     "openmatch_diff",
                     templates::detect_openmatch_result_difficulty,
-                );
-            }
-            _ => {}
-        }
+                ),
+            ),
+            _ => (None, None),
+        };
 
-        // 2. 결과창 템플릿 매칭 성공 시, 결과창 캐시를 업데이트 (자가 보정 가능)
-        if detected_mode.is_some() {
-            self.cache.result_mode.update(detected_mode);
-        }
-        if detected_diff.is_some() {
-            self.cache.result_diff.update(detected_diff);
-        }
+        // 결과창 실시간 템플릿 매칭 성공 시 래치 업데이트 (자가 보정)
+        self.result_mode_diff
+            .update_if_some(detected_mode, detected_diff);
 
-        // 3. 최종 반환값 결정: 결과창 캐시가 존재하면 우선 사용
-        let final_mode = *self.cache.result_mode.get();
-        let final_diff = *self.cache.result_diff.get();
-
-        (final_mode, final_diff)
+        // 래치된 최종값 반환
+        self.result_mode_diff.get()
     }
 
     pub fn detect(
@@ -397,8 +397,7 @@ impl PlayStateDetector {
             mode = m;
             diff = d;
         } else {
-            self.cache.result_mode.update(None);
-            self.cache.result_diff.update(None);
+            self.result_mode_diff.clear();
             self.event_emitted_for_session = false;
 
             let (m, d, conf) = self.process_mode_diff_detection(frame, rois, now);
@@ -681,7 +680,7 @@ mod tests {
     #[test]
     fn result_mode_diff_remains_none_without_match() {
         let mut detector = PlayStateDetector::new(3);
-        detector.cache.clear_result_cache();
+        detector.result_mode_diff.clear();
 
         let frame = blank_frame();
         let mut rois = RoiManager::new(1920, 1080);
@@ -748,10 +747,10 @@ mod tests {
     #[test]
     fn test_verified_play_event_emits_once_per_result_session() {
         let mut detector = PlayStateDetector::new(3);
-        detector.cache.result_mode.update(Some(super::Mode::B4));
+        detector.result_mode_diff.mode.update(Some(super::Mode::B4));
         detector
-            .cache
-            .result_diff
+            .result_mode_diff
+            .diff
             .update(Some(super::Difficulty::NM));
         detector.rate_cache.set(
             Some(PatternRecord::Played {
@@ -809,10 +808,10 @@ mod tests {
 
         // 다음 곡 플레이 후 새 결과창 진입
         rois.set_scene(SceneType::ResultFreestyle);
-        detector.cache.result_mode.update(Some(super::Mode::B6));
+        detector.result_mode_diff.mode.update(Some(super::Mode::B6));
         detector
-            .cache
-            .result_diff
+            .result_mode_diff
+            .diff
             .update(Some(super::Difficulty::HD));
         detector.rate_cache.set(
             Some(PatternRecord::Played {
