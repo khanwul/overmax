@@ -56,6 +56,7 @@ OS별 구동 가이드 및 외부 연동 프로토콜 규격을 보관합니다.
   * [`2026-06-05-overlay-fullscreen-technical-analysis.md`](plans/2026-06-05-overlay-fullscreen-technical-analysis.md): 전체화면 오버레이 기술 분석.
   * [`2026-05-24-cpu-optimization-message-pump.md`](plans/2026-05-24-cpu-optimization-message-pump.md) / [`review.md`](plans/2026-05-24-cpu-optimization-message-pump-review.md): 메시지 펌프 CPU 최적화 분석.
 * **데이터 & 아키텍처 안정성**:
+  * [`2026-08-20-data-first-roi-cache-plan.md`](plans/2026-08-20-data-first-roi-cache-plan.md): Data-First RoiCache 및 ResultModeDiffLatch 캡슐화 계획.
   * [`2026-08-18-architecture-robustness-plan.md`](plans/2026-08-18-architecture-robustness-plan.md): SQLite 동시성 가드, 설정 I/O 큐, 캐시 전파 및 Repaint 스케줄링 계획.
   * [`2026-07-16-varchive-db-cache-design.md`](plans/2026-07-16-varchive-db-cache-design.md): V-Archive SQLite DB 캐시 설계.
   * [`2026-07-10-recommend-provider-protocol-design.md`](plans/2026-07-10-recommend-provider-protocol-design.md): 추천 제공자 인터페이스 및 프로토콜 설계.
@@ -71,6 +72,7 @@ OS별 구동 가이드 및 외부 연동 프로토콜 규격을 보관합니다.
 
 ### 5. Release Notes (`docs/releasenotes/`)
 버전별 배포 내역입니다. (작성 규칙은 [`AGENTS.md`](../AGENTS.md)의 Release Protocol 준수)
+* [`RELEASE_NOTES_v0.4.0.md`](releasenotes/RELEASE_NOTES_v0.4.0.md): (준비 중) VerifiedPlayEvent 이벤트 아키텍처, 미플레이 곡 잔류 방지 및 유령 기록 자동 정화, 템플릿 매칭 Zero-Allocation.
 * [`RELEASE_NOTES_v0.3.3.md`](releasenotes/RELEASE_NOTES_v0.3.3.md): 다중 모니터 DPI 인식, 1-Pass 매칭, Centroid 사전 게이트, 영어 UI 지원.
 * [`RELEASE_NOTES_v0.3.2.md`](releasenotes/RELEASE_NOTES_v0.3.2.md): 다국어 i18n 시스템 및 UI 설정 개선.
 * [`RELEASE_NOTES_v0.3.1.md`](releasenotes/RELEASE_NOTES_v0.3.1.md): V-Archive 증분 동기화, 동기화 필터, Favorite 마스킹, Linux 1차 포팅.
