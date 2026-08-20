@@ -154,7 +154,7 @@ pub struct PlayStateDetector {
     rate_cache: RoiCache<RecordKey, RateInputChecksums, PatternRecord>,
     result_mode_diff: ResultModeDiffLatch,
     result_rate_window: VecDeque<f32>,
-    event_emitted_for_session: bool,
+    last_emitted_event: Option<(RecordKey, bool)>,
 }
 
 impl PlayStateDetector {
@@ -309,7 +309,7 @@ impl PlayStateDetector {
             rate_cache: RoiCache::new(RATE_DETECTION_INTERVAL_SEC),
             result_mode_diff: ResultModeDiffLatch::new(),
             result_rate_window: VecDeque::new(),
-            event_emitted_for_session: false,
+            last_emitted_event: None,
         }
     }
 
@@ -319,12 +319,12 @@ impl PlayStateDetector {
         self.rate_cache.clear();
         // 결과창 진입 시 복구용 래치(result_mode_diff)는 reset 시에도 보존합니다.
         self.result_rate_window.clear();
-        self.event_emitted_for_session = false;
+        self.last_emitted_event = None;
     }
 
     pub fn clear_detected_cache(&mut self) {
         self.result_mode_diff.clear();
-        self.event_emitted_for_session = false;
+        self.last_emitted_event = None;
         self.rate_cache.clear();
         self.result_rate_window.clear();
     }
@@ -407,7 +407,6 @@ impl PlayStateDetector {
             (m, d, true, combo)
         } else {
             self.result_mode_diff.clear();
-            self.event_emitted_for_session = false;
             let (m, d, conf) = self.process_mode_diff_detection(frame, rois, now);
             let combo = detect_max_combo(frame, rois);
             (m, d, conf, combo)
@@ -468,6 +467,7 @@ impl PlayStateDetector {
         stable_context: Option<PlayContext>,
     ) -> (GameSessionState, Option<VerifiedPlayEvent>) {
         if let Some(stable_ctx) = stable_context {
+            let is_result = scene.is_result();
             let state = GameSessionState {
                 scene,
                 context: Some(stable_ctx.clone()),
@@ -476,19 +476,22 @@ impl PlayStateDetector {
             };
 
             let mut verified_event = None;
-            if scene.is_result()
-                && !self.event_emitted_for_session
-                && stable_ctx.rate >= MIN_VALID_RATE
-            {
-                self.event_emitted_for_session = true;
-                verified_event = Some(VerifiedPlayEvent {
-                    song_id: stable_ctx.song_id,
-                    mode: stable_ctx.mode,
-                    diff: stable_ctx.diff,
-                    rate: stable_ctx.rate,
-                    is_max_combo: stable_ctx.is_max_combo,
-                    is_result_screen: true,
-                });
+            if stable_ctx.rate >= MIN_VALID_RATE {
+                let event_key = (
+                    (stable_ctx.song_id, stable_ctx.mode, stable_ctx.diff),
+                    is_result,
+                );
+                if self.last_emitted_event != Some(event_key) {
+                    self.last_emitted_event = Some(event_key);
+                    verified_event = Some(VerifiedPlayEvent {
+                        song_id: stable_ctx.song_id,
+                        mode: stable_ctx.mode,
+                        diff: stable_ctx.diff,
+                        rate: stable_ctx.rate,
+                        is_max_combo: stable_ctx.is_max_combo,
+                        is_result_screen: is_result,
+                    });
+                }
             }
 
             (state, verified_event)
@@ -938,5 +941,84 @@ mod tests {
             "유효한 점수가 없는 새로운 입력 감지 시 캐시된 점수가 0.0으로 클리어되어야 함"
         );
         assert_eq!(detector.rate_cache.get(), Some(&PatternRecord::Unplayed));
+    }
+
+    #[test]
+    fn test_verified_play_event_emits_on_song_select_screen() {
+        let mut detector = PlayStateDetector::new(3);
+        let mut frame = blank_frame();
+        paint_rect(&mut frame, 80, 130, 85, 135, Bgr::from_rgb_hex(0x2D4F55)); // 4B
+        paint_rect(&mut frame, 98, 488, 208, 516, Bgr::from_rgb_hex(0xDCDCDC)); // NM
+        let mut rois = RoiManager::new(1920, 1080);
+        rois.set_scene(SceneType::Freestyle);
+
+        // 곡 1에 대해 99.63% 점수 주입
+        let checksums = PlayStateDetector::rate_input_checksums(&frame, &rois);
+        detector
+            .rate_cache
+            .sync_key(Some((100, super::Mode::B4, super::Difficulty::NM)));
+        detector.rate_cache.set(
+            Some(PatternRecord::Played {
+                rate: 99.63,
+                is_max_combo: true,
+            }),
+            checksums,
+            1.0,
+        );
+
+        // Frame 1, 2: 안정화 중 (히스토리 3개 필요)
+        let (_, e1) = detector.detect(&frame, &rois, Some(100), 1.0);
+        let (_, e2) = detector.detect(&frame, &rois, Some(100), 1.1);
+        assert!(e1.is_none());
+        assert!(e2.is_none());
+
+        // Frame 3: 3연속 일치로 안정화 완료 -> 선곡 화면 1회 이벤트 방출!
+        let (state3, e3) = detector.detect(&frame, &rois, Some(100), 1.2);
+        assert!(state3.is_stable);
+        assert!(
+            e3.is_some(),
+            "선곡 화면에서 첫 안정화 시 이벤트가 방출되어야 함"
+        );
+        let event = e3.unwrap();
+        assert_eq!(event.song_id, 100);
+        assert_eq!(event.mode, super::Mode::B4);
+        assert_eq!(event.diff, super::Difficulty::NM);
+        assert_eq!(event.rate, 99.63);
+        assert!(
+            !event.is_max_combo,
+            "빈 프레임에서는 맥스 콤보 뱃지가 없으므로 false"
+        );
+        assert!(
+            !event.is_result_screen,
+            "선곡 화면이므로 is_result_screen = false 여야 함 (무조건 Update 정책)"
+        );
+
+        // Frame 4: 동일 곡 선곡 화면 체류 -> 중복 방출 0회
+        let (_, e4) = detector.detect(&frame, &rois, Some(100), 1.3);
+        assert!(e4.is_none(), "동일 곡 체류 중에는 중복 방출되지 않아야 함");
+
+        // 곡 2로 전환 및 95.0% 주입
+        detector
+            .rate_cache
+            .sync_key(Some((200, super::Mode::B4, super::Difficulty::NM)));
+        detector.rate_cache.set(
+            Some(PatternRecord::Played {
+                rate: 95.0,
+                is_max_combo: false,
+            }),
+            checksums,
+            2.0,
+        );
+
+        let _ = detector.detect(&frame, &rois, Some(200), 2.0);
+        let _ = detector.detect(&frame, &rois, Some(200), 2.1);
+        let (state2_3, e2_3) = detector.detect(&frame, &rois, Some(200), 2.2);
+
+        assert!(state2_3.is_stable);
+        assert!(e2_3.is_some(), "새 곡 전환 시 새 이벤트가 방출되어야 함");
+        let event2 = e2_3.unwrap();
+        assert_eq!(event2.song_id, 200);
+        assert_eq!(event2.rate, 95.0);
+        assert!(!event2.is_result_screen);
     }
 }
