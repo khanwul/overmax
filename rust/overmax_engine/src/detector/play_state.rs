@@ -370,6 +370,7 @@ impl PlayStateDetector {
         self.result_mode_diff.get()
     }
 
+    /// [메인 진입점] 프레임 단위 감지 파이프라인
     pub fn detect(
         &mut self,
         frame: &CapturedFrame,
@@ -378,112 +379,130 @@ impl PlayStateDetector {
         now: f64,
     ) -> (GameSessionState, Option<VerifiedPlayEvent>) {
         let scene = rois.current_scene();
+
+        // 1. 현재 프레임의 플레이 컨텍스트 관측 (모드, 난이도, 점수)
+        let current_context = self.observe_current_context(frame, rois, song_id, scene, now);
+
+        // 2. 5프레임 연속 일치(Hysteresis) 이력 갱신 및 안정화 상태 판독
+        let stable_context = self.commit_history_and_get_stable(current_context.clone());
+
+        // 3. 최종 게임 세션 상태 및 결과창 1회 도메인 이벤트 생성
+        self.build_session_state_and_event(scene, current_context, stable_context)
+    }
+
+    fn observe_current_context(
+        &mut self,
+        frame: &CapturedFrame,
+        rois: &RoiManager,
+        song_id: Option<i32>,
+        scene: overmax_core::SceneType,
+        now: f64,
+    ) -> Option<PlayContext> {
         let is_result = scene.is_result();
 
-        let mode;
-        let diff;
-        let mut confident = true;
-        let is_max_combo;
-
-        if is_result {
-            is_max_combo = detect_max_combo_result(frame, rois);
+        // 1-1. 모드 / 난이도 / 콤보 판독
+        let (mode, diff, confident, is_max_combo) = if is_result {
             let (m, d) = self.resolve_result_mode_diff(scene, frame, rois);
-            mode = m;
-            diff = d;
+            let combo = detect_max_combo_result(frame, rois);
+            (m, d, true, combo)
         } else {
             self.result_mode_diff.clear();
             self.event_emitted_for_session = false;
-
             let (m, d, conf) = self.process_mode_diff_detection(frame, rois, now);
-            mode = m;
-            diff = d;
-            confident = conf;
-            is_max_combo = detect_max_combo(frame, rois);
-        }
-
-        let current_pattern = match (song_id, mode, diff) {
-            (Some(sid), Some(m), Some(d)) => Some((sid, m, d)),
-            _ => None,
+            let combo = detect_max_combo(frame, rois);
+            (m, d, conf, combo)
         };
 
+        let sid = song_id?;
+        let m = mode?;
+        let d = diff?;
+        if !confident {
+            return None;
+        }
+
+        let pattern_key = (sid, m, d);
         if !is_result {
-            self.rate_cache.sync_key(current_pattern);
+            self.rate_cache.sync_key(Some(pattern_key));
         }
 
         debug_println!(
             "    [detect] song_id={:?}, mode={:?}, diff={:?}, confident={}",
-            song_id,
-            mode,
-            diff,
+            Some(sid),
+            Some(m),
+            Some(d),
             confident
         );
-        let context = if let (Some(sid), Some(m), Some(d)) = (song_id, mode, diff) {
-            if confident {
-                let record = self.process_rate_detection(frame, rois, scene, is_result, now);
-                let rate = record.rate();
-                let rate_valid = !is_result || rate >= MIN_VALID_RATE;
 
-                Some(PlayContext {
-                    song_id: sid,
-                    mode: m,
-                    diff: d,
-                    rate: if rate_valid { rate } else { 0.0 },
-                    is_max_combo: if rate_valid && rate > 0.0 {
-                        is_max_combo
-                    } else {
-                        false
-                    },
-                })
+        // 1-2. 점수 / Rate 판독
+        let record = self.process_rate_detection(frame, rois, scene, is_result, now);
+        let rate = record.rate();
+        let rate_valid = !is_result || rate >= MIN_VALID_RATE;
+
+        Some(PlayContext {
+            song_id: sid,
+            mode: m,
+            diff: d,
+            rate: if rate_valid { rate } else { 0.0 },
+            is_max_combo: if rate_valid && rate > 0.0 {
+                is_max_combo
             } else {
-                None
-            }
-        } else {
-            None
-        };
+                false
+            },
+        })
+    }
 
-        let raw = RawPlayState {
-            context: context.clone(),
-        };
-        self.push_raw(raw);
+    fn commit_history_and_get_stable(
+        &mut self,
+        current_context: Option<PlayContext>,
+    ) -> Option<PlayContext> {
+        self.push_raw(RawPlayState {
+            context: current_context,
+        });
+        self.stable_raw().and_then(|s| s.context.clone())
+    }
 
-        let stable_context = self.stable_raw().map(|s| s.context.clone());
+    fn build_session_state_and_event(
+        &mut self,
+        scene: overmax_core::SceneType,
+        current_context: Option<PlayContext>,
+        stable_context: Option<PlayContext>,
+    ) -> (GameSessionState, Option<VerifiedPlayEvent>) {
         if let Some(stable_ctx) = stable_context {
             let state = GameSessionState {
                 scene,
-                context: stable_ctx.clone(),
+                context: Some(stable_ctx.clone()),
                 is_stable: true,
                 is_fullscreen: false, // will be overwritten/updated by detection worker
             };
 
             let mut verified_event = None;
-            if is_result && !self.event_emitted_for_session {
-                if let Some(ctx) = &stable_ctx {
-                    if ctx.rate >= MIN_VALID_RATE {
-                        self.event_emitted_for_session = true;
-                        verified_event = Some(VerifiedPlayEvent {
-                            song_id: ctx.song_id,
-                            mode: ctx.mode,
-                            diff: ctx.diff,
-                            rate: ctx.rate,
-                            is_max_combo: ctx.is_max_combo,
-                            is_result_screen: true,
-                        });
-                    }
-                }
+            if scene.is_result()
+                && !self.event_emitted_for_session
+                && stable_ctx.rate >= MIN_VALID_RATE
+            {
+                self.event_emitted_for_session = true;
+                verified_event = Some(VerifiedPlayEvent {
+                    song_id: stable_ctx.song_id,
+                    mode: stable_ctx.mode,
+                    diff: stable_ctx.diff,
+                    rate: stable_ctx.rate,
+                    is_max_combo: stable_ctx.is_max_combo,
+                    is_result_screen: true,
+                });
             }
 
-            return (state, verified_event);
+            (state, verified_event)
+        } else {
+            (
+                GameSessionState {
+                    scene,
+                    context: current_context,
+                    is_stable: false,
+                    is_fullscreen: false,
+                },
+                None,
+            )
         }
-
-        (
-            GameSessionState {
-                scene,
-                context,
-                is_stable: false,
-                is_fullscreen: false,
-            },
-            None,
-        )
     }
 
     fn push_raw(&mut self, raw: RawPlayState) {
@@ -534,23 +553,37 @@ pub fn detect_button_mode(frame: &CapturedFrame, rois: &RoiManager) -> Option<Mo
 }
 
 pub fn detect_difficulty(frame: &CapturedFrame, rois: &RoiManager) -> (Option<Difficulty>, bool) {
-    let mut brightnesses = Difficulty::ALL
-        .iter()
-        .filter_map(|&diff| {
-            let roi = rois.get_diff_panel_roi(diff)?;
-            let mean = region_mean_bgr(frame, roi);
-            Some((diff, mean.to_f64().average() as f32))
-        })
-        .collect::<Vec<_>>();
-    brightnesses.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let Some((best, max_bright)) = brightnesses.first().copied() else {
+    let mut max_bright = 0.0f32;
+    let mut second_bright = 0.0f32;
+    let mut best_diff = None;
+
+    for &diff in Difficulty::ALL.iter() {
+        let Some(roi) = rois.get_diff_panel_roi(diff) else {
+            continue;
+        };
+        let bright = region_mean_bgr(frame, roi).to_f64().average() as f32;
+
+        if bright > max_bright {
+            second_bright = max_bright;
+            max_bright = bright;
+            best_diff = Some(diff);
+        } else if bright > second_bright {
+            second_bright = bright;
+        }
+    }
+
+    let Some(best) = best_diff else {
         return (None, false);
     };
+
     if max_bright < DIFF_MIN_BRIGHTNESS {
         return (None, false);
     }
-    let second = brightnesses.get(1).map_or(0.0, |item| item.1);
-    (Some(best), max_bright - second >= DIFF_CONFIDENT_MARGIN)
+
+    (
+        Some(best),
+        max_bright - second_bright >= DIFF_CONFIDENT_MARGIN,
+    )
 }
 
 // 선곡창 Perfect Play (100.0%) 뱃지 대표 해시
