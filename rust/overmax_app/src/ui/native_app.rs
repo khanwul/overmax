@@ -890,7 +890,15 @@ impl NativeApp {
             .record_manager
             .get_varchive_cache_record(song_id, mode, diff);
 
-        match (local, varchive) {
+        let (mut local_rate, mut local_mc) = local.unwrap_or((0.0, false));
+        if ctx.rate > local_rate {
+            local_rate = ctx.rate;
+        }
+        if ctx.is_max_combo {
+            local_mc = true;
+        }
+
+        match (Some((local_rate, local_mc)), varchive) {
             (Some((l_rate, l_mc)), Some((v_rate, v_mc))) => {
                 (l_rate - v_rate) >= 0.01 || (l_mc && !v_mc)
             }
@@ -915,7 +923,19 @@ impl NativeApp {
             .record_manager
             .get_varchive_cache_record(song_id, mode, diff);
 
-        let (overmax_rate, overmax_mc) = local.unwrap_or((0.0, false));
+        let (mut overmax_rate, mut overmax_mc) = local.unwrap_or((0.0, false));
+        if session_ctx.rate > overmax_rate {
+            overmax_rate = session_ctx.rate;
+        }
+        if session_ctx.is_max_combo {
+            overmax_mc = true;
+        }
+
+        if overmax_rate > 0.0 || overmax_mc {
+            self.record_manager
+                .upsert(song_id, mode, diff, overmax_rate, overmax_mc, true);
+        }
+
         let (v_rate, v_mc) = match varchive {
             Some((r, mc)) => (Some(r), Some(mc)),
             None => (None, None),

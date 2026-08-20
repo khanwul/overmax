@@ -31,14 +31,19 @@ impl RecordManager {
     /// VerifiedPlayEvent를 수신하여 기록을 갱신하고, 신규/개선 여부를 반환합니다.
     pub fn handle_verified_play(&self, event: &VerifiedPlayEvent) -> bool {
         let key = event.record_key();
-        self.upsert(
-            key.0,
-            key.1,
-            key.2,
-            event.rate,
-            event.is_max_combo,
-            event.is_result_screen,
-        )
+        if !event.is_result_screen && event.rate <= 0.0 {
+            // 선곡 화면에서 미플레이(0.0%)로 확인된 경우: 과거 오기록이 있다면 삭제하여 미플레이로 교정
+            self.delete(key.0, key.1, key.2)
+        } else {
+            self.upsert(
+                key.0,
+                key.1,
+                key.2,
+                event.rate,
+                event.is_max_combo,
+                event.is_result_screen,
+            )
+        }
     }
 
     pub fn refresh(&self) {
@@ -434,6 +439,50 @@ mod tests {
                 overmax_core::Difficulty::MX
             ),
             Some((99.85, true))
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_handle_verified_play_deletes_record_when_unplayed_on_song_select() {
+        let dir = test_dir("record-manager-handle-unplayed");
+        let db_path = dir.join("record.db");
+        let mut db = RecordDB::new(&db_path, Some("765611"));
+        assert!(db.initialize());
+
+        let db = Arc::new(db);
+        let manager = RecordManager::new(db);
+
+        // 1. 과거 오인식으로 잘못 들어간 레코드 (90.0%)
+        assert!(manager.upsert(
+            77,
+            overmax_core::Mode::B4,
+            overmax_core::Difficulty::SC,
+            90.0,
+            false,
+            false
+        ));
+        assert_eq!(
+            manager.get_local_record(77, overmax_core::Mode::B4, overmax_core::Difficulty::SC),
+            Some((90.0, false))
+        );
+
+        // 2. 선곡 화면에서 미플레이(0.00%)로 인식되어 이벤트 발생 -> 삭제되어야 함!
+        let event = VerifiedPlayEvent {
+            song_id: 77,
+            mode: overmax_core::Mode::B4,
+            diff: overmax_core::Difficulty::SC,
+            rate: 0.0,
+            is_max_combo: false,
+            is_result_screen: false,
+        };
+        assert!(manager.handle_verified_play(&event));
+
+        // 3. 로컬 DB에서 삭제 확인
+        assert_eq!(
+            manager.get_local_record(77, overmax_core::Mode::B4, overmax_core::Difficulty::SC),
+            None
         );
 
         let _ = std::fs::remove_dir_all(dir);
