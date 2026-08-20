@@ -129,6 +129,39 @@ impl Difficulty {
 pub type RecordKey = (i32, Mode, Difficulty);
 pub type RecordValue = (f32, bool);
 
+/// 선곡창/결과창에서 인식된 플레이 기록 데이터
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum PatternRecord {
+    /// 기록 없음 / 미플레이 (0.00%)
+    #[default]
+    Unplayed,
+    /// 유효 기록 존재 (80.0% ~ 100.0%)
+    Played { rate: f32, is_max_combo: bool },
+}
+
+impl PatternRecord {
+    #[inline]
+    pub fn rate(&self) -> f32 {
+        match self {
+            Self::Unplayed => 0.0,
+            Self::Played { rate, .. } => *rate,
+        }
+    }
+
+    #[inline]
+    pub fn is_max_combo(&self) -> bool {
+        match self {
+            Self::Unplayed => false,
+            Self::Played { is_max_combo, .. } => *is_max_combo,
+        }
+    }
+
+    #[inline]
+    pub fn is_played(&self) -> bool {
+        matches!(self, Self::Played { .. })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SceneType {
     Unknown,

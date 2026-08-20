@@ -3,7 +3,8 @@ use crate::capture::frame_utils::{compute_pixel_checksum, region_mean_bgr};
 use crate::detector::roi::RoiManager;
 use crate::detector::templates;
 use overmax_core::{
-    Changed, Difficulty, GameSessionState, Mode, PlayContext, RecordKey, VerifiedPlayEvent,
+    Changed, Difficulty, GameSessionState, Mode, PatternRecord, PlayContext, RecordKey,
+    VerifiedPlayEvent,
 };
 use std::collections::VecDeque;
 
@@ -15,9 +16,15 @@ const DIFF_CONFIDENT_MARGIN: f32 = 15.0;
 const RATE_DETECTION_INTERVAL_SEC: f64 = 0.20;
 const RATE_CHECKSUM_CHANGE_THRESHOLD: u64 = 50;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq)]
 struct RateInputChecksums {
     score: u64,
+}
+
+impl PartialEq for RateInputChecksums {
+    fn eq(&self, other: &Self) -> bool {
+        self.score.abs_diff(other.score) <= RATE_CHECKSUM_CHANGE_THRESHOLD
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -26,11 +33,79 @@ struct ModeDiffChecksums {
     diff: u64,
 }
 
-fn rate_inputs_changed(previous: Option<RateInputChecksums>, current: RateInputChecksums) -> bool {
-    let Some(previous) = previous else {
-        return true;
-    };
-    previous.score.abs_diff(current.score) > RATE_CHECKSUM_CHANGE_THRESHOLD
+/// 화면 ROI 단위의 관측값과 체크섬을 묶어 관리하는 단일 캐시 단위
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoiCache<Key, Checksum, Value> {
+    current_key: Option<Key>,
+    last_checksum: Option<Checksum>,
+    last_value: Option<Value>,
+    last_detect_ts: f64,
+    interval_sec: f64,
+}
+
+impl<Key: PartialEq + Clone, Checksum: PartialEq + Copy, Value: Clone>
+    RoiCache<Key, Checksum, Value>
+{
+    pub fn new(interval_sec: f64) -> Self {
+        Self {
+            current_key: None,
+            last_checksum: None,
+            last_value: None,
+            last_detect_ts: 0.0,
+            interval_sec,
+        }
+    }
+
+    /// 현재 키(RecordKey 등)가 이전과 다르면 캐시를 즉시 비움 (잔류 원천 차단)
+    pub fn sync_key(&mut self, key: Option<Key>) {
+        if self.current_key != key {
+            self.current_key = key;
+            self.last_value = None;
+            self.last_checksum = None;
+        }
+    }
+
+    /// 체크섬이 변경되었거나 시간 쿨다운이 되었을 때만 계산 수행
+    pub fn get_or_detect<F>(
+        &mut self,
+        checksum: Option<Checksum>,
+        now: f64,
+        detect_fn: F,
+    ) -> Option<Value>
+    where
+        F: FnOnce() -> Option<Value>,
+    {
+        let checksum_changed = checksum.is_none() || checksum != self.last_checksum;
+        let time_due = now - self.last_detect_ts >= self.interval_sec;
+
+        if (checksum_changed || self.last_value.is_none()) && time_due {
+            self.last_value = detect_fn();
+            self.last_checksum = checksum;
+            self.last_detect_ts = now;
+        }
+
+        self.last_value.clone()
+    }
+
+    /// 현재 캐시된 값 조회
+    pub fn get(&self) -> Option<&Value> {
+        self.last_value.as_ref()
+    }
+
+    /// 캐시 수동 설정
+    pub fn set(&mut self, value: Option<Value>, checksum: Option<Checksum>, now: f64) {
+        self.last_value = value;
+        self.last_checksum = checksum;
+        self.last_detect_ts = now;
+    }
+
+    /// 캐시 완전 초기화
+    pub fn clear(&mut self) {
+        self.current_key = None;
+        self.last_checksum = None;
+        self.last_value = None;
+        self.last_detect_ts = 0.0;
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,15 +138,10 @@ pub struct PlayStateDetector {
     history_size: usize,
     history: VecDeque<Option<RawPlayState>>,
     last_stable_state: Option<GameSessionState>,
-    last_rate_checksums: Option<RateInputChecksums>,
-    last_rate_result: Option<f32>,
-    last_rate_detection_ts: f64,
-    last_mode_diff_checksums: Option<ModeDiffChecksums>,
-    last_mode_diff_result: Option<(Option<Mode>, Option<Difficulty>, bool)>,
-    last_mode_diff_detection_ts: f64,
+    mode_diff_cache: RoiCache<(), ModeDiffChecksums, (Option<Mode>, Option<Difficulty>, bool)>,
+    rate_cache: RoiCache<RecordKey, RateInputChecksums, PatternRecord>,
     cache: ModeDiffCache,
     last_song_id: Changed<Option<i32>>,
-    last_target_pattern: Option<RecordKey>,
     result_rate_window: VecDeque<f32>,
     event_emitted_for_session: bool,
 }
@@ -79,10 +149,6 @@ pub struct PlayStateDetector {
 impl PlayStateDetector {
     pub fn stable_hits(&self) -> u32 {
         self.history.iter().filter(|h| h.is_some()).count() as u32
-    }
-
-    fn should_run_rate_detection(&self, now: f64) -> bool {
-        now - self.last_rate_detection_ts >= RATE_DETECTION_INTERVAL_SEC
     }
 
     fn rate_input_checksums(
@@ -106,62 +172,77 @@ impl PlayStateDetector {
         scene: overmax_core::SceneType,
         is_result: bool,
         now: f64,
-    ) -> f32 {
-        if self.should_run_rate_detection(now) {
-            let checksums = Self::rate_input_checksums(frame, rois);
-            let inputs_changed = checksums
-                .map(|current| rate_inputs_changed(self.last_rate_checksums, current))
-                .unwrap_or(true);
+    ) -> PatternRecord {
+        let checksums = Self::rate_input_checksums(frame, rois);
+        let is_song_select = matches!(
+            scene,
+            overmax_core::SceneType::Freestyle | overmax_core::SceneType::OpenMatch
+        );
 
-            if inputs_changed {
-                let is_song_select = matches!(
-                    scene,
-                    overmax_core::SceneType::Freestyle | overmax_core::SceneType::OpenMatch
-                );
+        if is_result {
+            if now - self.rate_cache.last_detect_ts >= RATE_DETECTION_INTERVAL_SEC {
+                let inputs_changed =
+                    checksums.is_none() || checksums != self.rate_cache.last_checksum;
 
-                let mut detected_rate = None;
+                if inputs_changed {
+                    let detected_rate = if let Some(score_val) =
+                        rois.and_then_roi(frame, "score", templates::detect_score)
+                    {
+                        let calc_rate = (score_val as f32 / 10000.0 * 100.0).floor() / 100.0;
+                        if (0.0..=100.0).contains(&calc_rate) {
+                            Some(calc_rate)
+                        } else {
+                            None
+                        }
+                    } else {
+                        rois.and_then_roi(frame, "rate", |img| templates::detect_rate(img))
+                    };
+
+                    if let Some(r) = detected_rate {
+                        self.push_result_rate_sample(r);
+                        if let Some(median_r) = self.median_result_rate() {
+                            let record = PatternRecord::Played {
+                                rate: median_r,
+                                is_max_combo: false,
+                            };
+                            self.rate_cache.set(Some(record), checksums, now);
+                        }
+                    }
+                }
+            }
+            self.rate_cache
+                .get()
+                .copied()
+                .unwrap_or(PatternRecord::Unplayed)
+        } else {
+            self.result_rate_window.clear();
+            let record = self.rate_cache.get_or_detect(checksums, now, || {
                 if let Some(score_val) = rois.and_then_roi(frame, "score", templates::detect_score)
                 {
                     let calc_rate = (score_val as f32 / 10000.0 * 100.0).floor() / 100.0;
-                    let is_valid_range = if is_song_select {
-                        (MIN_VALID_RATE..=100.0).contains(&calc_rate)
-                    } else {
-                        (0.0..=100.0).contains(&calc_rate)
-                    };
-
-                    if is_valid_range {
+                    if is_song_select && (MIN_VALID_RATE..=100.0).contains(&calc_rate) {
                         debug_println!(
                             "    [detect] score run. score={}, rate={:.2}%",
                             score_val,
                             calc_rate
                         );
-                        detected_rate = Some(calc_rate);
+                        return Some(PatternRecord::Played {
+                            rate: calc_rate,
+                            is_max_combo: false,
+                        });
                     }
                 } else if let Some(rate_res) =
                     rois.and_then_roi(frame, "rate", |img| templates::detect_rate(img))
                 {
-                    detected_rate = Some(rate_res);
+                    return Some(PatternRecord::Played {
+                        rate: rate_res,
+                        is_max_combo: false,
+                    });
                 }
+                Some(PatternRecord::Unplayed)
+            });
 
-                self.last_rate_detection_ts = now;
-                self.last_rate_checksums = checksums;
-                self.apply_rate_detection_result(is_result, detected_rate);
-            }
-        }
-
-        self.last_rate_result.unwrap_or(0.0)
-    }
-
-    fn apply_rate_detection_result(&mut self, is_result: bool, mut res: Option<f32>) {
-        if is_result {
-            if let Some(new_r) = res {
-                self.push_result_rate_sample(new_r);
-                res = self.median_result_rate();
-                self.last_rate_result = res;
-            }
-        } else {
-            self.result_rate_window.clear();
-            self.last_rate_result = res;
+            record.unwrap_or(PatternRecord::Unplayed)
         }
     }
 
@@ -201,22 +282,12 @@ impl PlayStateDetector {
         now: f64,
     ) -> (Option<Mode>, Option<Difficulty>, bool) {
         let checksums = Self::mode_diff_checksums(frame, rois);
-        let checksums_changed = checksums.is_none() || checksums != self.last_mode_diff_checksums;
-
-        if checksums_changed || self.last_mode_diff_result.is_none() {
+        let result = self.mode_diff_cache.get_or_detect(checksums, now, || {
             let m = detect_button_mode(frame, rois);
             let (d, conf) = detect_difficulty(frame, rois);
-            self.last_mode_diff_checksums = checksums;
-            self.last_mode_diff_detection_ts = now;
-            self.last_mode_diff_result = Some((m, d, conf));
-            (m, d, conf)
-        } else if let Some(res) = self.last_mode_diff_result {
-            res
-        } else {
-            let m = detect_button_mode(frame, rois);
-            let (d, conf) = detect_difficulty(frame, rois);
-            (m, d, conf)
-        }
+            Some((m, d, conf))
+        });
+        result.unwrap_or((None, None, false))
     }
 
     pub fn new(history_size: usize) -> Self {
@@ -224,15 +295,10 @@ impl PlayStateDetector {
             history_size: history_size.max(1),
             history: VecDeque::new(),
             last_stable_state: None,
-            last_rate_checksums: None,
-            last_rate_result: None,
-            last_rate_detection_ts: 0.0,
-            last_mode_diff_checksums: None,
-            last_mode_diff_result: None,
-            last_mode_diff_detection_ts: 0.0,
+            mode_diff_cache: RoiCache::new(0.0),
+            rate_cache: RoiCache::new(RATE_DETECTION_INTERVAL_SEC),
             cache: ModeDiffCache::new(),
             last_song_id: Changed::new(None),
-            last_target_pattern: None,
             result_rate_window: VecDeque::new(),
             event_emitted_for_session: false,
         }
@@ -241,15 +307,10 @@ impl PlayStateDetector {
     pub fn reset(&mut self) {
         self.history.clear();
         self.last_stable_state = None;
-        self.last_rate_checksums = None;
-        self.last_rate_result = None;
-        self.last_rate_detection_ts = 0.0;
-        self.last_mode_diff_checksums = None;
-        self.last_mode_diff_result = None;
-        self.last_mode_diff_detection_ts = 0.0;
+        self.mode_diff_cache.clear();
+        self.rate_cache.clear();
         // 결과창 진입 시 복구용(result_mode/diff) 캐시는 reset 시에도 보존합니다.
         self.last_song_id.update(None);
-        self.last_target_pattern = None;
         self.result_rate_window.clear();
         self.event_emitted_for_session = false;
     }
@@ -257,10 +318,8 @@ impl PlayStateDetector {
     pub fn clear_detected_cache(&mut self) {
         self.cache.clear_result_cache();
         self.event_emitted_for_session = false;
-        self.last_rate_result = None;
-        self.last_rate_checksums = None;
+        self.rate_cache.clear();
         self.result_rate_window.clear();
-        self.last_target_pattern = None;
     }
 
     #[cfg(test)]
@@ -354,10 +413,8 @@ impl PlayStateDetector {
             _ => None,
         };
 
-        if !is_result && current_pattern != self.last_target_pattern {
-            self.last_target_pattern = current_pattern;
-            self.last_rate_result = None;
-            self.last_rate_checksums = None;
+        if !is_result {
+            self.rate_cache.sync_key(current_pattern);
         }
 
         self.last_song_id.update(song_id);
@@ -371,13 +428,9 @@ impl PlayStateDetector {
         );
         let context = if let (Some(sid), Some(m), Some(d)) = (song_id, mode, diff) {
             if confident {
-                let rate = self.process_rate_detection(frame, rois, scene, is_result, now);
-
-                let rate_valid = !is_result
-                    || self
-                        .last_rate_result
-                        .map(|r| r >= MIN_VALID_RATE)
-                        .unwrap_or(false);
+                let record = self.process_rate_detection(frame, rois, scene, is_result, now);
+                let rate = record.rate();
+                let rate_valid = !is_result || rate >= MIN_VALID_RATE;
 
                 Some(PlayContext {
                     song_id: sid,
@@ -596,10 +649,10 @@ pub fn detect_max_combo_result(frame: &CapturedFrame, rois: &RoiManager) -> bool
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_button_mode, rate_inputs_changed, PlayStateDetector, RateInputChecksums};
+    use super::{detect_button_mode, PlayStateDetector, RateInputChecksums};
     use crate::capture::frame::CapturedFrame;
     use crate::detector::roi::RoiManager;
-    use overmax_core::SceneType;
+    use overmax_core::{PatternRecord, SceneType};
     use overmax_cv::Bgr;
 
     #[test]
@@ -650,12 +703,12 @@ mod tests {
         rois.set_scene(SceneType::Freestyle);
 
         let (state1, _) = detector.detect(&frame, &rois, Some(1), 1.0);
-        assert_eq!(detector.last_mode_diff_detection_ts, 1.0);
-        assert!(detector.last_mode_diff_checksums.is_some());
+        assert_eq!(detector.mode_diff_cache.last_detect_ts, 1.0);
+        assert!(detector.mode_diff_cache.last_checksum.is_some());
 
         // 동일 프레임에서 시간만 지나도 체크섬이 안 바뀌면 timestamp가 1.0으로 유지됨 (재계산 스킵)
         let (state2, _) = detector.detect(&frame, &rois, Some(1), 2.0);
-        assert_eq!(detector.last_mode_diff_detection_ts, 1.0);
+        assert_eq!(detector.mode_diff_cache.last_detect_ts, 1.0);
         assert_eq!(
             state1.context.as_ref().map(|c| c.mode),
             state2.context.as_ref().map(|c| c.mode)
@@ -664,7 +717,7 @@ mod tests {
         // 난이도 카드 하이라이트 변경 -> checksum 변경으로 3.0s 시점에 갱신됨
         paint_rect(&mut frame, 218, 488, 328, 516, Bgr::from_rgb_hex(0xFFFFFF));
         let (_state3, _) = detector.detect(&frame, &rois, Some(1), 3.0);
-        assert_eq!(detector.last_mode_diff_detection_ts, 3.0);
+        assert_eq!(detector.mode_diff_cache.last_detect_ts, 3.0);
     }
 
     fn blank_frame() -> CapturedFrame {
@@ -688,14 +741,8 @@ mod tests {
     fn rate_checksum_cache_only_refreshes_on_meaningful_input_change() {
         let previous = RateInputChecksums { score: 2_000 };
 
-        assert!(!rate_inputs_changed(
-            Some(previous),
-            RateInputChecksums { score: 2_049 }
-        ));
-        assert!(rate_inputs_changed(
-            Some(previous),
-            RateInputChecksums { score: 2_051 }
-        ));
+        assert_eq!(previous, RateInputChecksums { score: 2_049 });
+        assert_ne!(previous, RateInputChecksums { score: 2_051 });
     }
 
     #[test]
@@ -706,7 +753,14 @@ mod tests {
             .cache
             .result_diff
             .update(Some(super::Difficulty::NM));
-        detector.last_rate_result = Some(99.5); // MIN_VALID_RATE (80.0) 이상
+        detector.rate_cache.set(
+            Some(PatternRecord::Played {
+                rate: 99.5,
+                is_max_combo: false,
+            }),
+            None,
+            0.0,
+        );
 
         let frame = blank_frame();
         let mut rois = RoiManager::new(1920, 1080);
@@ -760,7 +814,14 @@ mod tests {
             .cache
             .result_diff
             .update(Some(super::Difficulty::HD));
-        detector.last_rate_result = Some(98.0);
+        detector.rate_cache.set(
+            Some(PatternRecord::Played {
+                rate: 98.0,
+                is_max_combo: false,
+            }),
+            None,
+            2.0,
+        );
 
         let _ = detector.detect(&frame, &rois, Some(20), 3.0);
         let _ = detector.detect(&frame, &rois, Some(20), 3.1);
@@ -789,9 +850,18 @@ mod tests {
         rois.set_scene(SceneType::Freestyle);
 
         // 1. 곡 1 (기록 있음: 98.5%)
-        detector.last_rate_result = Some(98.5);
-        detector.last_target_pattern = Some((1, super::Mode::B4, super::Difficulty::NM));
-        detector.last_rate_checksums = PlayStateDetector::rate_input_checksums(&frame, &rois);
+        let checksums = PlayStateDetector::rate_input_checksums(&frame, &rois);
+        detector
+            .rate_cache
+            .sync_key(Some((1, super::Mode::B4, super::Difficulty::NM)));
+        detector.rate_cache.set(
+            Some(PatternRecord::Played {
+                rate: 98.5,
+                is_max_combo: false,
+            }),
+            checksums,
+            1.0,
+        );
 
         let (state1, _) = detector.detect(&frame, &rois, Some(1), 1.0);
         assert_eq!(state1.context.as_ref().unwrap().rate, 98.5);
@@ -803,7 +873,7 @@ mod tests {
             0.0,
             "이전 곡의 기록(98.5%)이 새 미플레이 곡(0.00%)에 잔류하면 안 됨"
         );
-        assert_eq!(detector.last_rate_result, None);
+        assert_eq!(detector.rate_cache.get(), Some(&PatternRecord::Unplayed));
     }
 
     #[test]
@@ -816,9 +886,17 @@ mod tests {
         rois.set_scene(SceneType::Freestyle);
 
         // 임의의 이전 rate 캐시와 체크섬 설정
-        detector.last_rate_result = Some(95.0);
-        detector.last_rate_checksums = Some(RateInputChecksums { score: 100 });
-        detector.last_target_pattern = Some((1, super::Mode::B4, super::Difficulty::NM));
+        detector
+            .rate_cache
+            .sync_key(Some((1, super::Mode::B4, super::Difficulty::NM)));
+        detector.rate_cache.set(
+            Some(PatternRecord::Played {
+                rate: 95.0,
+                is_max_combo: false,
+            }),
+            Some(RateInputChecksums { score: 100 }),
+            0.0,
+        );
 
         // score 영역에 체크섬 변경 유발 (하지만 빈 화면이라 유효한 점수가 검출되지 않음)
         paint_rect(
@@ -836,6 +914,6 @@ mod tests {
             0.0,
             "유효한 점수가 없는 새로운 입력 감지 시 캐시된 점수가 0.0으로 클리어되어야 함"
         );
-        assert_eq!(detector.last_rate_result, None);
+        assert_eq!(detector.rate_cache.get(), Some(&PatternRecord::Unplayed));
     }
 }
