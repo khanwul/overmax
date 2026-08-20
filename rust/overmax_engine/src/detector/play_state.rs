@@ -150,11 +150,9 @@ impl ResultModeDiffLatch {
 pub struct PlayStateDetector {
     history_size: usize,
     history: VecDeque<Option<RawPlayState>>,
-    last_stable_state: Option<GameSessionState>,
     mode_diff_cache: RoiCache<(), ModeDiffChecksums, (Option<Mode>, Option<Difficulty>, bool)>,
     rate_cache: RoiCache<RecordKey, RateInputChecksums, PatternRecord>,
     result_mode_diff: ResultModeDiffLatch,
-    last_song_id: Changed<Option<i32>>,
     result_rate_window: VecDeque<f32>,
     event_emitted_for_session: bool,
 }
@@ -307,11 +305,9 @@ impl PlayStateDetector {
         Self {
             history_size: history_size.max(1),
             history: VecDeque::new(),
-            last_stable_state: None,
             mode_diff_cache: RoiCache::new(0.0),
             rate_cache: RoiCache::new(RATE_DETECTION_INTERVAL_SEC),
             result_mode_diff: ResultModeDiffLatch::new(),
-            last_song_id: Changed::new(None),
             result_rate_window: VecDeque::new(),
             event_emitted_for_session: false,
         }
@@ -319,11 +315,9 @@ impl PlayStateDetector {
 
     pub fn reset(&mut self) {
         self.history.clear();
-        self.last_stable_state = None;
         self.mode_diff_cache.clear();
         self.rate_cache.clear();
         // 결과창 진입 시 복구용 래치(result_mode_diff)는 reset 시에도 보존합니다.
-        self.last_song_id.update(None);
         self.result_rate_window.clear();
         self.event_emitted_for_session = false;
     }
@@ -416,8 +410,6 @@ impl PlayStateDetector {
             self.rate_cache.sync_key(current_pattern);
         }
 
-        self.last_song_id.update(song_id);
-
         debug_println!(
             "    [detect] song_id={:?}, mode={:?}, diff={:?}, confident={}",
             song_id,
@@ -462,7 +454,6 @@ impl PlayStateDetector {
                 is_stable: true,
                 is_fullscreen: false, // will be overwritten/updated by detection worker
             };
-            self.last_stable_state = Some(state.clone());
 
             let mut verified_event = None;
             if is_result && !self.event_emitted_for_session {
