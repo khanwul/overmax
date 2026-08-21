@@ -50,23 +50,40 @@ Overmax v0.4.0 마일스톤 활성 작업 목록 및 백로그입니다.
 
 ---
 
-## 4. 감지 씬 다양화 및 인게임 확장
+## 4. 지능형 다차원 추천 엔진 및 통계적 실력 분포 모델 (Smart Recommendation Engine)
 
-- [ ] **4.1 래더매치(Ladder Match) 씬 감지 대응**
+- [x] **4.1 4-Phase 추천 엔진 및 레인별 독립 가중치 아키텍처**
+  - [x] Phase 1(재도전 레인): 목표 rate(99.5%) 격차 $\times$ 14일 최근성 감쇠 램프
+  - [x] Phase 2(Top-50 경계 레인): 41~50위 수성 및 컷라인 돌파 후보곡 선별
+  - [x] Phase 3(세션 모멘텀 레인): 0~200점 만점 자체 Performance Rating 기반 플로우 가중치 부여
+  - [x] Phase 4(미니멀 사유 뱃지): `RecommendReason` ADT 기반 18px 미니멀 렌더링 및 툴팁
+- [x] **4.2 TrueSkill 기반 통계적 실력 분포 모델 (`SkillProfile`) 및 도메인 게이팅**
+  - [x] 버튼별 SC 및 일반(Pad) 실력 분포 $\mathcal{N}(\mu, \sigma^2)$ 모델링 및 Cross-Track Fallback 구축
+  - [x] 커서 위치와 무관한 일관된 권장 난이도 라벨(`derive_footer_level`) 고정
+  - [x] 물리적 안전 난이도($\text{Floor} \le \mu - 0.8\sigma$) 가드를 통한 고난도 곡 REST 뱃지 오발동 원천 차단
+- [x] **4.3 V-Archive 미연동 환경을 위한 로컬 기록 기반 Top-50 Fallback**
+  - [x] `varchive_records` 부재 시 로컬 `records` 테이블과 자체 Performance Rating을 결합하여 실시간 Top-50 요약(`get_top50_summary_with_fallback`) 산출
+  - [x] 보유 DLC 자동 추론(`get_all_recorded_song_ids`)을 통한 미보유 DLC 곡 추천 제외
+
+---
+
+## 5. 감지 씬 다양화 및 인게임 확장
+
+- [ ] **5.1 래더매치(Ladder Match) 씬 감지 대응**
   - [ ] 래더매치 밴픽/선곡 화면 및 대기실 감지 대응
   - [ ] 래더매치 결과창 인식 지원
 
 ---
 
-## 5. 다국어 (i18n) 지원 확장
+## 6. 다국어 (i18n) 지원 확장
 
-- [ ] **5.1 일본어(JA) 번역 및 폰트 지원 추가**
+- [ ] **6.1 일본어(JA) 번역 및 폰트 지원 추가**
   - [ ] UI 및 오버레이 텍스트 일본어 리소스 작성
   - [ ] 일본어 CJK 폰트 렌더링 검증
 
 ---
 
-## 6. 장기 백로그 (Long-term Backlog)
+## 7. 장기 백로그 (Long-term Backlog)
 
-- [ ] **6.1 공식 V-Archive 클라이언트 보완/대체 자동 업로드 파이프라인 (장기)**
+- [ ] **7.1 공식 V-Archive 클라이언트 보완/대체 자동 업로드 파이프라인 (장기)**
   - [ ] 게임 플레이 종료 시 감지된 플레이 기록을 V-Archive API로 안전하게 자동 백그라운드 업로드하는 파이프라인 설계
