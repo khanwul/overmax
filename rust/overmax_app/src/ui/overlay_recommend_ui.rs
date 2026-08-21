@@ -150,14 +150,77 @@ fn draw_recommend_row(ui: &mut egui::Ui, entry: &RecommendEntry, scale: f32) {
                 RECOMMEND_ROW_HEIGHT * scale,
             ));
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0 * scale;
+                ui.spacing_mut().item_spacing.x = 6.0 * scale;
                 draw_entry_badge(ui, entry, scale);
-                draw_song_name(ui, entry, scale);
+                let reason_width = if entry.reason.is_some() {
+                    24.0 * scale
+                } else {
+                    0.0
+                };
+                let song_width = (SONG_LABEL_WIDTH * scale - reason_width).max(80.0 * scale);
+                draw_song_name(ui, entry, song_width, scale);
+                if let Some(reason) = &entry.reason {
+                    draw_reason_badge(ui, reason, scale);
+                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     draw_rate(ui, entry, scale)
                 });
             });
         });
+}
+
+fn draw_reason_badge(ui: &mut egui::Ui, reason: &overmax_data::RecommendReason, scale: f32) {
+    let label = reason.kind.badge_label();
+    let width = 22.0 * scale;
+    let height = 14.0 * scale;
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(width, RECOMMEND_ROW_HEIGHT * scale),
+        egui::Sense::hover(),
+    );
+    let badge_rect = Rect::from_center_size(rect.center(), Vec2::new(width, height));
+    let color = match reason.kind {
+        overmax_data::RecommendReasonKind::Top50Attack => Color32::from_rgb(160, 110, 255), // 보라
+        overmax_data::RecommendReasonKind::Top50Defend => Color32::from_rgb(240, 150, 40), // 골드/오렌지
+        overmax_data::RecommendReasonKind::Climbing => Color32::from_rgb(50, 180, 255),    // 블루
+        overmax_data::RecommendReasonKind::Recovery => Color32::from_rgb(40, 190, 130), // 에메랄드
+        overmax_data::RecommendReasonKind::Retry => Color32::from_rgb(255, 95, 95),     // 코랄레드
+        overmax_data::RecommendReasonKind::Unplayed => Color32::from_rgb(30, 200, 160), // 민트/청록 (신규)
+    };
+    ui.painter()
+        .rect_filled(badge_rect, CornerRadius::same((3.0 * scale) as u8), color);
+    ui.painter().text(
+        badge_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        FontId::proportional(7.5 * scale),
+        Color32::WHITE,
+    );
+    response.on_hover_text(reason_tooltip(reason));
+}
+
+fn reason_tooltip(reason: &overmax_data::RecommendReason) -> String {
+    match reason.kind {
+        overmax_data::RecommendReasonKind::Top50Attack => {
+            crate::t!("reco-reason-top50-attack").to_string()
+        }
+        overmax_data::RecommendReasonKind::Top50Defend => {
+            if let Some(rank) = reason.rank {
+                crate::t!("reco-reason-top50-defend", rank = rank)
+            } else {
+                reason.detail.clone()
+            }
+        }
+        overmax_data::RecommendReasonKind::Climbing => {
+            crate::t!("reco-reason-climbing").to_string()
+        }
+        overmax_data::RecommendReasonKind::Recovery => {
+            crate::t!("reco-reason-recovery").to_string()
+        }
+        overmax_data::RecommendReasonKind::Retry => crate::t!("reco-reason-retry").to_string(),
+        overmax_data::RecommendReasonKind::Unplayed => {
+            crate::t!("reco-reason-unplayed").to_string()
+        }
+    }
 }
 
 fn draw_entry_badge(ui: &mut egui::Ui, entry: &RecommendEntry, scale: f32) {
@@ -186,9 +249,9 @@ fn draw_entry_badge(ui: &mut egui::Ui, entry: &RecommendEntry, scale: f32) {
     );
 }
 
-fn draw_song_name(ui: &mut egui::Ui, entry: &RecommendEntry, scale: f32) {
+fn draw_song_name(ui: &mut egui::Ui, entry: &RecommendEntry, width: f32, scale: f32) {
     ui.allocate_ui_with_layout(
-        Vec2::new(SONG_LABEL_WIDTH * scale, RECOMMEND_ROW_HEIGHT * scale),
+        Vec2::new(width, RECOMMEND_ROW_HEIGHT * scale),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.add(
@@ -363,5 +426,33 @@ mod tests {
 
         assert_eq!(badge.height(), BADGE_HEIGHT);
         assert_eq!(badge.center().y, cell.center().y);
+    }
+
+    #[test]
+    fn test_recommendation_reason_labels() {
+        assert_eq!(
+            overmax_data::RecommendReasonKind::Top50Attack.badge_label(),
+            "TOP"
+        );
+        assert_eq!(
+            overmax_data::RecommendReasonKind::Top50Defend.badge_label(),
+            "DEF"
+        );
+        assert_eq!(
+            overmax_data::RecommendReasonKind::Climbing.badge_label(),
+            "UP"
+        );
+        assert_eq!(
+            overmax_data::RecommendReasonKind::Recovery.badge_label(),
+            "REST"
+        );
+        assert_eq!(
+            overmax_data::RecommendReasonKind::Retry.badge_label(),
+            "TRY"
+        );
+        assert_eq!(
+            overmax_data::RecommendReasonKind::Unplayed.badge_label(),
+            "CLR"
+        );
     }
 }

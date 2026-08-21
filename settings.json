@@ -50,5 +50,8 @@
     "enabled": false,
     "url": null,
     "name": null
+  },
+  "recommend": {
+    "smart_recommend": true
   }
 }

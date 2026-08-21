@@ -5,11 +5,11 @@ use crate::ui::overlay_recommend_ui::{
 use crate::ui::overlay_theme::Theme;
 use crate::ui::ui_command::UiCommand;
 use eframe::egui::{
-    self, Align, Button, Color32, CornerRadius, FontId, Frame, Layout, Margin, Rect, RichText, Vec2,
+    self, Align, Color32, CornerRadius, FontId, Frame, Layout, Margin, Rect, RichText, Vec2,
 };
 use overmax_core::GameSessionState;
 use overmax_data::RecommendResult;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 pub const BASE_WIDTH: f32 = 360.0;
@@ -60,8 +60,8 @@ impl Px {
     pub(crate) fn mode_badge_h(&self) -> f32 {
         18.0 * self.scale
     }
-    pub(crate) fn settings_btn(&self) -> f32 {
-        24.0 * self.scale
+    pub(crate) fn header_btn_size(&self) -> f32 {
+        18.0 * self.scale
     }
     pub(crate) fn body_gap(&self) -> f32 {
         6.0 * self.scale
@@ -127,6 +127,7 @@ pub fn draw_overlay_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayAct
                 &props.settings_open,
                 &px,
             )
+            .sync_open(&props.sync_open)
             .varchive_upload_needed(props.varchive_upload_needed)
             .varchive_account_configured(props.varchive_account_configured)
             .is_snap_manual(props.is_snap_manual)
@@ -142,13 +143,7 @@ pub fn draw_overlay_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayAct
                 &px,
             );
             ui.add_space(px.panel_gap());
-            draw_footer(
-                ui,
-                props.recommendations,
-                &props.sync_open,
-                &mut actions,
-                &px,
-            );
+            draw_footer(ui, props.recommendations, &px);
         });
 
     actions.response_rect = Some(response.response.rect);
@@ -174,13 +169,7 @@ fn draw_body(
     });
 }
 
-fn draw_footer(
-    ui: &mut egui::Ui,
-    recommendations: &RecommendResult,
-    sync_open: &Arc<AtomicBool>,
-    actions: &mut OverlayActions,
-    px: &Px,
-) {
+fn draw_footer(ui: &mut egui::Ui, recommendations: &RecommendResult, px: &Px) {
     Frame::new()
         .fill(Theme::SECTION_BG)
         .corner_radius(CornerRadius::same((8.0 * px.scale) as u8))
@@ -190,34 +179,37 @@ fn draw_footer(
         ))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().button_padding = egui::vec2(2.0 * px.scale, 1.0 * px.scale);
-
-                let sync_btn =
-                    Button::new(RichText::new("sync").font(FontId::proportional(11.0 * px.scale)))
-                        .wrap();
-                if ui
-                    .add_sized(Vec2::new(42.0 * px.scale, 18.0 * px.scale), sync_btn)
-                    .clicked()
-                {
-                    sync_open.store(true, Ordering::Relaxed);
-                    actions.command = Some(UiCommand::OpenSync);
+                if let Some(target) = &recommendations.recommended_level {
+                    ui.label(
+                        RichText::new(crate::t!("overlay-recommended-target", target = target))
+                            .color(Theme::TEXT_ACCENT)
+                            .font(FontId::proportional(11.0 * px.scale))
+                            .strong(),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new(crate::t!("overlay-similar-avg"))
+                            .color(Theme::TEXT_SECONDARY)
+                            .font(FontId::proportional(11.0 * px.scale)),
+                    );
                 }
-                ui.label(
-                    RichText::new(crate::t!("overlay-similar-avg"))
-                        .color(Theme::TEXT_SECONDARY)
-                        .font(FontId::proportional(11.0 * px.scale)),
-                );
+
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
                         RichText::new(pattern_count_text(recommendations))
-                            .color(Theme::TEXT_SECONDARY)
-                            .font(FontId::proportional(11.0 * px.scale)),
+                            .color(Theme::TEXT_MUTED)
+                            .font(FontId::proportional(10.5 * px.scale)),
                     );
                     ui.label(
                         RichText::new(avg_rate_text(recommendations))
                             .color(Theme::TEXT_SECONDARY)
                             .font(FontId::proportional(11.0 * px.scale))
                             .strong(),
+                    );
+                    ui.label(
+                        RichText::new(crate::t!("overlay-avg-label"))
+                            .color(Theme::TEXT_MUTED)
+                            .font(FontId::proportional(10.5 * px.scale)),
                     );
                 });
             });

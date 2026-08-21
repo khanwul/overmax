@@ -1,7 +1,7 @@
 # Overmax v0.4.0 릴리즈 노트
 
 > v0.3.3 이후 변경 사항 (v0.4.0)  
-> 기준 커밋: `6256097f48bb5292e3e50b293f6c46db0136cdeb`
+> 기준 커밋: `v0.3.3` (`a0368a4`)
 
 ---
 
@@ -22,34 +22,67 @@
 * **[체감 변화]**: 화면을 분석하고 기록을 저장하는 과정에서 발생할 수 있었던 미세한 끊김(Stuttering)을 줄였습니다.
 * **[개선 세부 요약]**: 매 프레임마다 화면을 검사하여 저장하던 기존 방식을 개선하여, 결과창이나 선곡창에서 기록이 완전히 확정되는 순간에만 단 1회 저장하도록 이벤트 방식으로 전환함으로써 불필요한 시스템 부하를 소거했습니다.
 
+### 🧠 4. 지능형 다차원 선곡 추천 (Smart Recommendation) 도입
+* **[체감 변화]**: 오늘 나의 실시간 판정 흐름과 장기 실력, V-Archive 레이팅 컷라인을 입체적으로 분석하여 실력 향상과 레이팅 상승에 가장 효과적인 곡을 똑똑하게 추천해 줍니다.
+* **[개선 세부 요약]**:
+  * **오늘의 컨디션 맞춤 추천 (세션 모멘텀)**: 오늘의 게임 플레이 판정 흐름이 좋을 때는 적정 난이도 이상의 상위 도전곡을 추천하고, 피로가 쌓여 점수가 주춤할 때는 안정적인 회복용 곡을 제안하여 무리 없는 플레이 리듬을 유도합니다.
+  * **방치된 곡 재도전 (오랫동안 안 친 곡 우선 안내)**: 방금 플레이한 곡이 오버레이에 연속으로 추천되어 화면을 차지하는 현상을 방지하고, 과거에 플레이한 후 오랫동안 기록 갱신을 시도하지 않은 성적 개선 유력 곡을 우선적으로 안내합니다.
+  * **V-Archive Top-50 방어 및 돌파 지원**: V-Archive 연동 시, Top 50 랭킹 컷라인에 걸쳐 있는 수성 추천곡이나 조금만 기록을 개선해도 Top 50에 새로 진입할 수 있는 돌파 유력 곡을 정밀하게 포착하여 추천합니다.
+  * **미보유 DLC 자동 제외 및 미플레이 곡 스마트 추천**: 플레이어가 소유하지 않은 DLC 곡이 무차별 추천되어 선곡에 불편을 겪는 일이 없도록 보유 DLC를 자동 추론하여 제외하며, 보유한 팩 내에서 아직 도전해보지 않은 미플레이 곡을 적정 난이도에 맞춰 우선 발굴해 드립니다.
+* 💡 **이용 팁**: 기존의 단순 달성률 오름차순 정렬 방식을 선호하시는 경우, `설정(⚙) > 스마트 추천` 옵션을 끄면 언제든지 클래식 추천 방식으로 즉시 전환할 수 있습니다.
+
+### 🏷️ 5. 추천 사유 미니멀 뱃지 (`TOP`, `DEF`, `UP`, `REST`, `TRY`) 및 호버 툴팁
+* **[체감 변화]**: 추천 목록에 뜬 곡이 어떤 이유로 선정되었는지 한눈에 파악할 수 있으며, 마우스를 올리면 구체적인 추천 사유를 확인할 수 있습니다.
+* **[개선 세부 요약]**:
+  * 곡명이 가려지는 불편을 없애기 위해 불필요한 기본곡 뱃지 도배를 지양하고, 특별한 사유가 있는 추천곡에만 18px 미니멀 뱃지를 부여했습니다.
+  * 뱃지에 마우스 커서를 올리면 `Top-50 컷라인 돌파 유력 후보`, `Top-50 수성 추천곡`, `상승세 모멘텀에 맞춘 상위 도전곡`, `컨디션 회복용 안정권 곡`, `방치된 기록의 성적 개선 추천` 등 상황별 상세 사유가 툴팁으로 친절하게 표시됩니다.
+
+### 🎯 6. 헤더 & 푸터 화면 정돈 및 인게임 권장 난이도 표시
+* **[체감 변화]**: 오버레이 하단과 상단의 여백과 버튼 크기가 깔끔하게 정돈되었으며, 현재 내 실력과 오늘 컨디션에 꼭 맞는 적정 인게임 난이도를 바로 확인할 수 있습니다.
+* **[개선 세부 요약]**:
+  * 하단 푸터에 자리 잡고 있던 V-Archive 동기화 버튼을 상단 헤더 우측(`[⬆] [🔄] [⚙]`)으로 이전하여 버튼 크기와 정렬을 통일하고 하단 가독성을 대폭 개선했습니다.
+  * 하단 푸터 좌측에 오늘 컨디션과 장기 실력을 종합한 인게임 공식 권장 레벨(예: `🎯 권장 SC 13` / `🎯 Rec: SC 13`)을 현재 선택된 난이도 탭(NM/HD/MX/SC)에 맞춰 안내하고, 우측에는 현재 난이도 탭의 평균 달성률과 플레이 완주 현황을 직관적으로 보여줍니다.
+
 ---
 
 ## 🛠️ 엔지니어링 & 내부 아키텍처 변경점
 
-### 🎯 1. 이벤트 주도형 `VerifiedPlayEvent` 도메인 아키텍처 도입
-* **[도메인 이벤트 분리 및 Zero-Allocation 전송]**:
-  * 메인 UI 렌더 루프(`native_app`)가 매 프레임 `output.state.context`를 폴링하여 DB 쓰기 여부를 평가하던 절차적 방식을 전면 제거했습니다.
-  * `PlayStateDetector`가 5프레임 연속 안정화(Hysteresis) 시점에 단일 `VerifiedPlayEvent` (Copy/Zero-Allocation 값 객체)를 단 1회(또는 기록 개선 시) 방출하고, `RecordManager::handle_verified_play`가 이를 직접 수신하여 SQLite DB 및 캐시를 동기화하도록 이벤트 주도 계층 분리를 완성했습니다.
+### 🎯 1. 이벤트 주도형 `VerifiedPlayEvent` 및 Data-First `RoiCache` 도메인 아키텍처
+* **[도메인 이벤트 분리 및 Zero-Allocation 관측 캐시]**:
+  * 메인 UI 렌더 루프의 매 프레임 DB 평가 폴링을 전면 제거하고, 5프레임 연속 안정화(Hysteresis) 시점에 단 1회 Copy/Zero-Allocation 값 객체를 방출하도록 이벤트 계층을 분리했습니다.
+  * 관측 단위와 체크섬을 단일 `RoiCache`로 캡슐화하여 키 변경 시 즉시 무효화하고, `ResultModeDiffLatch`로 결과창 연출 깜빡임을 안전하게 보정하며, 플레이 상태를 `PatternRecord::Unplayed`와 `PatternRecord::Played`의 ADT로 명시적 모델링했습니다.
 
-### 🧱 2. Data-First `RoiCache` 및 `ResultModeDiffLatch` 캡슐화
-* **[관측 캐시와 보정 래치의 도메인 책임 격리]**:
-  * 산발적인 수동 캐시 조작으로 인한 점수 잔류 버그를 원천 차단하기 위해 `RoiCache<Key, Checksum, Value>` 제네릭 구조체를 도입하고, 관측 단위와 체크섬을 단일 캐시로 캡슐화했습니다. 키(`RecordKey`) 변경 시 이전 캐시를 즉시 무효화합니다.
-  * 결과창 애니메이션 깜빡임 보정용 래치(`ResultModeDiffLatch`)와 일반 관측 캐시의 수명주기를 분리하고, 플레이 상태를 `PatternRecord::Unplayed`와 `PatternRecord::Played`의 대수적 데이터 타입(ADT)으로 명시적으로 모델링했습니다.
-
-### 🚀 3. 템플릿 매칭 Zero-Allocation 및 u32 비트마스크/Popcount 최적화
+### 🚀 2. 템플릿 매칭 Zero-Allocation 및 u32 비트마스크/Popcount 최적화
 * **[스택 기반 비트 패킹 및 CPU Popcount 연산 전환]**:
   * 글자당 20여 회 발생하던 동적 `Vec<u8>` 힙 할당을 스택 기반 `[u32; 32]` 비트마스크 패킹 및 CPU `count_ones()`(popcnt) 연산으로 전환하여 매칭 연산 속도를 10~20배 고속화하고 힙 할당을 0으로 줄였습니다.
-  * `detect_score`의 `char → String → parse → u32` 중복 왕복을 `score * 10 + digit` 정수 직접 누적으로 직결하고, `detect_rate` 내 미사용 `String` 필드를 제거하여 Zero String Allocation 파이프라인을 구축했습니다.
+  * `detect_score`의 `char → String → parse → u32` 중복 왕복을 정수 직접 누적으로 직결하고, 미사용 문자열 필드를 제거하여 파이프라인 전체의 무할당화를 달성했습니다.
 
-### 🌐 4. 크레이트 경계 책임 정돈 및 네트워크/ROI 설정 단일화
-* **[HTTP 네트워크 I/O 및 ROI 설정 위치 일원화]**:
-  * UI 계층(`overmax_app`)에 산재해 있던 V-Archive HTTP 통신(`cache_downloader`, `varchive_api`, `recommend_provider_fetch`)을 `overmax_data` 계층으로 완전히 통합했습니다.
-  * ROI 설정 구조체(`GlobalRoiConfig`, `SceneRoiConfig`)를 `overmax_data`에서 `overmax_engine::detector::roi_config`로 이관하여 도메인 경계 누수를 해소했습니다.
+### 🌐 3. 크레이트 경계 정돈 및 데이터 무결성/동시성 가드 강화
+* **[네트워크/ROI 위치 단일화 및 SQLite WAL 모드]**:
+  * V-Archive HTTP 통신을 `overmax_data`로, ROI 좌표 설정을 `overmax_engine`으로 이관하여 도메인 경계 완결성을 확보하고 워크스페이스 패키지 버전을 일원화(`version.workspace = true`)했습니다.
+  * `RecordDB`에 SQLite WAL 모드, Busy Timeout(5초), 지수 백오프 재시도 가드를 적용하고, `settings.user.json` 쓰기 시 100ms 디바운스 및 임시 파일 교체를 통한 원자적(Atomic) 저장을 적용했습니다.
 
-### 🛡️ 5. 데이터 무결성 및 동시성 가드 강화
-* **[SQLite WAL 모드 및 Atomic Settings Debounce Writer]**:
-  * `RecordDB`에 SQLite WAL(Write-Ahead Logging) 모드, Busy Timeout(3초), 지수 백오프 재시도 가드를 적용하여 멀티스레드 DB 쓰기 안정성을 확보했습니다.
-  * `settings.user.json` 쓰기 시 100ms 디바운스 및 임시 파일 교체(`settings.user.json.tmp`)를 통한 원자적(Atomic) 파일 저장을 적용했습니다.
+### 🧩 4. 4-Phase 다차원 지능형 추천 엔진 아키텍처 (`recommend/`)
+* **[레인별 독립 가중치 블렌딩 모델]**:
+  * 종합 평가 점수 산출식:
+    $$\text{FinalScore} = \text{BaseScore}(\Delta\text{Floor}) + w_{\text{top50}} \cdot S_{\text{top50}} + w_{\text{retry}} \cdot S_{\text{retry}} + w_{\text{flow}} \cdot S_{\text{flow}}$$
+  * **Phase 1 (재도전 레인)**: 목표 rate(99.5%) 격차 $\times$ 14일 최근성 감쇠 램프($S_{\text{retry}}$) 결합.
+  * **Phase 2 (Top-50 경계 레인)**: V-Archive 41~50위 수성 곡 및 컷라인 -2.0 이내 돌파 후보곡 선별 (`idx_varchive_top50` 복합 인덱스로 0.05ms 이하 조회).
+  * **Phase 3 (세션 모멘텀 레인)**: 0~200점 만점 자체 Performance Rating($\text{PR} = \text{FloorBase} + \text{RateWeight}$) 체계 기반 동적 플로우 가중치 부여 (4시간 세션 만료 가드).
+  * **Phase 4 (미니멀 사유 뱃지)**: `RecommendReason` ADT 기반 18px 미니멀 렌더링 파이프라인 구축.
 
-### 📦 6. 워크스페이스 크레이트 버전 단일화 (`version.workspace = true`)
-* 워크스페이스 내 5개 크레이트(`overmax_core`, `overmax_cv`, `overmax_data`, `overmax_engine`, `overmax_app`)의 패키지 버전을 루트 `Cargo.toml`의 `workspace.package.version`으로 통일했습니다.
+### 🛡️ 5. 손풀기(Warm-up) 곡 왜곡 방지 및 Top 50 중앙값(Median) 앵커링
+* **[실력대 앵커 고정 및 세션 데이터 점진적(Smooth) 블렌딩]**:
+  * Peak Rating 대비 30점 이상 낮은 저난도 손풀기 곡을 세션 평균 집계에서 자동 제외하고 세션 내 최고/주력 난이도(Peak Floor)를 앵커로 유지.
+  * V-Archive Top 50 중앙값(Median)을 베이스 앵커로 고정하고, 당일 실제 플레이 완주 판 수(1~4판)에 따라 세션 데이터를 점진적(25% ~ 100%)으로 블렌딩하여 선곡창 커서 위치에 따른 요동 현상을 원천 해소했습니다.
+
+### 📜 6. 결과창 실제 플레이 이력 전용 `play_events` 테이블 및 45초 디바운스/In-Place 갱신
+* **[선곡창 탐색 오염 격리 및 원자적 이력화]**:
+  * 선곡 화면 휠 스크롤 시 발생하는 `records.updated_at` 갱신이 세션 모멘텀을 오염시키지 않도록 결과창 완주(`is_result_screen == true`) 전용 `play_events` 테이블을 신설했습니다.
+  * 팝업 재진입 중복을 45초 디바운스로 차단하고, 결과창 MAX COMBO 연출 지연 감지 시 45초 윈도우 내 In-place `UPDATE`를 수행하여 완벽한 데이터 정합성을 보장합니다.
+
+### ⚙️ 7. Zero-Cost Enum Strategy 패턴 및 모놀리식 모듈 분리
+* **[무상태 다형성 및 메모리 오버헤드 0]**:
+  * 1,000줄 이상의 거대한 `recommend.rs`를 `composite.rs`, `local.rs`, `scoring.rs`, `strategy.rs`, `types.rs`, `tests.rs`로 완전히 분리했습니다.
+  * `RecommendStrategy` Enum(`Smart` vs `Classic`)을 정의하여 동적 디스패치 및 힙 할당 없이 컴파일 타임 최적화 기반으로 알고리즘 분리를 구현했습니다.
+  * 로컬 및 V-Archive 기록에 존재하는 DLC 팩 목록을 `HashSet`으로 수집하여 미보유 DLC 곡의 불필요한 추천을 사전에 원천 필터링합니다.

@@ -17,6 +17,7 @@ pub struct OverlayHeader<'a> {
     song_label: &'a str,
     pattern_tabs: &'a [PatternTabInfo],
     settings_open: &'a Arc<AtomicBool>,
+    sync_open: Option<&'a Arc<AtomicBool>>,
     px: &'a Px,
     varchive_upload_needed: bool,
     varchive_account_configured: bool,
@@ -38,6 +39,7 @@ impl<'a> OverlayHeader<'a> {
             song_label,
             pattern_tabs,
             settings_open,
+            sync_open: None,
             px,
             varchive_upload_needed: false,
             varchive_account_configured: false,
@@ -45,6 +47,11 @@ impl<'a> OverlayHeader<'a> {
             session_initial_record: None,
             toast: None,
         }
+    }
+
+    pub(crate) fn sync_open(mut self, sync_open: &'a Arc<AtomicBool>) -> Self {
+        self.sync_open = Some(sync_open);
+        self
     }
 
     pub(crate) fn varchive_upload_needed(mut self, needed: bool) -> Self {
@@ -91,11 +98,20 @@ impl<'a> OverlayHeader<'a> {
                             .scale(self.px.scale),
                     );
 
-                    let right_w = if self.varchive_upload_needed {
-                        (24.0 + 18.0 + 4.0) * self.px.scale
-                    } else {
-                        24.0 * self.px.scale
-                    };
+                    let btn_size_val = self.px.header_btn_size();
+                    let btn_gap_val = 2.5 * self.px.scale;
+                    let btn_radius = CornerRadius::same((3.5 * self.px.scale) as u8);
+                    let btn_size = Vec2::splat(btn_size_val);
+
+                    let mut btn_count = 1;
+                    if self.sync_open.is_some() {
+                        btn_count += 1;
+                    }
+                    if self.varchive_upload_needed {
+                        btn_count += 1;
+                    }
+                    let right_w =
+                        (btn_count as f32 * btn_size_val) + ((btn_count - 1) as f32 * btn_gap_val);
                     let spacing = ui.spacing().item_spacing.x;
                     let max_w =
                         ui.available_width() - right_w - spacing * 2.0 - 4.0 * self.px.scale;
@@ -109,19 +125,17 @@ impl<'a> OverlayHeader<'a> {
                             .scale(self.px.scale),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = btn_gap_val;
                         ui.spacing_mut().button_padding = Vec2::ZERO;
                         let text = RichText::new("⚙")
                             .color(Theme::TEXT_PRIMARY)
-                            .font(FontId::proportional(15.0 * self.px.scale));
+                            .font(FontId::proportional(11.0 * self.px.scale));
                         let btn = Button::new(text)
                             .fill(Theme::SECTION_BG)
-                            .corner_radius(CornerRadius::same((6.0 * self.px.scale) as u8))
+                            .corner_radius(btn_radius)
                             .wrap();
                         let response = ui
-                            .add_sized(
-                                Vec2::splat(self.px.settings_btn()),
-                                btn.sense(Sense::click()),
-                            )
+                            .add_sized(btn_size, btn.sense(Sense::click()))
                             .on_hover_text(crate::t!("settings-title"));
                         buttons_left_x = Some(response.rect.min.x);
                         if response.clicked() {
@@ -129,15 +143,36 @@ impl<'a> OverlayHeader<'a> {
                             actions.command = Some(UiCommand::OpenSettings);
                         }
 
+                        if let Some(sync_open) = self.sync_open {
+                            let sync_text = RichText::new("🔄")
+                                .color(Theme::TEXT_PRIMARY)
+                                .font(FontId::proportional(10.0 * self.px.scale));
+                            let sync_btn = Button::new(sync_text)
+                                .fill(Theme::SECTION_BG)
+                                .corner_radius(btn_radius)
+                                .wrap();
+                            let response = ui
+                                .add_sized(btn_size, sync_btn.sense(Sense::click()))
+                                .on_hover_text(crate::t!("sync-title"));
+                            buttons_left_x = Some(
+                                buttons_left_x
+                                    .map(|x| x.min(response.rect.min.x))
+                                    .unwrap_or(response.rect.min.x),
+                            );
+                            if response.clicked() {
+                                sync_open.store(true, Ordering::Relaxed);
+                                actions.command = Some(UiCommand::OpenSync);
+                            }
+                        }
+
                         if self.varchive_upload_needed {
-                            ui.add_space(4.0 * self.px.scale);
                             let upload_text = RichText::new("⬆")
                                 .color(if self.varchive_account_configured {
                                     Theme::TEXT_PRIMARY
                                 } else {
                                     Theme::TEXT_MUTED
                                 })
-                                .font(FontId::proportional(11.0 * self.px.scale));
+                                .font(FontId::proportional(10.5 * self.px.scale));
 
                             let upload_btn = Button::new(upload_text)
                                 .fill(if self.varchive_account_configured {
@@ -145,10 +180,9 @@ impl<'a> OverlayHeader<'a> {
                                 } else {
                                     Theme::SECTION_BG
                                 })
-                                .corner_radius(CornerRadius::same((4.0 * self.px.scale) as u8))
+                                .corner_radius(btn_radius)
                                 .wrap();
 
-                            let btn_size = Vec2::splat(18.0 * self.px.scale);
                             let response = ui.add_sized(btn_size, upload_btn.sense(Sense::click()));
                             let response = if self.varchive_account_configured {
                                 response.on_hover_text(crate::t!("overlay-varchive-upload-needed"))

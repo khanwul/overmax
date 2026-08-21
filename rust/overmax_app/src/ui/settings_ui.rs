@@ -67,7 +67,33 @@ pub fn render_settings_form(ui: &mut egui::Ui, draft: &mut Value, ctx: &Settings
 
 fn ui_tab(ui: &mut egui::Ui, draft: &mut Value) {
     section_frame(ui, crate::t!("settings-overlay-section"), |ui| {
-        overlay_section(ui, draft)
+        overlay_section(ui, draft);
+    });
+    ui.add_space(16.0);
+    section_frame(ui, crate::t!("settings-recommend-section"), |ui| {
+        recommend_section(ui, draft);
+    });
+}
+
+fn recommend_section(ui: &mut egui::Ui, draft: &mut Value) {
+    form_row(ui, crate::t!("settings-smart-recommend"), |ui| {
+        let mut smart_reco = draft
+            .get("recommend")
+            .and_then(|r| r.get("smart_recommend"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let response = ui
+            .checkbox(&mut smart_reco, crate::t!("settings-enable"))
+            .on_hover_text(crate::t!("settings-smart-recommend-desc"));
+
+        if response.changed() {
+            if !draft.get("recommend").is_some_and(|v| v.is_object()) {
+                draft["recommend"] = serde_json::json!({});
+            }
+            draft["recommend"]["smart_recommend"] = serde_json::json!(smart_reco);
+            ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
+        }
     });
 }
 

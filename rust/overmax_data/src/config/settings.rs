@@ -731,6 +731,20 @@ pub struct RecommendProviderSettings {
     pub name: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RecommendSettings {
+    #[serde(default = "default_true")]
+    pub smart_recommend: bool,
+}
+
+impl Default for RecommendSettings {
+    fn default() -> Self {
+        Self {
+            smart_recommend: default_true(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
 pub struct Settings {
     #[serde(default)]
@@ -751,6 +765,8 @@ pub struct Settings {
     pub sync_filter: Option<SyncFilterSettings>,
     #[serde(default)]
     pub recommend_provider: Option<RecommendProviderSettings>,
+    #[serde(default)]
+    pub recommend: Option<RecommendSettings>,
 }
 
 impl Settings {
@@ -780,5 +796,8 @@ impl Settings {
     }
     pub fn recommend_provider(&self) -> RecommendProviderSettings {
         self.recommend_provider.clone().unwrap_or_default()
+    }
+    pub fn recommend(&self) -> RecommendSettings {
+        self.recommend.clone().unwrap_or_default()
     }
 }
