@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -340,7 +341,7 @@ fn test_derive_recommended_level() {
     // 4. 주력 플레이 4판 누적 시 세션 데이터 100% 반영 + Climbing 모멘텀 (+0.3)
     let session_4_plays = vec![
         SessionPlayInfo {
-            rating: 180.0,
+            rating: 174.8,
             floor: 13.8,
             rate: 99.0,
             diff: Difficulty::SC,
@@ -348,7 +349,7 @@ fn test_derive_recommended_level() {
             updated_at: now - 50,
         },
         SessionPlayInfo {
-            rating: 180.0,
+            rating: 174.8,
             floor: 13.8,
             rate: 99.0,
             diff: Difficulty::SC,
@@ -356,7 +357,7 @@ fn test_derive_recommended_level() {
             updated_at: now - 150,
         },
         SessionPlayInfo {
-            rating: 180.0,
+            rating: 174.8,
             floor: 13.8,
             rate: 99.0,
             diff: Difficulty::SC,
@@ -364,7 +365,7 @@ fn test_derive_recommended_level() {
             updated_at: now - 250,
         },
         SessionPlayInfo {
-            rating: 180.0,
+            rating: 174.8,
             floor: 13.8,
             rate: 99.0,
             diff: Difficulty::SC,
@@ -374,7 +375,7 @@ fn test_derive_recommended_level() {
     ];
     let climbing_state = SessionTrendState {
         trend: SessionTrend::Climbing,
-        avg_rating: 180.0,
+        avg_rating: 174.8,
         last_floor: 13.8,
         last_diff: Difficulty::SC,
     };
@@ -395,9 +396,9 @@ fn test_derive_recommended_level() {
     );
 
     let normal_play = vec![SessionPlayInfo {
-        rating: 120.0,
+        rating: 139.3,
         floor: 11.0,
-        rate: 98.0,
+        rate: 99.0,
         diff: Difficulty::MX,
         is_max_combo: false,
         updated_at: now - 100,
@@ -421,6 +422,7 @@ fn test_derive_top50_base_floor() {
     let summary = crate::store::record_db::VArchiveTop50Summary {
         cutoff_rating: 150.0,
         rank_map: rank_map.clone(),
+        rating_map: HashMap::new(),
         total_recorded_count: 4,
     };
 
@@ -442,6 +444,7 @@ fn test_derive_top50_base_floor() {
     let summary_even = crate::store::record_db::VArchiveTop50Summary {
         cutoff_rating: 140.0,
         rank_map: rank_map.clone(),
+        rating_map: HashMap::new(),
         total_recorded_count: 5,
     };
     let find_floor_even = |sid: i32, m: Mode, d: Difficulty| match sid {
@@ -1028,7 +1031,7 @@ fn test_candidate_ranking_integration_multi_signal_hierarchy() {
     let conn = db.open_conn().unwrap();
 
     for i in 101..=149 {
-        let rating = 174.0 + ((i - 101) as f64 * 0.4);
+        let rating = 160.0 + ((i - 101) as f64 * 0.2);
         let json = serde_json::json!({
             "score": 99.0,
             "maxCombo": true,
@@ -1047,7 +1050,7 @@ fn test_candidate_ranking_integration_multi_signal_hierarchy() {
         "score": 99.5,
         "maxCombo": true,
         "updatedAt": "2026-08-01T00:00:00.000Z",
-        "rating": 188.0,
+        "rating": 172.0,
     });
     conn.execute(
         "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
@@ -1060,7 +1063,7 @@ fn test_candidate_ranking_integration_multi_signal_hierarchy() {
         "score": 98.5,
         "maxCombo": false,
         "updatedAt": "2026-08-01T00:00:00.000Z",
-        "rating": 173.8,
+        "rating": 159.8,
     });
     conn.execute(
         "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
@@ -1203,6 +1206,7 @@ fn test_skill_profile_estimation_and_cross_track_fallback() {
         total_recorded_count: 5,
         cutoff_rating: 175.0,
         rank_map,
+        rating_map: HashMap::new(),
     };
 
     let find_floor = |sid: i32, _m: Mode, _d: Difficulty| -> f64 {
@@ -1268,7 +1272,7 @@ fn test_8b_end_of_moonlight_scenario_gating_and_footer() {
     let conn = db.open_conn().unwrap();
 
     // Top 50에 118(11.2), 119(11.1), 156(12.2), 136(12.1) 등이 등록됨 -> 실력 mu ~ 11.6
-    let top_records = [(118, 172.0), (119, 174.0), (156, 178.0), (136, 176.0)];
+    let top_records = [(118, 142.0), (119, 141.0), (156, 155.0), (136, 153.0)];
     for (sid, rating) in top_records {
         let json = serde_json::json!({
             "score": 990000,
@@ -1397,12 +1401,12 @@ fn test_pad_patterns_maintain_consistent_footer_level_across_nm_hd_mx() {
     assert!(db.initialize());
 
     let conn = db.open_conn().unwrap();
-    // Top 50에 SC 12.2 기록 (Rating 175.0) -> SC 실력 mu ~ 12.2, Pad 실력 mu ~ 13.2
+    // Top 50에 SC 12.2 기록 (Rating 154.5) -> SC 실력 mu ~ 12.2, Pad 실력 mu ~ 13.2
     let json = serde_json::json!({
         "score": 995000,
         "maxCombo": true,
         "updatedAt": "2026-08-01T00:00:00.000Z",
-        "rating": 175.0,
+        "rating": 154.5,
     });
     conn.execute(
         "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
@@ -1686,4 +1690,48 @@ fn test_derive_recommend_reason_when_skill_is_none_blocks_high_floor_rest() {
     );
     assert!(reason_low.is_some());
     assert_eq!(reason_low.unwrap().kind, RecommendReasonKind::Recovery);
+}
+
+#[test]
+fn test_skill_profile_estimation_uses_effective_floor_from_performance_rating() {
+    let mut rank_map = HashMap::new();
+    let mut rating_map = HashMap::new();
+
+    // 곡 1: SC 12 (100.0%) -> Performance Rating = 160.0 -> Effective Floor = 12.63 (상향 인정)
+    rank_map.insert((1, Mode::B4, Difficulty::SC), 1);
+    rating_map.insert((1, Mode::B4, Difficulty::SC), 160.0);
+
+    // 곡 2: SC 15 (95.0%) -> Performance Rating = 130.0 -> Effective Floor = 10.26 (판정 붕괴 하향 환산)
+    rank_map.insert((2, Mode::B4, Difficulty::SC), 2);
+    rating_map.insert((2, Mode::B4, Difficulty::SC), 130.0);
+
+    // 곡 3: SC 11 (99.5%) -> Performance Rating = 143.0 -> Effective Floor = 11.29 (안정적 실력 인정)
+    rank_map.insert((3, Mode::B4, Difficulty::SC), 3);
+    rating_map.insert((3, Mode::B4, Difficulty::SC), 143.0);
+
+    let top50 = crate::store::record_db::VArchiveTop50Summary {
+        total_recorded_count: 3,
+        cutoff_rating: 130.0,
+        rank_map,
+        rating_map,
+    };
+
+    let find_floor = |sid: i32, _m: Mode, _d: Difficulty| match sid {
+        1 => 12.0,
+        2 => 15.0,
+        3 => 11.0,
+        _ => 0.0,
+    };
+
+    let profile = derive_skill_profile(&top50, &find_floor, Mode::B4);
+
+    // 1. 단순 Floor 산술 평균: (12.0 + 15.0 + 11.0) / 3 = 12.67
+    // 2. Rating 기반 Effective Floor 평균: (12.63 + 10.26 + 11.29) / 3 = 11.39
+    // SC 15를 95%로 간신히 친 것은 실력으로 과대 반영되지 않고, 실질 평균 11.39 부근으로 정확히 수렴함을 검증!
+    assert_eq!(profile.sc.sample_count, 3);
+    assert!((profile.sc.mu - 11.39).abs() < 0.05);
+
+    // 하단 푸터 권장 레벨 도출 시에도 "SC 11"로 안정적으로 도출됨 (액면 13으로 뻥튀기 방지)
+    let footer_level = derive_recommended_level(None, &[], Difficulty::SC, &profile);
+    assert_eq!(footer_level, Some("SC 11".to_string()));
 }

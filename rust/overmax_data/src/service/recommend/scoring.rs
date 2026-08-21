@@ -157,6 +157,18 @@ pub fn calculate_performance_rating(floor: f64, rate: f64) -> f64 {
     max_rating * rate_ratio
 }
 
+/// Performance Rating(또는 V-Archive Rating)을 기준 적정 달성률(99.0%, RateRatio=0.95) 기준의 환산 난이도(Effective Floor)로 역산한다.
+/// - SC 12 100.0% (160점) -> 12.63층 (상위 실력 상향 인정)
+/// - SC 15 95.0%  (130점) -> 10.26층 (판정 붕괴 하향 환산)
+/// - SC 11 99.5%  (143점) -> 11.29층 (안정적 주력 실력 인정)
+pub fn rating_to_effective_floor(rating: f64) -> f64 {
+    if rating <= 0.0 {
+        return 0.0;
+    }
+    // rating / (0.95 * (200.0 / 15.0)) = rating * (15.0 / 190.0)
+    (rating * (15.0 / 190.0)).clamp(1.0, 16.0)
+}
+
 /// 상대 상승 모멘텀 판별 레이팅 편차 기준치 (개인 세션 평균 대비 +3.0점 이상)
 pub(crate) const MOMENTUM_CLIMB_RATING_DELTA: f64 = 3.0;
 /// 상대 저조/회복 판별 레이팅 편차 기준치 (개인 세션 평균 대비 -6.0점 미만)
@@ -437,6 +449,9 @@ impl SkillProfile {
 }
 
 /// Top 50 요약 정보로부터 SC 및 일반(Pad) 2-Track 실력 프로필을 산출한다.
+/// - 각 곡의 실제 성과(Performance Rating / V-Archive Rating)를 기준 적정 달성률(99.0%) 기준의
+///   환산 실력 난이도(Effective Floor)로 역산하여, 단순 액면 난이도 대신 실질 실력 분포를 추정한다.
+///   (예: SC 12 100% -> 12.63층 상향 인정, SC 15 95% -> 10.26층 하향 환산)
 /// - 샘플이 부족할 경우 Cross-Track Fallback을 통해 상호 보완한다.
 pub(crate) fn derive_skill_profile<F>(
     top50: &crate::store::record_db::VArchiveTop50Summary,
@@ -451,12 +466,21 @@ where
 
     for &(sid, m, d) in top50.rank_map.keys() {
         if m == button_mode {
-            let f = find_floor(sid, m, d);
-            if f > 0.0 {
-                if d.is_sc() {
-                    sc_floors.push(f);
+            let eff_floor = if let Some(&rating) = top50.rating_map.get(&(sid, m, d)) {
+                if rating > 0.0 {
+                    rating_to_effective_floor(rating)
                 } else {
-                    pad_floors.push(f);
+                    find_floor(sid, m, d)
+                }
+            } else {
+                find_floor(sid, m, d)
+            };
+
+            if eff_floor > 0.0 {
+                if d.is_sc() {
+                    sc_floors.push(eff_floor);
+                } else {
+                    pad_floors.push(eff_floor);
                 }
             }
         }
@@ -559,13 +583,21 @@ pub(crate) fn derive_recommended_level(
         .filter(|p| p.diff.is_sc() == is_sc && p.floor > 0.0)
         .collect();
 
-    // 2. 세션 내 최고 난이도 (Session Peak Floor)
+    let get_eff_floor = |p: &SessionPlayInfo| {
+        if p.rating > 0.0 {
+            rating_to_effective_floor(p.rating)
+        } else {
+            p.floor
+        }
+    };
+
+    // 2. 세션 내 최고 환산 난이도 (Session Peak Effective Floor)
     let session_peak = same_diff_plays
         .iter()
-        .map(|p| p.floor)
+        .map(|p| get_eff_floor(p))
         .fold(0.0f64, |acc, f| acc.max(f));
 
-    // 3. 글로벌 앵커 난이도 (스킬 프로필의 표본이 있으면 mu 우선, 없으면 세션 최고 난이도)
+    // 3. 글로벌 앵커 난이도 (스킬 프로필의 표본이 있으면 mu 우선, 없으면 세션 최고 환산 난이도)
     let anchor_floor = if skill.sample_count > 0 {
         skill.mu
     } else if session_peak > 0.0 {
@@ -580,7 +612,7 @@ pub(crate) fn derive_recommended_level(
     // 앵커 대비 2.5 미만 차이의 주력 플레이들
     let core_session_plays: Vec<&&SessionPlayInfo> = same_diff_plays
         .iter()
-        .filter(|p| anchor_floor - p.floor < WARMUP_FLOOR_GAP)
+        .filter(|p| anchor_floor - get_eff_floor(p) < WARMUP_FLOOR_GAP)
         .collect();
 
     let base_floor = if core_session_plays.is_empty() {
@@ -589,10 +621,13 @@ pub(crate) fn derive_recommended_level(
         anchor_floor
     } else {
         // 세션 주력곡들의 중앙값과 직전 주력곡의 조화로 세션 대표 난이도 산출
-        let mut core_floors: Vec<f64> = core_session_plays.iter().map(|p| p.floor).collect();
+        let mut core_floors: Vec<f64> = core_session_plays
+            .iter()
+            .map(|p| get_eff_floor(p))
+            .collect();
         core_floors.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let session_median = core_floors[core_floors.len() / 2];
-        let last_core_floor = core_session_plays.first().unwrap().floor;
+        let last_core_floor = get_eff_floor(core_session_plays.first().unwrap());
         let session_floor = (session_median + last_core_floor) / 2.0;
 
         let core_count = core_session_plays.len();
@@ -673,10 +708,9 @@ pub(crate) fn derive_recommend_reason(
                 // Recovery zone (Floor <= mu - 0.8*sigma) 필수 가드!
                 // 고난도(Floor > mu - 0.8*sigma)에는 절대로 REST 뱃지를 달지 않는다!
                 // 실력 프로필이 아직 없는 경우 기본 기준(DEFAULT_SC.mu = 5.0) 이하의 저난도에만 부여
-                let is_valid = skill
-                    .map_or(cand_floor <= GaussianSkill::DEFAULT_SC.mu, |s| {
-                        s.is_recovery_zone(cand_floor)
-                    });
+                let is_valid = skill.map_or(cand_floor <= GaussianSkill::DEFAULT_SC.mu, |s| {
+                    s.is_recovery_zone(cand_floor)
+                });
                 if is_valid {
                     return Some(RecommendReason {
                         kind: RecommendReasonKind::Recovery,

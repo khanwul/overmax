@@ -205,17 +205,20 @@ impl RecordManager {
 
         let top50_slice = &rated_records[..rated_records.len().min(50)];
         let mut rank_map = std::collections::HashMap::new();
+        let mut rating_map = std::collections::HashMap::new();
         let mut cutoff_rating = 0.0f64;
 
         for (idx, &(song_id, diff, rating)) in top50_slice.iter().enumerate() {
             let rank = idx + 1;
             rank_map.insert((song_id, mode, diff), rank);
+            rating_map.insert((song_id, mode, diff), rating);
             cutoff_rating = rating;
         }
 
         VArchiveTop50Summary {
             cutoff_rating,
             rank_map,
+            rating_map,
             total_recorded_count: top50_slice.len(),
         }
     }

@@ -21,6 +21,8 @@ pub struct VArchiveTop50Summary {
     pub cutoff_rating: f64,
     /// 1위 ~ 50위 곡들의 순위 맵 (RecordKey -> 1-based rank)
     pub rank_map: std::collections::HashMap<RecordKey, usize>,
+    /// 1위 ~ 50위 곡들의 레이팅 맵 (RecordKey -> Performance / V-Archive Rating)
+    pub rating_map: std::collections::HashMap<RecordKey, f64>,
     /// 모드 내 등록된 유효 레이팅(rating > 0) 곡 수
     pub total_recorded_count: usize,
 }
@@ -1121,6 +1123,7 @@ impl RecordDB {
                      LIMIT 50";
 
         let mut rank_map = std::collections::HashMap::new();
+        let mut rating_map = std::collections::HashMap::new();
         let mut cutoff_rating = 0.0f64;
         let mut total_count = 0usize;
 
@@ -1137,6 +1140,7 @@ impl RecordDB {
                             (song_id_str.parse::<i32>(), Difficulty::from_str(&diff_str))
                         {
                             rank_map.insert((sid, mode, diff), rank);
+                            rating_map.insert((sid, mode, diff), rating);
                             cutoff_rating = rating;
                             total_count += 1;
                             rank += 1;
@@ -1149,6 +1153,7 @@ impl RecordDB {
         VArchiveTop50Summary {
             cutoff_rating,
             rank_map,
+            rating_map,
             total_recorded_count: total_count,
         }
     }
