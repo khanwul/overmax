@@ -99,8 +99,8 @@ impl<'a> OverlayHeader<'a> {
                     );
 
                     let btn_size_val = self.px.header_btn_size();
-                    let btn_gap_val = 3.5 * self.px.scale;
-                    let btn_radius = CornerRadius::same((4.0 * self.px.scale) as u8);
+                    let btn_gap_val = 2.5 * self.px.scale;
+                    let btn_radius = CornerRadius::same((3.5 * self.px.scale) as u8);
                     let btn_size = Vec2::splat(btn_size_val);
 
                     let mut btn_count = 1;
@@ -125,6 +125,7 @@ impl<'a> OverlayHeader<'a> {
                             .scale(self.px.scale),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = btn_gap_val;
                         ui.spacing_mut().button_padding = Vec2::ZERO;
                         let text = RichText::new("⚙")
                             .color(Theme::TEXT_PRIMARY)
@@ -143,7 +144,6 @@ impl<'a> OverlayHeader<'a> {
                         }
 
                         if let Some(sync_open) = self.sync_open {
-                            ui.add_space(btn_gap_val);
                             let sync_text = RichText::new("🔄")
                                 .color(Theme::TEXT_PRIMARY)
                                 .font(FontId::proportional(10.0 * self.px.scale));
@@ -166,7 +166,6 @@ impl<'a> OverlayHeader<'a> {
                         }
 
                         if self.varchive_upload_needed {
-                            ui.add_space(btn_gap_val);
                             let upload_text = RichText::new("⬆")
                                 .color(if self.varchive_account_configured {
                                     Theme::TEXT_PRIMARY
