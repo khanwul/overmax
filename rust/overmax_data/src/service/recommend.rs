@@ -86,6 +86,28 @@ impl RecommendResult {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RecommendStrategy {
+    #[default]
+    Smart,
+    Classic,
+}
+
+impl RecommendStrategy {
+    pub fn from_smart_flag(smart: bool) -> Self {
+        if smart {
+            Self::Smart
+        } else {
+            Self::Classic
+        }
+    }
+
+    pub fn is_smart(&self) -> bool {
+        matches!(self, Self::Smart)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RecommendContext {
     pub song_id: i32,
@@ -95,7 +117,13 @@ pub struct RecommendContext {
     pub max_results: usize,
     pub same_mode_only: bool,
     pub v_id: Option<String>,
-    pub smart_recommend: bool,
+    pub strategy: RecommendStrategy,
+}
+
+impl RecommendContext {
+    pub fn smart_recommend(&self) -> bool {
+        self.strategy.is_smart()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -599,6 +627,176 @@ impl<'a> RawCandidate<'a> {
     }
 }
 
+struct StrategySortParams<'a, 'b, F>
+where
+    F: Fn(i32, Mode, Difficulty) -> f64,
+{
+    candidates: &'b mut Vec<RawCandidate<'a>>,
+    rdb: &'b RecordManager,
+    find_floor: F,
+    button_mode: Mode,
+    ref_floor: f64,
+    max_results: usize,
+    now_unix: i64,
+}
+
+struct StrategyFooterParams<'a, F>
+where
+    F: Fn(i32, Mode, Difficulty) -> f64,
+{
+    rdb: &'a RecordManager,
+    find_floor: F,
+    button_mode: Mode,
+    current_diff: Difficulty,
+    ref_floor: f64,
+    now_unix: i64,
+}
+
+impl RecommendStrategy {
+    fn sort_and_annotate<'a, 'b, F>(&self, params: StrategySortParams<'a, 'b, F>)
+    where
+        F: Fn(i32, Mode, Difficulty) -> f64,
+    {
+        match self {
+            Self::Classic => {
+                params.candidates.sort_by(|a, b| match (a.is_played(), b.is_played()) {
+                    (true, false) => Ordering::Less,
+                    (false, true) => Ordering::Greater,
+                    (true, true) => a
+                        .rate
+                        .partial_cmp(&b.rate)
+                        .unwrap_or(Ordering::Equal)
+                        .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal)),
+                    (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
+                });
+                params.candidates.truncate(params.max_results);
+            }
+            Self::Smart => {
+                let top50 = params.rdb.get_varchive_top50_summary(params.button_mode);
+                let recent_plays = params.rdb.get_recent_records(params.button_mode, 10);
+                let session_play_infos: Vec<SessionPlayInfo> = recent_plays
+                    .iter()
+                    .map(|r| {
+                        let floor = (params.find_floor)(r.song_id, r.button_mode, r.difficulty);
+                        let rating = calculate_performance_rating(floor, r.rate);
+                        SessionPlayInfo {
+                            rating,
+                            floor,
+                            diff: r.difficulty,
+                            is_max_combo: r.is_max_combo,
+                            updated_at: r.updated_at,
+                        }
+                    })
+                    .collect();
+                let session_trend_state =
+                    SessionTrend::analyze_session(&session_play_infos, params.now_unix);
+                let session_trend = session_trend_state.as_ref().map(|s| s.trend);
+
+                params.candidates.sort_by(|a, b| match (a.is_played(), b.is_played()) {
+                    (true, false) => Ordering::Less,
+                    (false, true) => Ordering::Greater,
+                    (true, true) => {
+                        let a_rank = top50.rank_map.get(&(a.song_id, a.mode, a.diff)).copied();
+                        let b_rank = top50.rank_map.get(&(b.song_id, b.mode, b.diff)).copied();
+                        let pa = retry_priority(a.rate.unwrap_or(0.0), a.updated_at, params.now_unix)
+                            + top50_boundary_score(
+                                a.varchive_rating,
+                                a_rank,
+                                top50.cutoff_rating,
+                                top50.total_recorded_count,
+                            )
+                            + session_flow_score(
+                                a.floor,
+                                a.rate,
+                                params.ref_floor,
+                                session_trend_state.as_ref(),
+                            );
+                        let pb = retry_priority(b.rate.unwrap_or(0.0), b.updated_at, params.now_unix)
+                            + top50_boundary_score(
+                                b.varchive_rating,
+                                b_rank,
+                                top50.cutoff_rating,
+                                top50.total_recorded_count,
+                            )
+                            + session_flow_score(
+                                b.floor,
+                                b.rate,
+                                params.ref_floor,
+                                session_trend_state.as_ref(),
+                            );
+                        pb.partial_cmp(&pa)
+                            .unwrap_or(Ordering::Equal)
+                            .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal))
+                    }
+                    (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
+                });
+
+                params.candidates.truncate(params.max_results);
+
+                for c in params.candidates.iter_mut() {
+                    if c.is_played() {
+                        let rank = top50.rank_map.get(&(c.song_id, c.mode, c.diff)).copied();
+                        let retry_score =
+                            retry_priority(c.rate.unwrap_or(0.0), c.updated_at, params.now_unix);
+                        let top50_score = top50_boundary_score(
+                            c.varchive_rating,
+                            rank,
+                            top50.cutoff_rating,
+                            top50.total_recorded_count,
+                        );
+                        let flow_score = session_flow_score(
+                            c.floor,
+                            c.rate,
+                            params.ref_floor,
+                            session_trend_state.as_ref(),
+                        );
+                        c.reason = derive_recommend_reason(
+                            retry_score,
+                            top50_score,
+                            flow_score,
+                            rank,
+                            session_trend,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn derive_footer_level<F>(&self, params: StrategyFooterParams<'_, F>) -> Option<String>
+    where
+        F: Fn(i32, Mode, Difficulty) -> f64,
+    {
+        match self {
+            Self::Classic => None,
+            Self::Smart => {
+                let recent_plays = params.rdb.get_recent_records(params.button_mode, 10);
+                let session_play_infos: Vec<SessionPlayInfo> = recent_plays
+                    .iter()
+                    .map(|r| {
+                        let floor = (params.find_floor)(r.song_id, r.button_mode, r.difficulty);
+                        let rating = calculate_performance_rating(floor, r.rate);
+                        SessionPlayInfo {
+                            rating,
+                            floor,
+                            diff: r.difficulty,
+                            is_max_combo: r.is_max_combo,
+                            updated_at: r.updated_at,
+                        }
+                    })
+                    .collect();
+                let session_trend_state =
+                    SessionTrend::analyze_session(&session_play_infos, params.now_unix);
+                derive_recommended_level(
+                    session_trend_state.as_ref(),
+                    params.current_diff,
+                    params.ref_floor,
+                )
+            }
+        }
+    }
+}
+
 impl LocalFloorRecommender {
     fn now_unix() -> i64 {
         std::time::SystemTime::now()
@@ -667,37 +865,14 @@ impl LocalFloorRecommender {
             ctx.same_mode_only,
         );
 
-        let recommended_level = if ctx.smart_recommend {
-            let recent_plays = self.rdb.get_recent_records(ctx.button_mode, 10);
-            let session_play_infos: Vec<SessionPlayInfo> = recent_plays
-                .iter()
-                .map(|r| {
-                    let floor = self.find_pattern_floor(
-                        r.song_id,
-                        r.button_mode,
-                        r.difficulty,
-                        use_official,
-                    );
-                    let rating = calculate_performance_rating(floor, r.rate);
-                    SessionPlayInfo {
-                        rating,
-                        floor,
-                        diff: r.difficulty,
-                        is_max_combo: r.is_max_combo,
-                        updated_at: r.updated_at,
-                    }
-                })
-                .collect();
-            let now_unix = Self::now_unix();
-            let session_trend_state = SessionTrend::analyze_session(&session_play_infos, now_unix);
-            derive_recommended_level(
-                session_trend_state.as_ref(),
-                ctx.difficulty,
-                final_ref_floor,
-            )
-        } else {
-            None
-        };
+        let recommended_level = ctx.strategy.derive_footer_level(StrategyFooterParams {
+            rdb: &self.rdb,
+            find_floor: |sid, m, d| self.find_pattern_floor(sid, m, d, use_official),
+            button_mode: ctx.button_mode,
+            current_diff: ctx.difficulty,
+            ref_floor: final_ref_floor,
+            now_unix: Self::now_unix(),
+        });
 
         LocalRecommendFooter {
             avg_rate: summary.avg_rate(),
@@ -1077,121 +1252,18 @@ impl RecommendationSource for LocalFloorRecommender {
 
         self.merge_record_rates(&mut candidates);
 
-        if !ctx.smart_recommend {
-            candidates.sort_by(|a, b| match (a.is_played(), b.is_played()) {
-                (true, false) => Ordering::Less,
-                (false, true) => Ordering::Greater,
-                (true, true) => a
-                    .rate
-                    .partial_cmp(&b.rate)
-                    .unwrap_or(Ordering::Equal)
-                    .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal)),
-                (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
-            });
-            candidates.truncate(ctx.max_results);
-            let final_entries = candidates.into_iter().map(|c| c.into_entry()).collect();
-            return RecommendBundle {
-                source_id: self.source_id().to_string(),
-                source_label: self.source_label().to_string(),
-                entries: final_entries,
-                status: SourceStatus::Ok,
-            };
-        }
-
-        let top50 = self.rdb.get_varchive_top50_summary(ctx.button_mode);
-        let recent_plays = self.rdb.get_recent_records(ctx.button_mode, 10);
-        let session_play_infos: Vec<SessionPlayInfo> = recent_plays
-            .iter()
-            .map(|r| {
-                let floor =
-                    self.find_pattern_floor(r.song_id, r.button_mode, r.difficulty, use_official);
-                let rating = calculate_performance_rating(floor, r.rate);
-                SessionPlayInfo {
-                    rating,
-                    floor,
-                    diff: r.difficulty,
-                    is_max_combo: r.is_max_combo,
-                    updated_at: r.updated_at,
-                }
-            })
-            .collect();
         let now_unix = Self::now_unix();
-        let session_trend_state = SessionTrend::analyze_session(&session_play_infos, now_unix);
-        let session_trend = session_trend_state.as_ref().map(|s| s.trend);
-
-        candidates.sort_by(|a, b| {
-            match (a.is_played(), b.is_played()) {
-                (true, false) => Ordering::Less,
-                (false, true) => Ordering::Greater,
-                (true, true) => {
-                    let a_rank = top50.rank_map.get(&(a.song_id, a.mode, a.diff)).copied();
-                    let b_rank = top50.rank_map.get(&(b.song_id, b.mode, b.diff)).copied();
-                    let pa = retry_priority(a.rate.unwrap_or(0.0), a.updated_at, now_unix)
-                        + top50_boundary_score(
-                            a.varchive_rating,
-                            a_rank,
-                            top50.cutoff_rating,
-                            top50.total_recorded_count,
-                        )
-                        + session_flow_score(
-                            a.floor,
-                            a.rate,
-                            final_ref_floor,
-                            session_trend_state.as_ref(),
-                        );
-                    let pb = retry_priority(b.rate.unwrap_or(0.0), b.updated_at, now_unix)
-                        + top50_boundary_score(
-                            b.varchive_rating,
-                            b_rank,
-                            top50.cutoff_rating,
-                            top50.total_recorded_count,
-                        )
-                        + session_flow_score(
-                            b.floor,
-                            b.rate,
-                            final_ref_floor,
-                            session_trend_state.as_ref(),
-                        );
-                    // 우선순위 내림차순 정렬: cmp(b, a) 형태로 비교
-                    pb.partial_cmp(&pa)
-                        .unwrap_or(Ordering::Equal)
-                        .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal))
-                }
-                (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
-            }
+        ctx.strategy.sort_and_annotate(StrategySortParams {
+            candidates: &mut candidates,
+            rdb: &self.rdb,
+            find_floor: |sid, m, d| self.find_pattern_floor(sid, m, d, use_official),
+            button_mode: ctx.button_mode,
+            ref_floor: final_ref_floor,
+            max_results: ctx.max_results,
+            now_unix,
         });
 
-        candidates.truncate(ctx.max_results);
-
-        let final_entries = candidates
-            .into_iter()
-            .map(|mut c| {
-                if c.is_played() {
-                    let rank = top50.rank_map.get(&(c.song_id, c.mode, c.diff)).copied();
-                    let retry_score = retry_priority(c.rate.unwrap_or(0.0), c.updated_at, now_unix);
-                    let top50_score = top50_boundary_score(
-                        c.varchive_rating,
-                        rank,
-                        top50.cutoff_rating,
-                        top50.total_recorded_count,
-                    );
-                    let flow_score = session_flow_score(
-                        c.floor,
-                        c.rate,
-                        final_ref_floor,
-                        session_trend_state.as_ref(),
-                    );
-                    c.reason = derive_recommend_reason(
-                        retry_score,
-                        top50_score,
-                        flow_score,
-                        rank,
-                        session_trend,
-                    );
-                }
-                c.into_entry()
-            })
-            .collect();
+        let final_entries = candidates.into_iter().map(|c| c.into_entry()).collect();
 
         RecommendBundle {
             source_id: self.source_id().to_string(),
@@ -1497,7 +1569,7 @@ impl CompositeRecommender {
             max_results,
             same_mode_only,
             v_id: None,
-            smart_recommend: true,
+            strategy: RecommendStrategy::Smart,
         };
         self.recommend_panel(&ctx).as_legacy_result()
     }
@@ -1528,7 +1600,7 @@ mod tests {
             max_results: 6,
             same_mode_only: true,
             v_id: None,
-            smart_recommend: true,
+            strategy: RecommendStrategy::Smart,
         };
 
         let bundle = reader.recommend(&ctx);
@@ -1568,7 +1640,7 @@ mod tests {
             max_results: 6,
             same_mode_only: true,
             v_id: None,
-            smart_recommend: true,
+            strategy: RecommendStrategy::Smart,
         };
 
         let bundle = reader.recommend(&ctx);
@@ -1878,7 +1950,7 @@ mod tests {
             max_results: 6,
             same_mode_only: true,
             v_id: None,
-            smart_recommend: false,
+            strategy: RecommendStrategy::Classic,
         };
 
         let footer = recommender.floor_summary(&ctx_classic);
