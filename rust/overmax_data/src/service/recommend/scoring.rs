@@ -364,7 +364,8 @@ pub(crate) fn session_flow_score(
     }
 }
 
-/// V-Archive Top 50 곡들 중 현재 난이도 계열(SC vs 일반)에 해당하는 패턴들의 상위 난이도 평균(기본 실력대 Floor)을 산출한다.
+/// V-Archive Top 50 곡들 중 현재 난이도 계열(SC vs 일반)에 해당하는 패턴들의 중앙값(Median Floor)을 기본 실력대 앵커로 산출한다.
+/// 최상위 한계곡(Peak)에 편향되지 않고 플레이어의 주력 난이도 허리를 가장 정직하게 대변한다.
 pub(crate) fn derive_top50_base_floor<F>(
     top50: &crate::store::record_db::VArchiveTop50Summary,
     find_floor: &F,
@@ -386,11 +387,16 @@ where
         return None;
     }
 
-    floors.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    floors.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-    let sample_count = floors.len().min(15);
-    let avg = floors.iter().take(sample_count).sum::<f64>() / sample_count as f64;
-    Some(avg)
+    let len = floors.len();
+    let median = if len % 2 == 1 {
+        floors[len / 2]
+    } else {
+        (floors[(len / 2) - 1] + floors[len / 2]) / 2.0
+    };
+
+    Some(median)
 }
 
 /// Top 50 기반 장기 실력대 및 최근 세션 모멘텀을 결합하여 인게임 공식 레벨 라벨(예: "SC 13", "12")을 도출한다.
@@ -418,11 +424,15 @@ pub(crate) fn derive_recommended_level(
         .fold(0.0f64, |acc, f| acc.max(f));
 
     // 3. 글로벌 앵커 난이도 (Top 50 주력 실력대 우선, 없으면 세션 최고 난이도)
-    let anchor_floor = match (top50_base_floor, session_peak > 0.0) {
-        (Some(t_floor), true) => t_floor.max(session_peak),
-        (Some(t_floor), false) => t_floor,
-        (None, true) => session_peak,
-        (None, false) => return None,
+    let anchor_floor = match top50_base_floor {
+        Some(t_floor) => t_floor,
+        None => {
+            if session_peak > 0.0 {
+                session_peak
+            } else {
+                return None;
+            }
+        }
     };
 
     // 4. 세션 플레이 분석 및 손풀기 가드 & 점진적 블렌딩
@@ -439,17 +449,22 @@ pub(crate) fn derive_recommended_level(
         // Top 50 앵커를 그대로 유지하여 저난도로 곤두박질치는 것을 방어!
         anchor_floor
     } else {
-        // 직전 주력 플레이 난이도
+        // 세션 주력곡들의 중앙값과 직전 주력곡의 조화로 세션 대표 난이도 산출
+        let mut core_floors: Vec<f64> = core_session_plays.iter().map(|p| p.floor).collect();
+        core_floors.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let session_median = core_floors[core_floors.len() / 2];
         let last_core_floor = core_session_plays.first().unwrap().floor;
+        let session_floor = (session_median + last_core_floor) / 2.0;
+
         let core_count = core_session_plays.len();
 
         if let Some(t_floor) = top50_base_floor {
             // 주력 플레이 수에 따라 세션 데이터를 스근하게 블렌딩
             // 1판: 25% 세션, 2판: 50% 세션, 3판: 75% 세션, 4판 이상: 100% 세션
             let session_weight = (core_count as f64 / 4.0).min(1.0);
-            (1.0 - session_weight) * t_floor + session_weight * last_core_floor
+            (1.0 - session_weight) * t_floor + session_weight * session_floor
         } else {
-            last_core_floor
+            session_floor
         }
     };
 

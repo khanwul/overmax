@@ -406,7 +406,7 @@ fn test_derive_top50_base_floor() {
 
     let summary = crate::store::record_db::VArchiveTop50Summary {
         cutoff_rating: 150.0,
-        rank_map,
+        rank_map: rank_map.clone(),
         total_recorded_count: 4,
     };
 
@@ -418,12 +418,27 @@ fn test_derive_top50_base_floor() {
         _ => 0.0,
     };
 
-    // SC 계열: (15.0 + 14.5 + 14.0) / 3 = 14.5
+    // SC 계열: [14.0, 14.5, 15.0] (홀수 개수) -> 중앙값 14.5
     let sc_floor = derive_top50_base_floor(&summary, &find_floor, Mode::B4, true);
     assert!(sc_floor.is_some());
     assert!((sc_floor.unwrap() - 14.5).abs() < 1e-6);
 
-    // 일반 계열: 12.0
+    // 짝수 개수 SC 케이스: [12.0, 14.0, 14.5, 15.0] -> 중앙값 (14.0 + 14.5) / 2 = 14.25
+    rank_map.insert((104, Mode::B4, Difficulty::SC), 5);
+    let summary_even = crate::store::record_db::VArchiveTop50Summary {
+        cutoff_rating: 140.0,
+        rank_map: rank_map.clone(),
+        total_recorded_count: 5,
+    };
+    let find_floor_even = |sid: i32, m: Mode, d: Difficulty| match sid {
+        104 => 12.0,
+        _ => find_floor(sid, m, d),
+    };
+    let sc_floor_even = derive_top50_base_floor(&summary_even, &find_floor_even, Mode::B4, true);
+    assert!(sc_floor_even.is_some());
+    assert!((sc_floor_even.unwrap() - 14.25).abs() < 1e-6);
+
+    // 일반 계열: [12.0] -> 중앙값 12.0
     let mx_floor = derive_top50_base_floor(&summary, &find_floor, Mode::B4, false);
     assert!(mx_floor.is_some());
     assert!((mx_floor.unwrap() - 12.0).abs() < 1e-6);

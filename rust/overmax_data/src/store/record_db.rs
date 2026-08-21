@@ -696,7 +696,9 @@ impl RecordDB {
         let button_mode = mode.as_str();
         let mut results = Vec::new();
 
-        // 1. play_events 테이블(결과창 실제 플레이 이력)에서 우선 조회
+        // play_events 테이블(결과창 실제 완주 이력)에서만 100% 조회
+        // 선곡창 휠 스크롤/탐색으로 오염될 수 있는 records.updated_at을 완전히 배제하여
+        // 플레이어가 실제로 플레이한 곡들만 세션 이력으로 수집한다.
         let query_events = "SELECT song_id, difficulty, rate, is_max_combo, played_at
                             FROM play_events
                             WHERE steam_id = ?1 AND button_mode = ?2
@@ -732,70 +734,6 @@ impl RecordDB {
                                     rate,
                                     is_max_combo: mc_int != 0,
                                     updated_at: played_at,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        if results.len() >= limit {
-            return results;
-        }
-
-        // 2. play_events의 결과가 limit에 못 미치면, records 테이블에서 나머지 슬롯을 보충한다.
-        //    play_events가 실제 플레이 타임라인이므로 항상 우선하며,
-        //    records는 최고 기록 갱신 시각 기준이므로 보충 역할만 수행한다.
-        let remaining = limit - results.len();
-        let fetch_extra = remaining + results.len(); // 중복 제거 여유분
-
-        let query_records = "SELECT song_id, difficulty, rate, is_max_combo, updated_at
-                             FROM records
-                             WHERE steam_id = ?1 AND button_mode = ?2
-                             ORDER BY updated_at DESC
-                             LIMIT ?3";
-
-        let existing_keys: std::collections::HashSet<(i32, String)> = results
-            .iter()
-            .map(|r| (r.song_id, r.difficulty.as_str().to_string()))
-            .collect();
-
-        let _ = self.with_rate_map_connection(|conn| {
-            if let Ok(mut stmt) = conn.prepare(query_records) {
-                if let Ok(mut rows) =
-                    stmt.query(rusqlite::params![steam_id, button_mode, fetch_extra as i64])
-                {
-                    while let Ok(Some(row)) = rows.next() {
-                        if results.len() >= limit {
-                            break;
-                        }
-                        if let (
-                            Ok(song_id_str),
-                            Ok(diff_str),
-                            Ok(rate),
-                            Ok(mc_int),
-                            Ok(updated_at),
-                        ) = (
-                            row.get::<_, String>(0),
-                            row.get::<_, String>(1),
-                            row.get::<_, f64>(2),
-                            row.get::<_, i32>(3),
-                            row.get::<_, i64>(4),
-                        ) {
-                            if let (Ok(sid), Some(diff)) =
-                                (song_id_str.parse::<i32>(), Difficulty::from_str(&diff_str))
-                            {
-                                if existing_keys.contains(&(sid, diff_str.clone())) {
-                                    continue;
-                                }
-                                results.push(RecentRecordEntry {
-                                    song_id: sid,
-                                    button_mode: mode,
-                                    difficulty: diff,
-                                    rate,
-                                    is_max_combo: mc_int != 0,
-                                    updated_at,
                                 });
                             }
                         }
@@ -1313,7 +1251,7 @@ mod tests {
         let conn = db.open_conn().unwrap();
         for i in 1..=5 {
             conn.execute(
-                "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+                "INSERT INTO play_events (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, played_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params![
                     "76561198000000001",
@@ -1399,19 +1337,10 @@ mod tests {
     /// play_events가 limit 미만일 때 records로 보충하되 중복 제거하는 fallback 검증.
     ///
     /// 테스트 시나리오:
-    /// - play_events: 곡 100(SC), 101(SC) — 2건만 존재
-    /// - records: 곡 100(SC), 200(NM), 201(NM), 202(NM), 203(NM) — 5건 존재
-    /// - limit=5 요청 시:
-    ///   1. play_events에서 100, 101 (2건) 우선 반환
-    ///   2. records에서 200, 201, 202 보충 (100은 중복이므로 스킵)
-    ///   3. 최종 5건 반환, play_events 항목이 앞에 위치
-    ///
-    /// 실제 마이그레이션 상황에서의 동작:
-    /// - play_events 도입 직후 사용자: play_events 1~2건 + records 다수 → 세션 분석에 충분한 데이터 제공
-    /// - play_events가 전혀 없는 기존 사용자: records에서만 limit개 반환 (기존 동작 유지)
-    /// - play_events가 limit 이상인 정상 사용자: play_events만으로 반환 (records 미참조)
+    /// play_events(실제 완주 로그)만을 100% 조회하며,
+    /// 선곡창 휠 스크롤로 오염될 수 있는 records 테이블의 허위 레코드는 끌어오지 않음을 검증한다.
     #[test]
-    fn test_recent_records_fallback_supplements_from_records_with_dedup() {
+    fn test_recent_records_exclusive_play_events_without_records_pollution() {
         let temp_dir = tempfile::tempdir().unwrap();
         let db_path = temp_dir.path().join("record_fallback.db");
         let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
@@ -1463,38 +1392,22 @@ mod tests {
         }
         drop(conn);
 
-        // Case 1: limit=5 → play_events 2건 + records 3건(중복 제거) = 5건
+        // play_events 테이블의 실제 완주 기록만 정확하게 반환함을 검증
+        // records 테이블(선곡창 휠 스크롤 오염)은 세션 이력으로 끌어오지 않음
         let recent = db.get_recent_records("76561198000000001", Mode::B4, 5);
-        assert_eq!(recent.len(), 5);
-        // play_events가 먼저 (temporal order 보장)
+        assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].song_id, 100);
         assert_eq!(recent[0].updated_at, 2000); // play_events의 played_at
         assert_eq!(recent[1].song_id, 101);
         assert_eq!(recent[1].updated_at, 1900);
-        // records에서 보충 (곡 100은 중복으로 스킵됨)
-        assert_eq!(recent[2].song_id, 200);
-        assert_eq!(recent[3].song_id, 201);
-        assert_eq!(recent[4].song_id, 202);
 
-        // Case 2: limit=2 → play_events만으로 충분 → records 미참조
-        let recent_small = db.get_recent_records("76561198000000001", Mode::B4, 2);
-        assert_eq!(recent_small.len(), 2);
+        // limit=1일 때 최신 1건만 반환
+        let recent_small = db.get_recent_records("76561198000000001", Mode::B4, 1);
+        assert_eq!(recent_small.len(), 1);
         assert_eq!(recent_small[0].song_id, 100);
-        assert_eq!(recent_small[1].song_id, 101);
 
-        // Case 3: play_events가 없는 다른 모드 → records에서만 조회 (기존 동작 유지)
-        let conn = db.open_conn().unwrap();
-        conn.execute(
-            "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params!["76561198000000001", "300", "6B", "MX", 99.0, 1, 3000],
-        )
-        .unwrap();
-        drop(conn);
-
+        // play_events가 없는 모드는 0건 반환 (records 테이블의 허위 레코드를 끌어오지 않음)
         let recent_6b = db.get_recent_records("76561198000000001", Mode::B6, 5);
-        assert_eq!(recent_6b.len(), 1);
-        assert_eq!(recent_6b[0].song_id, 300);
-        assert_eq!(recent_6b[0].rate, 99.0);
+        assert_eq!(recent_6b.len(), 0);
     }
 }
