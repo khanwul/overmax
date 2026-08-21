@@ -71,6 +71,7 @@ pub struct RecommendResult {
     pub avg_rate: f64,
     pub has_record_count: usize,
     pub total_count: usize,
+    pub recommended_level: Option<String>,
 }
 
 impl RecommendResult {
@@ -80,6 +81,7 @@ impl RecommendResult {
             avg_rate: -1.0,
             has_record_count: 0,
             total_count: 0,
+            recommended_level: None,
         }
     }
 }
@@ -125,6 +127,7 @@ pub struct LocalRecommendFooter {
     pub avg_rate: f64,
     pub has_record_count: usize,
     pub total_count: usize,
+    pub recommended_level: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +149,7 @@ impl RecommendPanel {
             avg_rate: footer.as_ref().map(|f| f.avg_rate).unwrap_or(-1.0),
             has_record_count: footer.as_ref().map(|f| f.has_record_count).unwrap_or(0),
             total_count: footer.as_ref().map(|f| f.total_count).unwrap_or(0),
+            recommended_level: footer.as_ref().and_then(|f| f.recommended_level.clone()),
         }
     }
 }
@@ -313,13 +317,26 @@ pub enum SessionTrend {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SessionPlayInfo {
     pub rating: f64,
+    pub floor: f64,
+    pub diff: Difficulty,
     pub is_max_combo: bool,
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SessionTrendState {
+    pub trend: SessionTrend,
+    pub avg_rating: f64,
+    pub last_floor: f64,
+    pub last_diff: Difficulty,
+}
+
 impl SessionTrend {
     /// 최근 플레이 레이팅 기록들로부터 플레이어 개인의 세션 평균 대비 상대적 퍼포먼스 추세를 산출한다.
-    pub fn from_session_plays(session_plays: &[SessionPlayInfo], now_unix: i64) -> Option<Self> {
+    pub fn analyze_session(
+        session_plays: &[SessionPlayInfo],
+        now_unix: i64,
+    ) -> Option<SessionTrendState> {
         let last_play = session_plays.first()?;
         let elapsed_hours = ((now_unix - last_play.updated_at).max(0) as f64) / 3600.0;
         if elapsed_hours > SESSION_IDLE_TIMEOUT_HOURS {
@@ -339,36 +356,92 @@ impl SessionTrend {
             return None;
         }
 
-        // 세션 첫 판 직후인 경우: 비교 기준이 없으므로 Steady(동급 탐색)로 시작
-        if valid_plays.len() == 1 {
-            return Some(Self::Steady);
-        }
-
         let avg_rating =
             valid_plays.iter().map(|r| r.rating).sum::<f64>() / valid_plays.len() as f64;
         let delta = last_play.rating - avg_rating;
 
-        if delta >= MOMENTUM_CLIMB_RATING_DELTA || (last_play.is_max_combo && delta >= 0.0) {
-            Some(Self::Climbing)
+        let trend = if valid_plays.len() == 1 {
+            Self::Steady
+        } else if delta >= MOMENTUM_CLIMB_RATING_DELTA || (last_play.is_max_combo && delta >= 0.0) {
+            Self::Climbing
         } else if delta >= MOMENTUM_RECOVERY_RATING_DELTA {
-            Some(Self::Steady)
+            Self::Steady
         } else {
-            Some(Self::Recovery)
-        }
+            Self::Recovery
+        };
+
+        Some(SessionTrendState {
+            trend,
+            avg_rating,
+            last_floor: last_play.floor,
+            last_diff: last_play.diff,
+        })
+    }
+
+    /// 레거시 호환 래퍼
+    pub fn from_session_plays(session_plays: &[SessionPlayInfo], now_unix: i64) -> Option<Self> {
+        Self::analyze_session(session_plays, now_unix).map(|s| s.trend)
     }
 }
 
-/// 직전 플레이 성과와 후보 곡의 Floor 관계를 평가하여 세션 모멘텀 가중치를 반환한다.
-fn session_flow_score(cand_floor: f64, ref_floor: f64, trend: Option<SessionTrend>) -> f64 {
-    let Some(trend) = trend else {
+/// 직전 플레이 성과와 후보 곡의 Floor 및 Rate 관계를 평가하여 세션 모멘텀 가중치를 반환한다.
+fn session_flow_score(
+    cand_floor: f64,
+    cand_rate: Option<f64>,
+    ref_floor: f64,
+    trend_state: Option<&SessionTrendState>,
+) -> f64 {
+    let Some(state) = trend_state else {
         return 0.0;
     };
 
     let delta = cand_floor - ref_floor;
 
-    match trend {
+    // 1. 동일 Floor 내부 정렬 (floor_range: 0.0 또는 근접 층) -> 상대 Performance Rating 기반 정규화
+    if delta.abs() <= 0.05 {
+        if let Some(rate) = cand_rate {
+            let cand_rating = calculate_performance_rating(cand_floor, rate);
+            let rating_delta = cand_rating - state.avg_rating;
+
+            return match state.trend {
+                SessionTrend::Climbing => {
+                    // 컨디션 쾌조/상승: 내 평균 실력 대비 살짝 미달인 정복 대상 미숙달곡 (-12.0 ~ -1.5)
+                    if (-12.0..=-1.5).contains(&rating_delta) {
+                        let center = -6.0;
+                        let dist = (rating_delta - center).abs();
+                        (1.0 - (dist / 6.0)).max(0.0) * MOMENTUM_MAX_BONUS
+                    } else {
+                        0.0
+                    }
+                }
+                SessionTrend::Recovery => {
+                    // 컨디션 저조/손풀기: 내 실력으로 안정적으로 고득점을 낼 수 있는 검증된 안정곡 (+1.5 이상)
+                    if rating_delta >= 1.5 {
+                        let ratio = ((rating_delta - 1.5) / 8.0).clamp(0.0, 1.0);
+                        ratio * MOMENTUM_MAX_BONUS
+                    } else {
+                        0.0
+                    }
+                }
+                SessionTrend::Steady => {
+                    // 안정 순항: 평균 실력 부근 (±4.0 이내)
+                    if rating_delta.abs() <= 4.0 {
+                        (1.0 - (rating_delta.abs() / 4.0)) * (MOMENTUM_MAX_BONUS * 0.75)
+                    } else {
+                        0.0
+                    }
+                }
+            };
+        }
+        return match state.trend {
+            SessionTrend::Steady => MOMENTUM_MAX_BONUS * 0.5,
+            _ => 0.0,
+        };
+    }
+
+    // 2. 서로 다른 Floor 간 정렬 (floor_range > 0일 때의 모멘텀 가중치)
+    match state.trend {
         SessionTrend::Climbing => {
-            // +0.1 ~ +0.4 구간에서 최고 점수 (최대 4.0)
             if (0.0..=0.4).contains(&delta) && delta > 0.0 {
                 let center = 0.25;
                 let dist = (delta - center).abs();
@@ -378,7 +451,6 @@ fn session_flow_score(cand_floor: f64, ref_floor: f64, trend: Option<SessionTren
             }
         }
         SessionTrend::Steady => {
-            // ±0.15 이내 동급 난이도에서 최고 점수 (최대 3.0)
             if delta.abs() <= 0.15 {
                 (1.0 - (delta.abs() / 0.15)) * (MOMENTUM_MAX_BONUS * 0.75)
             } else {
@@ -386,7 +458,6 @@ fn session_flow_score(cand_floor: f64, ref_floor: f64, trend: Option<SessionTren
             }
         }
         SessionTrend::Recovery => {
-            // -0.5 ~ -0.1 구간에서 최고 점수 (최대 4.0)
             if (-0.5..0.0).contains(&delta) {
                 let center = -0.3;
                 let dist = (delta - center).abs();
@@ -395,6 +466,33 @@ fn session_flow_score(cand_floor: f64, ref_floor: f64, trend: Option<SessionTren
                 0.0
             }
         }
+    }
+}
+
+/// 최근 플레이 기록 및 세션 모멘텀을 기반으로 인게임 공식 레벨 라벨(예: "SC 13", "12")을 도출한다.
+fn derive_recommended_level(
+    trend_state: Option<&SessionTrendState>,
+    current_diff: Difficulty,
+    current_floor: f64,
+) -> Option<String> {
+    let base_floor = trend_state.map(|s| s.last_floor).unwrap_or(current_floor);
+    let is_sc = trend_state
+        .map(|s| s.last_diff == Difficulty::SC)
+        .unwrap_or(current_diff == Difficulty::SC);
+
+    let target_floor = match trend_state.map(|s| s.trend) {
+        Some(SessionTrend::Climbing) => base_floor + 0.3,
+        Some(SessionTrend::Recovery) => (base_floor - 0.3).max(1.0),
+        Some(SessionTrend::Steady) | None => base_floor,
+    };
+
+    let level_num = target_floor.round() as u32;
+    let clamped_level = level_num.clamp(1, 15);
+
+    if is_sc {
+        Some(format!("SC {}", clamped_level))
+    } else {
+        Some(format!("{}", clamped_level))
     }
 }
 
@@ -562,10 +660,35 @@ impl LocalFloorRecommender {
             ctx.same_mode_only,
         );
 
+        let recent_plays = self.rdb.get_recent_records(ctx.button_mode, 10);
+        let session_play_infos: Vec<SessionPlayInfo> = recent_plays
+            .iter()
+            .map(|r| {
+                let floor =
+                    self.find_pattern_floor(r.song_id, r.button_mode, r.difficulty, use_official);
+                let rating = calculate_performance_rating(floor, r.rate);
+                SessionPlayInfo {
+                    rating,
+                    floor,
+                    diff: r.difficulty,
+                    is_max_combo: r.is_max_combo,
+                    updated_at: r.updated_at,
+                }
+            })
+            .collect();
+        let now_unix = Self::now_unix();
+        let session_trend_state = SessionTrend::analyze_session(&session_play_infos, now_unix);
+        let recommended_level = derive_recommended_level(
+            session_trend_state.as_ref(),
+            ctx.difficulty,
+            final_ref_floor,
+        );
+
         LocalRecommendFooter {
             avg_rate: summary.avg_rate(),
             has_record_count: summary.has_record_count,
             total_count: summary.total_count,
+            recommended_level,
         }
     }
 
@@ -949,13 +1072,16 @@ impl RecommendationSource for LocalFloorRecommender {
                 let rating = calculate_performance_rating(floor, r.rate);
                 SessionPlayInfo {
                     rating,
+                    floor,
+                    diff: r.difficulty,
                     is_max_combo: r.is_max_combo,
                     updated_at: r.updated_at,
                 }
             })
             .collect();
         let now_unix = Self::now_unix();
-        let session_trend = SessionTrend::from_session_plays(&session_play_infos, now_unix);
+        let session_trend_state = SessionTrend::analyze_session(&session_play_infos, now_unix);
+        let session_trend = session_trend_state.as_ref().map(|s| s.trend);
 
         candidates.sort_by(|a, b| {
             match (a.is_played(), b.is_played()) {
@@ -971,7 +1097,12 @@ impl RecommendationSource for LocalFloorRecommender {
                             top50.cutoff_rating,
                             top50.total_recorded_count,
                         )
-                        + session_flow_score(a.floor, final_ref_floor, session_trend);
+                        + session_flow_score(
+                            a.floor,
+                            a.rate,
+                            final_ref_floor,
+                            session_trend_state.as_ref(),
+                        );
                     let pb = retry_priority(b.rate.unwrap_or(0.0), b.updated_at, now_unix)
                         + top50_boundary_score(
                             b.varchive_rating,
@@ -979,7 +1110,12 @@ impl RecommendationSource for LocalFloorRecommender {
                             top50.cutoff_rating,
                             top50.total_recorded_count,
                         )
-                        + session_flow_score(b.floor, final_ref_floor, session_trend);
+                        + session_flow_score(
+                            b.floor,
+                            b.rate,
+                            final_ref_floor,
+                            session_trend_state.as_ref(),
+                        );
                     // 우선순위 내림차순 정렬: cmp(b, a) 형태로 비교
                     pb.partial_cmp(&pa)
                         .unwrap_or(Ordering::Equal)
@@ -1003,7 +1139,12 @@ impl RecommendationSource for LocalFloorRecommender {
                         top50.cutoff_rating,
                         top50.total_recorded_count,
                     );
-                    let flow_score = session_flow_score(c.floor, final_ref_floor, session_trend);
+                    let flow_score = session_flow_score(
+                        c.floor,
+                        c.rate,
+                        final_ref_floor,
+                        session_trend_state.as_ref(),
+                    );
                     c.reason = derive_recommend_reason(
                         retry_score,
                         top50_score,
@@ -1501,19 +1642,24 @@ mod tests {
         // 2. 세션 만료 테스트 (5시간 전 플레이 -> timeout -> None)
         let expired_play = vec![SessionPlayInfo {
             rating: 180.0,
+            floor: 14.0,
+            diff: Difficulty::SC,
             is_max_combo: false,
             updated_at: now - 5 * 3600,
         }];
-        assert_eq!(SessionTrend::from_session_plays(&expired_play, now), None);
+        assert_eq!(SessionTrend::analyze_session(&expired_play, now), None);
 
         // 3. 세션 첫 판 (1개 플레이 -> Steady)
         let first_play = vec![SessionPlayInfo {
             rating: 150.0,
+            floor: 12.0,
+            diff: Difficulty::SC,
             is_max_combo: false,
             updated_at: now - 600,
         }];
+        let first_state = SessionTrend::analyze_session(&first_play, now);
         assert_eq!(
-            SessionTrend::from_session_plays(&first_play, now),
+            first_state.as_ref().map(|s| s.trend),
             Some(SessionTrend::Steady)
         );
 
@@ -1522,49 +1668,105 @@ mod tests {
         let pro_climbing = vec![
             SessionPlayInfo {
                 rating: 150.0, // 15층 97.0% (고난도 도전 성공)
+                floor: 15.0,
+                diff: Difficulty::SC,
                 is_max_combo: false,
                 updated_at: now - 300,
             },
             SessionPlayInfo {
                 rating: 135.0,
+                floor: 13.0,
+                diff: Difficulty::SC,
                 is_max_combo: false,
                 updated_at: now - 600,
             },
             SessionPlayInfo {
                 rating: 135.0,
+                floor: 13.0,
+                diff: Difficulty::SC,
                 is_max_combo: false,
                 updated_at: now - 900,
             },
         ];
-        let climb_trend = SessionTrend::from_session_plays(&pro_climbing, now);
-        assert_eq!(climb_trend, Some(SessionTrend::Climbing));
+        let climb_state = SessionTrend::analyze_session(&pro_climbing, now);
+        assert_eq!(
+            climb_state.as_ref().map(|s| s.trend),
+            Some(SessionTrend::Climbing)
+        );
         // Climbing: +0.25 도전곡에 최고 보너스(4.0)
-        let climb_score = session_flow_score(12.25, 12.0, climb_trend);
+        let climb_score = session_flow_score(12.25, None, 12.0, climb_state.as_ref());
         assert!((climb_score - 4.0).abs() < 0.01);
 
         // Case B: 8층 99.8% 달성 (레이팅 105.6점, 단순 손풀기) vs 세션 평균 (140.0점) -> -34.4점 -> Recovery/Warmup
         let warmup_play = vec![
             SessionPlayInfo {
                 rating: 105.6, // 8층 99.8% 손풀기
+                floor: 8.0,
+                diff: Difficulty::SC,
                 is_max_combo: true,
                 updated_at: now - 300,
             },
             SessionPlayInfo {
                 rating: 150.0,
+                floor: 13.0,
+                diff: Difficulty::SC,
                 is_max_combo: false,
                 updated_at: now - 600,
             },
             SessionPlayInfo {
                 rating: 160.0,
+                floor: 13.0,
+                diff: Difficulty::SC,
                 is_max_combo: false,
                 updated_at: now - 900,
             },
         ];
-        let warmup_trend = SessionTrend::from_session_plays(&warmup_play, now);
-        assert_eq!(warmup_trend, Some(SessionTrend::Recovery));
+        let warmup_state = SessionTrend::analyze_session(&warmup_play, now);
+        assert_eq!(
+            warmup_state.as_ref().map(|s| s.trend),
+            Some(SessionTrend::Recovery)
+        );
         // Recovery: -0.3 회복곡에 최고 보너스(4.0)
-        let rec_score = session_flow_score(11.7, 12.0, warmup_trend);
+        let rec_score = session_flow_score(11.7, None, 12.0, warmup_state.as_ref());
         assert!((rec_score - 4.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_derive_recommended_level() {
+        let state_climb = SessionTrendState {
+            trend: SessionTrend::Climbing,
+            avg_rating: 170.0,
+            last_floor: 12.8,
+            last_diff: Difficulty::SC,
+        };
+        // 12.8 + 0.3 = 13.1 -> round 13 -> "SC 13"
+        assert_eq!(
+            derive_recommended_level(Some(&state_climb), Difficulty::SC, 12.8),
+            Some("SC 13".to_string())
+        );
+
+        let state_recovery = SessionTrendState {
+            trend: SessionTrend::Recovery,
+            avg_rating: 170.0,
+            last_floor: 13.2,
+            last_diff: Difficulty::SC,
+        };
+        // 13.2 - 0.3 = 12.9 -> round 13 -> "SC 13", 13.0 - 0.3 = 12.7 -> round 13
+        assert_eq!(
+            derive_recommended_level(Some(&state_recovery), Difficulty::SC, 13.0),
+            Some("SC 13".to_string())
+        );
+
+        let state_normal = SessionTrendState {
+            trend: SessionTrend::Steady,
+            avg_rating: 140.0,
+            last_floor: 11.0,
+            last_diff: Difficulty::MX,
+        };
+        assert_eq!(
+            derive_recommended_level(Some(&state_normal), Difficulty::MX, 11.0),
+            Some("11".to_string())
+        );
     }
 
     #[test]

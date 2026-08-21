@@ -17,6 +17,7 @@ pub struct OverlayHeader<'a> {
     song_label: &'a str,
     pattern_tabs: &'a [PatternTabInfo],
     settings_open: &'a Arc<AtomicBool>,
+    sync_open: Option<&'a Arc<AtomicBool>>,
     px: &'a Px,
     varchive_upload_needed: bool,
     varchive_account_configured: bool,
@@ -38,6 +39,7 @@ impl<'a> OverlayHeader<'a> {
             song_label,
             pattern_tabs,
             settings_open,
+            sync_open: None,
             px,
             varchive_upload_needed: false,
             varchive_account_configured: false,
@@ -45,6 +47,11 @@ impl<'a> OverlayHeader<'a> {
             session_initial_record: None,
             toast: None,
         }
+    }
+
+    pub(crate) fn sync_open(mut self, sync_open: &'a Arc<AtomicBool>) -> Self {
+        self.sync_open = Some(sync_open);
+        self
     }
 
     pub(crate) fn varchive_upload_needed(mut self, needed: bool) -> Self {
@@ -127,6 +134,30 @@ impl<'a> OverlayHeader<'a> {
                         if response.clicked() {
                             self.settings_open.store(true, Ordering::Relaxed);
                             actions.command = Some(UiCommand::OpenSettings);
+                        }
+
+                        if let Some(sync_open) = self.sync_open {
+                            ui.add_space(4.0 * self.px.scale);
+                            let sync_text = RichText::new("🔄")
+                                .color(Theme::TEXT_PRIMARY)
+                                .font(FontId::proportional(11.0 * self.px.scale));
+                            let sync_btn = Button::new(sync_text)
+                                .fill(Theme::SECTION_BG)
+                                .corner_radius(CornerRadius::same((4.0 * self.px.scale) as u8))
+                                .wrap();
+                            let btn_size = Vec2::splat(18.0 * self.px.scale);
+                            let response = ui
+                                .add_sized(btn_size, sync_btn.sense(Sense::click()))
+                                .on_hover_text(crate::t!("sync-title"));
+                            buttons_left_x = Some(
+                                buttons_left_x
+                                    .map(|x| x.min(response.rect.min.x))
+                                    .unwrap_or(response.rect.min.x),
+                            );
+                            if response.clicked() {
+                                sync_open.store(true, Ordering::Relaxed);
+                                actions.command = Some(UiCommand::OpenSync);
+                            }
                         }
 
                         if self.varchive_upload_needed {
