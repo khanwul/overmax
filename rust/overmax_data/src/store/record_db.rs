@@ -397,6 +397,63 @@ impl RecordDB {
         map
     }
 
+    pub fn get_updated_at_map(
+        &self,
+        song_ids: &[i32],
+    ) -> std::collections::HashMap<RecordKey, i64> {
+        if !self.is_ready || song_ids.is_empty() {
+            return std::collections::HashMap::new();
+        }
+
+        let steam_id = self.get_steam_id();
+        let placeholders = vec!["?"; song_ids.len()].join(",");
+        let query = format!(
+            "SELECT song_id, button_mode, difficulty, updated_at
+             FROM records
+             WHERE steam_id=?1 AND song_id IN ({})",
+            placeholders
+        );
+
+        let mut map = std::collections::HashMap::new();
+        let _ =
+            self.with_rate_map_connection(|conn| {
+                if let Ok(mut stmt) = conn.prepare(&query) {
+                    let mut p = Vec::new();
+                    p.push(&steam_id as &dyn rusqlite::ToSql);
+                    let song_ids_str: Vec<String> =
+                        song_ids.iter().map(|s| s.to_string()).collect();
+                    for id_str in &song_ids_str {
+                        p.push(id_str as &dyn rusqlite::ToSql);
+                    }
+                    if let Ok(mut rows) = stmt.query(&*p) {
+                        while let Ok(Some(row)) = rows.next() {
+                            if let (
+                                Ok(song_id_str),
+                                Ok(button_mode),
+                                Ok(difficulty),
+                                Ok(updated_at),
+                            ) = (
+                                row.get::<_, String>(0),
+                                row.get::<_, String>(1),
+                                row.get::<_, String>(2),
+                                row.get::<_, i64>(3),
+                            ) {
+                                if let Ok(sid) = song_id_str.parse::<i32>() {
+                                    if let (Some(m), Some(d)) = (
+                                        Mode::from_str(&button_mode),
+                                        Difficulty::from_str(&difficulty),
+                                    ) {
+                                        map.insert((sid, m, d), updated_at);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        map
+    }
+
     /// All local rows for a Steam id (for sync). Ignores internal `steam_id` mutex.
     pub fn all_records_for_steam(
         &self,
@@ -767,5 +824,28 @@ mod tests {
 
         let all_rows = db.all_records_for_steam("76561198000000001");
         assert_eq!(all_rows.len(), 8 * 20);
+    }
+
+    #[test]
+    fn test_get_updated_at_map() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("record_updated_at.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        assert!(db.upsert(101, Mode::B4, Difficulty::NM, 98.5, false, false));
+        assert!(db.upsert(102, Mode::B6, Difficulty::HD, 99.0, true, false));
+
+        let map = db.get_updated_at_map(&[101, 102, 999]);
+        assert_eq!(map.len(), 2);
+        let updated_101 = map.get(&(101, Mode::B4, Difficulty::NM)).copied().unwrap();
+        let updated_102 = map.get(&(102, Mode::B6, Difficulty::HD)).copied().unwrap();
+        assert!(updated_101 >= before);
+        assert!(updated_102 >= before);
     }
 }

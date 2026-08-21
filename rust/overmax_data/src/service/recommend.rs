@@ -174,6 +174,26 @@ struct CandidateSearchParams {
     same_mode_only: bool,
 }
 
+/// 재도전 목표 정확도. 100.0(퍼펙트) 대신 현실적인 재도전 유인 지점으로 설정.
+const RETRY_TARGET_RATE: f64 = 99.5;
+/// 이 시간 이내에 플레이한 곡은 재도전 우선순위에서 사실상 제외(당일 반복 추천 억제).
+const RETRY_RECENCY_GRACE_HOURS: f64 = 12.0;
+/// 이 일수가 지나면 격차(rate_gap)를 100% 반영(가중치 1.0로 포화).
+const RETRY_RECENCY_RAMP_DAYS: f64 = 14.0;
+
+/// 재도전 우선순위 = (목표 정확도 - 현재 rate) * 최근성 가중치.
+/// `updated_at`이 없으면(레거시 데이터 등) 최근성 가중 없이 격차만 반환한다.
+fn retry_priority(rate: f64, updated_at: Option<i64>, now_unix: i64) -> f64 {
+    let rate_gap = (RETRY_TARGET_RATE - rate).max(0.0);
+    let Some(updated_at) = updated_at else {
+        return rate_gap;
+    };
+    let days_since = ((now_unix - updated_at).max(0) as f64) / 86400.0;
+    let grace_days = RETRY_RECENCY_GRACE_HOURS / 24.0;
+    let recency_weight = ((days_since - grace_days) / RETRY_RECENCY_RAMP_DAYS).clamp(0.0, 1.0);
+    rate_gap * recency_weight
+}
+
 struct RawCandidate<'a> {
     song_id: i32,
     song: &'a crate::community::client::Song,
@@ -184,6 +204,7 @@ struct RawCandidate<'a> {
     floor_name: Option<Arc<str>>,
     rate: Option<f64>,
     is_max_combo: bool,
+    updated_at: Option<i64>,
 }
 
 impl<'a> RawCandidate<'a> {
@@ -209,6 +230,13 @@ impl<'a> RawCandidate<'a> {
 }
 
 impl LocalFloorRecommender {
+    fn now_unix() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
+
     pub fn new(vdb: Arc<VArchiveDB>, rdb: Arc<RecordManager>) -> Self {
         Self {
             vdb,
@@ -333,6 +361,7 @@ impl LocalFloorRecommender {
                             floor_name: p.floor_name.clone(),
                             rate: None,
                             is_max_combo: false,
+                            updated_at: None,
                         });
                     }
                 }
@@ -354,14 +383,15 @@ impl LocalFloorRecommender {
         }
 
         let rate_map = self.rdb.get_rate_map(&unique_ids);
+        let updated_at_map = self.rdb.get_local_updated_at_map(&unique_ids);
 
         for entry in candidates.iter_mut() {
-            if let Some(&(rate, is_max_combo)) =
-                rate_map.get(&(entry.song_id, entry.mode, entry.diff))
-            {
+            let key = (entry.song_id, entry.mode, entry.diff);
+            if let Some(&(rate, is_max_combo)) = rate_map.get(&key) {
                 entry.rate = Some(rate as f64);
                 entry.is_max_combo = is_max_combo;
             }
+            entry.updated_at = updated_at_map.get(&key).copied();
         }
     }
 
@@ -611,17 +641,20 @@ impl RecommendationSource for LocalFloorRecommender {
 
         self.merge_record_rates(&mut candidates);
 
+        let now_unix = Self::now_unix();
         candidates.sort_by(|a, b| {
-            if a.is_played() && !b.is_played() {
-                Ordering::Less
-            } else if !a.is_played() && b.is_played() {
-                Ordering::Greater
-            } else if let (Some(ra), Some(rb)) = (a.rate, b.rate) {
-                ra.partial_cmp(&rb)
-                    .unwrap_or(Ordering::Equal)
-                    .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal))
-            } else {
-                a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal)
+            match (a.is_played(), b.is_played()) {
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                (true, true) => {
+                    let pa = retry_priority(a.rate.unwrap_or(0.0), a.updated_at, now_unix);
+                    let pb = retry_priority(b.rate.unwrap_or(0.0), b.updated_at, now_unix);
+                    // 우선순위 내림차순 정렬: cmp(b, a) 형태로 비교
+                    pb.partial_cmp(&pa)
+                        .unwrap_or(Ordering::Equal)
+                        .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal))
+                }
+                (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
             }
         });
 
@@ -1044,5 +1077,26 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn retry_priority_weights_gap_by_recency_and_grace_period() {
+        let now = 1_000_000i64;
+
+        // 1시간 전 플레이 (12시간 유예 이내) -> 가중치 거의 0
+        let just_played = retry_priority(90.0, Some(now - 3600), now);
+        assert!(just_played < 0.01);
+
+        // 유예(12h) + 램프(14일)를 완전히 지남 -> 가중치 1.0, 격차 100% 반영
+        let long_ago = retry_priority(90.0, Some(now - (14 * 86400 + 13 * 3600)), now);
+        assert!((long_ago - 9.5).abs() < 0.05); // 99.5 - 90.0 = 9.5
+
+        // 이미 목표치 이상 -> 격차 0, 최근성과 무관하게 0
+        let maxed = retry_priority(99.5, Some(now - 30 * 86400), now);
+        assert_eq!(maxed, 0.0);
+
+        // updated_at 없음(레거시 로우) -> 최근성 가중 없이 순수 격차만 반환 (기존 동작과 호환)
+        let no_timestamp = retry_priority(95.0, None, now);
+        assert_eq!(no_timestamp, 4.5);
     }
 }

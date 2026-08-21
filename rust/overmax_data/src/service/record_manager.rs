@@ -143,6 +143,13 @@ impl RecordManager {
         self.record_db.get(song_id, button_mode, difficulty)
     }
 
+    pub fn get_local_updated_at_map(
+        &self,
+        song_ids: &[i32],
+    ) -> std::collections::HashMap<RecordKey, i64> {
+        self.record_db.get_updated_at_map(song_ids)
+    }
+
     pub fn get_varchive_cache_record(
         &self,
         song_id: i32,

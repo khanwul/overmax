@@ -302,14 +302,14 @@ fn retry_priority_weights_gap_by_recency_and_grace_period() {
 
 ## 5. Definition of Done
 
-- [ ] `RecordDB::get_updated_at_map` 추가 및 단위 테스트 통과
-- [ ] `RecordManager::get_local_updated_at_map` 추가
-- [ ] `LocalFloorRecommender`의 `RawCandidate`, `merge_record_rates`, 정렬 로직 반영
-- [ ] `retry_priority()` 단위 테스트 4종 통과
-- [ ] `cargo test --workspace --locked` 전체 통과 (특히 `overmax-data` 패키지)
-- [ ] `cargo clippy --workspace --all-targets --locked` 경고 없음
-- [ ] `overmax_data` 크레이트 외 파일 변경 없음 (git diff로 확인)
-- [ ] `LocalFloorRecommender`/`CompositeRecommender`의 공개 시그니처 불변 (하위 호환 유지 — `overmax_app`, `overmax_engine` 등 호출부 무변경 확인)
+- [x] `RecordDB::get_updated_at_map` 추가 및 단위 테스트 통과
+- [x] `RecordManager::get_local_updated_at_map` 추가
+- [x] `LocalFloorRecommender`의 `RawCandidate`, `merge_record_rates`, 정렬 로직 반영
+- [x] `retry_priority()` 단위 테스트 4종 통과
+- [x] `cargo test --workspace --locked` 전체 통과 (특히 `overmax-data` 패키지)
+- [x] `cargo clippy --workspace --all-targets --locked` 경고 없음
+- [x] `overmax_data` 크레이트 외 파일 변경 없음 (git diff로 확인)
+- [x] `LocalFloorRecommender`/`CompositeRecommender`의 공개 시그니처 불변 (하위 호환 유지 — `overmax_app`, `overmax_engine` 등 호출부 무변경 확인)
 
 ---
 
