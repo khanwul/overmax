@@ -95,6 +95,7 @@ pub struct RecommendContext {
     pub max_results: usize,
     pub same_mode_only: bool,
     pub v_id: Option<String>,
+    pub smart_recommend: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -660,29 +661,37 @@ impl LocalFloorRecommender {
             ctx.same_mode_only,
         );
 
-        let recent_plays = self.rdb.get_recent_records(ctx.button_mode, 10);
-        let session_play_infos: Vec<SessionPlayInfo> = recent_plays
-            .iter()
-            .map(|r| {
-                let floor =
-                    self.find_pattern_floor(r.song_id, r.button_mode, r.difficulty, use_official);
-                let rating = calculate_performance_rating(floor, r.rate);
-                SessionPlayInfo {
-                    rating,
-                    floor,
-                    diff: r.difficulty,
-                    is_max_combo: r.is_max_combo,
-                    updated_at: r.updated_at,
-                }
-            })
-            .collect();
-        let now_unix = Self::now_unix();
-        let session_trend_state = SessionTrend::analyze_session(&session_play_infos, now_unix);
-        let recommended_level = derive_recommended_level(
-            session_trend_state.as_ref(),
-            ctx.difficulty,
-            final_ref_floor,
-        );
+        let recommended_level = if ctx.smart_recommend {
+            let recent_plays = self.rdb.get_recent_records(ctx.button_mode, 10);
+            let session_play_infos: Vec<SessionPlayInfo> = recent_plays
+                .iter()
+                .map(|r| {
+                    let floor = self.find_pattern_floor(
+                        r.song_id,
+                        r.button_mode,
+                        r.difficulty,
+                        use_official,
+                    );
+                    let rating = calculate_performance_rating(floor, r.rate);
+                    SessionPlayInfo {
+                        rating,
+                        floor,
+                        diff: r.difficulty,
+                        is_max_combo: r.is_max_combo,
+                        updated_at: r.updated_at,
+                    }
+                })
+                .collect();
+            let now_unix = Self::now_unix();
+            let session_trend_state = SessionTrend::analyze_session(&session_play_infos, now_unix);
+            derive_recommended_level(
+                session_trend_state.as_ref(),
+                ctx.difficulty,
+                final_ref_floor,
+            )
+        } else {
+            None
+        };
 
         LocalRecommendFooter {
             avg_rate: summary.avg_rate(),
@@ -1061,6 +1070,27 @@ impl RecommendationSource for LocalFloorRecommender {
         });
 
         self.merge_record_rates(&mut candidates);
+
+        if !ctx.smart_recommend {
+            candidates.sort_by(|a, b| match (a.is_played(), b.is_played()) {
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                (true, true) => a
+                    .rate
+                    .partial_cmp(&b.rate)
+                    .unwrap_or(Ordering::Equal)
+                    .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal)),
+                (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
+            });
+            candidates.truncate(ctx.max_results);
+            let final_entries = candidates.into_iter().map(|c| c.into_entry()).collect();
+            return RecommendBundle {
+                source_id: self.source_id().to_string(),
+                source_label: self.source_label().to_string(),
+                entries: final_entries,
+                status: SourceStatus::Ok,
+            };
+        }
 
         let top50 = self.rdb.get_varchive_top50_summary(ctx.button_mode);
         let recent_plays = self.rdb.get_recent_records(ctx.button_mode, 10);
@@ -1461,6 +1491,7 @@ impl CompositeRecommender {
             max_results,
             same_mode_only,
             v_id: None,
+            smart_recommend: true,
         };
         self.recommend_panel(&ctx).as_legacy_result()
     }
@@ -1491,6 +1522,7 @@ mod tests {
             max_results: 6,
             same_mode_only: true,
             v_id: None,
+            smart_recommend: true,
         };
 
         let bundle = reader.recommend(&ctx);
@@ -1530,6 +1562,7 @@ mod tests {
             max_results: 6,
             same_mode_only: true,
             v_id: None,
+            smart_recommend: true,
         };
 
         let bundle = reader.recommend(&ctx);
@@ -1815,5 +1848,36 @@ mod tests {
         // Case 5: 점수 미달 (< 1.5) -> 사유 없음(None, 뱃지 생략)
         let reason_none = derive_recommend_reason(0.5, 0.0, 1.0, None, None);
         assert_eq!(reason_none, None);
+    }
+
+    #[test]
+    fn test_smart_recommend_false_sorts_by_classic_rate_and_omits_reason() {
+        let vdb = Arc::new(VArchiveDB::new());
+        let temp_dir =
+            std::env::temp_dir().join(format!("rec_test_classic_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let record_db = Arc::new(crate::store::record_db::RecordDB::new(
+            temp_dir.join("rec.db"),
+            None,
+        ));
+        let rdb = Arc::new(RecordManager::new(record_db));
+        let recommender = LocalFloorRecommender::new(vdb, rdb);
+
+        let ctx_classic = RecommendContext {
+            song_id: 1,
+            button_mode: Mode::B4,
+            difficulty: Difficulty::NM,
+            floor_range: 0.0,
+            max_results: 6,
+            same_mode_only: true,
+            v_id: None,
+            smart_recommend: false,
+        };
+
+        let footer = recommender.floor_summary(&ctx_classic);
+        assert_eq!(footer.recommended_level, None);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

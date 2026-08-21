@@ -380,6 +380,24 @@ macro_rules! t {
             En => "Recommend Provider"
         )
     };
+    ("settings-recommend-section") => {
+        $crate::t_select!(
+            Ko => "추천 설정",
+            En => "Recommendation"
+        )
+    };
+    ("settings-smart-recommend") => {
+        $crate::t_select!(
+            Ko => "스마트 추천",
+            En => "Smart Recommendation"
+        )
+    };
+    ("settings-smart-recommend-desc") => {
+        $crate::t_select!(
+            Ko => "Top-50 경계, 방치 재도전 및 세션 모멘텀을 반영해 가중 정렬하고 사유 뱃지를 표시합니다.\n비활성화 시 기존 단순 달성률 순서로 정렬됩니다.",
+            En => "Weighted sorting by Top-50 boundaries, retry gap, and session momentum with reason badges.\nWhen disabled, sorts by classic achievement rate only."
+        )
+    };
     ("settings-use-external-provider") => {
         $crate::t_select!(
             Ko => "외부 Provider 사용",

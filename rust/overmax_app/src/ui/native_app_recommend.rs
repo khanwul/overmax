@@ -82,6 +82,7 @@ impl NativeApp {
         let Some(ctx) = &state.context else {
             return RecommendResult::empty();
         };
+        let smart_recommend = self.settings.get_merged().recommend().smart_recommend;
         let rec_ctx = RecommendContext {
             song_id: ctx.song_id,
             button_mode: ctx.mode,
@@ -90,6 +91,7 @@ impl NativeApp {
             max_results: 6,
             same_mode_only: true,
             v_id: self.varchive_user_id(),
+            smart_recommend,
         };
 
         let provider_settings = self.settings.get_merged().recommend_provider();
