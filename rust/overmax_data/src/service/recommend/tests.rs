@@ -1803,17 +1803,31 @@ fn test_varchive_unofficial_floor_offsets_and_pad_integration() {
         Some("14 (SC 7)".to_string())
     );
 
-    // 패드 7 플레이 시 -> "7" (SC 병기 생략)
-    let play_7 = vec![SessionPlayInfo {
-        rating: 88.6,
-        floor: 7.0,
-        rate: 99.0,
-        diff: Difficulty::NM,
-        is_max_combo: false,
+    // 4. 비공식 16층 보스곡 (16.1, 16.2) 처리 및 인게임 표기(SC 15) 클램프 검증
+    let str_16_1: std::sync::Arc<str> = "16.1".into();
+    let str_16_2: std::sync::Arc<str> = "16.2".into();
+    assert!(
+        (LocalFloorRecommender::parse_floor_value(Some(&str_16_1)).unwrap() - 15.7).abs() < 1e-6
+    );
+    assert!(
+        (LocalFloorRecommender::parse_floor_value(Some(&str_16_2)).unwrap() - 16.0).abs() < 1e-6
+    );
+
+    // DIE IN 만점(Rating = 206.0) 달성 시 Effective Floor 16.26층으로 온전히 인정됨
+    let die_in_eff_floor = crate::service::recommend::scoring::rating_to_effective_floor(206.0);
+    assert!((die_in_eff_floor - 16.26).abs() < 0.05);
+
+    // 인게임 권장 레벨은 인게임 공식 표기 레벨에 맞춰 "SC 15"로 안전하게 클램프됨
+    let play_16 = vec![SessionPlayInfo {
+        rating: 206.0,
+        floor: 16.0,
+        rate: 100.0,
+        diff: Difficulty::SC,
+        is_max_combo: true,
         updated_at: 1000,
     }];
     assert_eq!(
-        derive_recommended_level(None, &play_7, Difficulty::NM, &empty_profile),
-        Some("7".to_string())
+        derive_recommended_level(None, &play_16, Difficulty::SC, &empty_profile),
+        Some("SC 15".to_string())
     );
 }
