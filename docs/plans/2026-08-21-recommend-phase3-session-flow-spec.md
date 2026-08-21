@@ -15,9 +15,9 @@
 **"플레이어가 방금 어떤 난이도에서 어떤 성과를 냈는지"**를 실시간으로 정확히 추적할 수 있다.
 
 리듬게임 플레이어의 실제 세션 흐름:
-1. **상승 모멘텀 (Climbing)**: 직전 판을 99.0% 이상으로 가볍게 클리어한 경우 $\rightarrow$ 현재 Floor 기준 $+0.1 \sim +0.4$ 상위 난이도 도전곡을 추천하여 성장 동기 부여.
-2. **동급 안정화 (Steady)**: 97.0% ~ 99.0% 구간에서 적정 난이도를 유지 중인 경우 $\rightarrow$ 현재 Floor 기준 $\pm 0.15$ 범위의 동급 연습곡을 추천.
-3. **피로 회복/쿨다운 (Recovery)**: 97.0% 미만으로 고전하거나 폭사한 경우 $\rightarrow$ 현재 Floor 기준 $-0.2 \sim -0.5$ 살짝 낮은 Floor의 손풀기/회복곡을 추천하여 좌절감 완화.
+1. **상승 모멘텀 (Climbing)**: 직전 판이 개인 세션 평균 대비 $+0.5\%$ 이상이거나 Max Combo를 달성한 경우 $\rightarrow$ 현재 Floor 기준 $+0.1 \sim +0.4$ 상위 난이도 도전곡을 추천하여 성장 동기 부여.
+2. **동급 안정화 (Steady)**: 개인 세션 평균 대비 $\pm 1.0\%$ 이내 적정 난이도를 유지 중이거나 세션 첫 판인 경우 $\rightarrow$ 현재 Floor 기준 $\pm 0.15$ 범위의 동급 연습곡을 추천.
+3. **피로 회복/쿨다운 (Recovery)**: 개인 세션 평균 대비 $-1.0\%$ 미만으로 고전하거나 폭사한 경우 $\rightarrow$ 현재 Floor 기준 $-0.2 \sim -0.5$ 살짝 낮은 Floor의 손풀기/회복곡을 추천하여 좌절감 완화.
 4. **세션 만료/데이터 부재**: 직전 플레이 후 4시간 이상 경과(`SESSION_IDLE_TIMEOUT_HOURS`)했거나 플레이 기록이 없으면 점수 `0.0`으로 자연스럽게 기존 레인(A, B, C)으로 폴백.
 
 ---
@@ -29,7 +29,7 @@
 - `RecordDB`에 `with_rate_map_connection` 스레드 로컬 커넥션을 사용하는 `get_recent_records` 추가
 - `RecordManager`에 pass-through 메서드 추가
 - `SESSION_IDLE_TIMEOUT_HOURS` 세션 유효 윈도우(4시간) 가드 적용
-- `SessionTrend`, `session_flow_score()` 모듈 레벨 순수 함수 추가 및 단위 테스트
+- `SessionTrend`, `session_flow_score()` 개인화 상대 편차 순수 함수 추가 및 단위 테스트
 - `LocalFloorRecommender::recommend()`에서 세션 모멘텀 점수를 블렌딩 가중치로 합산하여 최종 정렬 반영
 - 단위 테스트 추가 및 전체 워크스페이스 검증
 
@@ -136,37 +136,59 @@ impl RecordManager {
 **파일**: `rust/overmax_data/src/service/recommend.rs`
 
 - **상수 정의**:
-  - `MOMENTUM_HIGH_RATE_THRESHOLD: f64 = 99.0;` (상승 도전 기준치)
-  - `MOMENTUM_LOW_RATE_THRESHOLD: f64 = 97.0;` (회복/안정화 기준치)
+  - `MOMENTUM_CLIMB_DELTA: f64 = 0.5;` (상대 상승 편차 기준치)
+  - `MOMENTUM_RECOVERY_DELTA: f64 = -1.0;` (상대 저조 편차 기준치)
   - `MOMENTUM_MAX_BONUS: f64 = 4.0;` (모멘텀 추천 최대 보너스)
   - `SESSION_IDLE_TIMEOUT_HOURS: f64 = 4.0;` (세션 만료 기준 시간)
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionTrend {
-    /// 직전 성과 우수 (99.0% 이상) -> 상위 난이도(+0.1 ~ +0.4) 도전 권장
+    /// 직전 성과 상승 추세 (개인 평균 대비 +0.5% 이상 또는 맥콤) -> 상위 난이도(+0.1 ~ +0.4) 도전 권장
     Climbing,
-    /// 직전 성과 보통 (97.0% ~ 99.0%) -> 동급 난이도(±0.15) 안정화 권장
+    /// 직전 성과 평이/세션 시작 (개인 평균 대비 ±1.0% 이내) -> 동급 난이도(±0.15) 안정화 권장
     Steady,
-    /// 직전 성과 저조 (97.0% 미만) -> 살짝 낮은 난이도(-0.2 ~ -0.5) 회복 권장
+    /// 직전 성과 저조 (개인 평균 대비 -1.0% 미만) -> 살짝 낮은 난이도(-0.2 ~ -0.5) 회복 권장
     Recovery,
 }
 
 impl SessionTrend {
-    pub fn from_recent_play(rate: f64, updated_at: i64, now_unix: i64) -> Option<Self> {
-        let elapsed_hours = ((now_unix - updated_at).max(0) as f64) / 3600.0;
+    pub fn from_recent_plays(
+        recent_plays: &[RecentRecordEntry],
+        now_unix: i64,
+    ) -> Option<Self> {
+        let last_play = recent_plays.first()?;
+        let elapsed_hours = ((now_unix - last_play.updated_at).max(0) as f64) / 3600.0;
         if elapsed_hours > SESSION_IDLE_TIMEOUT_HOURS {
             return None;
         }
 
-        if rate >= MOMENTUM_HIGH_RATE_THRESHOLD {
+        let session_plays: Vec<&RecentRecordEntry> = recent_plays
+            .iter()
+            .filter(|r| {
+                ((now_unix - r.updated_at).max(0) as f64) / 3600.0 <= SESSION_IDLE_TIMEOUT_HOURS
+                    && r.rate > 0.0
+            })
+            .collect();
+
+        if session_plays.is_empty() {
+            return None;
+        }
+
+        if session_plays.len() == 1 {
+            return Some(Self::Steady);
+        }
+
+        let avg_rate =
+            session_plays.iter().map(|r| r.rate).sum::<f64>() / session_plays.len() as f64;
+        let delta = last_play.rate - avg_rate;
+
+        if delta >= MOMENTUM_CLIMB_DELTA || (last_play.is_max_combo && delta >= 0.0) {
             Some(Self::Climbing)
-        } else if rate >= MOMENTUM_LOW_RATE_THRESHOLD {
+        } else if delta >= MOMENTUM_RECOVERY_DELTA {
             Some(Self::Steady)
-        } else if rate > 0.0 {
-            Some(Self::Recovery)
         } else {
-            None
+            Some(Self::Recovery)
         }
     }
 }
@@ -186,7 +208,7 @@ fn session_flow_score(
     match trend {
         SessionTrend::Climbing => {
             // +0.1 ~ +0.4 구간에서 최고 점수 (최대 4.0)
-            if delta > 0.0 && delta <= 0.4 {
+            if (0.0..=0.4).contains(&delta) && delta > 0.0 {
                 let center = 0.25;
                 let dist = (delta - center).abs();
                 (1.0 - (dist / 0.25)).max(0.0) * MOMENTUM_MAX_BONUS
@@ -204,7 +226,7 @@ fn session_flow_score(
         }
         SessionTrend::Recovery => {
             // -0.5 ~ -0.1 구간에서 최고 점수 (최대 4.0)
-            if delta < 0.0 && delta >= -0.5 {
+            if (-0.5..0.0).contains(&delta) {
                 let center = -0.3;
                 let dist = (delta - center).abs();
                 (1.0 - (dist / 0.3)).max(0.0) * MOMENTUM_MAX_BONUS
