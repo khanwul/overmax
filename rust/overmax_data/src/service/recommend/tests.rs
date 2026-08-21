@@ -1223,8 +1223,8 @@ fn test_skill_profile_estimation_and_cross_track_fallback() {
     assert!((profile.sc.mu - 12.4).abs() < 0.001);
     assert!(profile.sc.sigma >= 0.8 && profile.sc.sigma <= 2.5);
 
-    // Pad Profile (Cross-track fallback from SC mu 12.4 -> 13.4 clamped)
-    assert_eq!(profile.pad.sample_count, 0);
+    // Pad Profile (Cross-track fallback from SC mu 12.4 -> 13.4 clamped, inheriting SC sample strength)
+    assert_eq!(profile.pad.sample_count, 5);
     assert!((profile.pad.mu - 13.4).abs() < 0.001);
 }
 
@@ -1358,5 +1358,129 @@ fn test_8b_end_of_moonlight_scenario_gating_and_footer() {
     assert_eq!(
         footer_low.recommended_level, footer_high.recommended_level,
         "Footer level MUST NOT change between low and high cursor selections!"
+    );
+}
+
+#[test]
+fn test_pad_patterns_maintain_consistent_footer_level_across_nm_hd_mx() {
+    let steam_id = "test_user_pad";
+    let _now = 1787325000i64;
+
+    let mut vdb = VArchiveDB::new();
+    // Song 1: NM 4 (공식만), HD 8 (공식만), MX 12 (공식만), SC 12 (12.2)
+    // Song 2: NM 5 (공식만), HD 9 (비공식 3.2), MX 13 (비공식 5.1), SC 11 (11.1)
+    let make_full_song = |id: i32, name: &str| {
+        serde_json::json!({
+            "name": name,
+            "title": id.to_string(),
+            "composer": "Artist",
+            "dlcCode": "RV",
+            "patterns": {
+                "4B": {
+                    "NM": { "level": 4 },
+                    "HD": { "level": if id == 1 { 8 } else { 9 }, "floorName": if id == 2 { Some("3.2") } else { None } },
+                    "MX": { "level": if id == 1 { 12 } else { 13 }, "floorName": if id == 2 { Some("5.1") } else { None } },
+                    "SC": { "level": if id == 1 { 12 } else { 11 }, "floorName": if id == 1 { "12.2" } else { "11.1" } }
+                }
+            }
+        })
+    };
+
+    vdb.songs = vec![
+        serde_json::from_value(make_full_song(1, "Song 1")).unwrap(),
+        serde_json::from_value(make_full_song(2, "Song 2")).unwrap(),
+    ];
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("rec_pad_consistency.db");
+    let mut db = crate::store::record_db::RecordDB::new(&db_path, Some(steam_id));
+    assert!(db.initialize());
+
+    let conn = db.open_conn().unwrap();
+    // Top 50에 SC 12.2 기록 (Rating 175.0) -> SC 실력 mu ~ 12.2, Pad 실력 mu ~ 13.2
+    let json = serde_json::json!({
+        "score": 995000,
+        "maxCombo": true,
+        "updatedAt": "2026-08-01T00:00:00.000Z",
+        "rating": 175.0,
+    });
+    conn.execute(
+        "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+         VALUES (?1, '1', '4B', 'SC', ?2)",
+        rusqlite::params![steam_id, json.to_string()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let rdb = Arc::new(RecordManager::new(Arc::new(db)));
+    rdb.refresh();
+    let recommender = LocalFloorRecommender::new(Arc::new(vdb), rdb);
+
+    // 1. SC 커서 조회 -> "SC 12"
+    let ctx_sc1 = RecommendContext {
+        song_id: 1,
+        button_mode: Mode::B4,
+        difficulty: Difficulty::SC,
+        floor_range: 0.5,
+        max_results: 6,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer_sc1 = recommender.floor_summary(&ctx_sc1);
+    assert_eq!(footer_sc1.recommended_level, Some("SC 12".to_string()));
+
+    // 2. 패드 패턴 NM 조회 (Song 1 NM - 공식 레벨 4) -> Pad 추천 "13"
+    let ctx_nm = RecommendContext {
+        song_id: 1,
+        button_mode: Mode::B4,
+        difficulty: Difficulty::NM,
+        floor_range: 0.5,
+        max_results: 6,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer_nm = recommender.floor_summary(&ctx_nm);
+
+    // 3. 패드 패턴 HD 조회 (Song 2 HD - 비공식 floor 3.2 존재) -> Pad 추천 동일하게 "13" 유지!
+    let ctx_hd = RecommendContext {
+        song_id: 2,
+        button_mode: Mode::B4,
+        difficulty: Difficulty::HD,
+        floor_range: 0.5,
+        max_results: 6,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer_hd = recommender.floor_summary(&ctx_hd);
+
+    // 4. 패드 패턴 MX 조회 (Song 2 MX - 비공식 floor 5.1 존재) -> Pad 추천 동일하게 "13" 유지!
+    let ctx_mx = RecommendContext {
+        song_id: 2,
+        button_mode: Mode::B4,
+        difficulty: Difficulty::MX,
+        floor_range: 0.5,
+        max_results: 6,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer_mx = recommender.floor_summary(&ctx_mx);
+
+    // [핵심 검증]: NM, HD, MX 어느 패턴을 가리키든 Pad 추천 레벨은 100% 동일하게 일관성 유지!
+    assert_eq!(
+        footer_nm.recommended_level,
+        Some("13".to_string()),
+        "NM cursor recommendation"
+    );
+    assert_eq!(
+        footer_hd.recommended_level, footer_nm.recommended_level,
+        "HD cursor MUST match NM recommendation"
+    );
+    assert_eq!(
+        footer_mx.recommended_level, footer_nm.recommended_level,
+        "MX cursor MUST match NM recommendation"
     );
 }

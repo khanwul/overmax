@@ -484,13 +484,13 @@ where
     let mut sc_skill = compute_gaussian(&sc_floors, GaussianSkill::DEFAULT_SC);
     let mut pad_skill = compute_gaussian(&pad_floors, GaussianSkill::DEFAULT_PAD);
 
-    // Cross-Track Fallback
-    if sc_skill.sample_count >= 3 && pad_skill.sample_count < 3 {
+    // Cross-Track Fallback: 한쪽 트랙의 기록이 전무할 때 상대 트랙으로부터 유연하게 실력대 추정
+    if sc_skill.sample_count > 0 && pad_skill.sample_count == 0 {
         let pad_mu = (sc_skill.mu + 1.0).clamp(1.0, 15.0);
-        pad_skill = GaussianSkill::new(pad_mu, sc_skill.sigma, pad_floors.len());
-    } else if pad_skill.sample_count >= 3 && sc_skill.sample_count < 3 {
+        pad_skill = GaussianSkill::new(pad_mu, sc_skill.sigma, sc_skill.sample_count);
+    } else if pad_skill.sample_count > 0 && sc_skill.sample_count == 0 {
         let sc_mu = (pad_skill.mu - 1.0).clamp(1.0, 15.0);
-        sc_skill = GaussianSkill::new(sc_mu, pad_skill.sigma, sc_floors.len());
+        sc_skill = GaussianSkill::new(sc_mu, pad_skill.sigma, pad_skill.sample_count);
     }
 
     SkillProfile {
