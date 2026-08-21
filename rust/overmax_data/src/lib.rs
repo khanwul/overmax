@@ -25,8 +25,8 @@ pub use overmax_core::{RecordKey, RecordValue};
 pub use service::jacket_matcher::{JacketMatcher, JacketMatcherConfig};
 pub use service::recommend::{
     CompositeRecommender, LocalFloorRecommender, LocalRecommendFooter, ProviderCacheReader,
-    RecommendBundle, RecommendContext, RecommendEntry, RecommendPanel, RecommendResult,
-    RecommendationSource, Recommender, SourceStatus, VaryDim,
+    RecommendBundle, RecommendContext, RecommendEntry, RecommendPanel, RecommendReason,
+    RecommendReasonKind, RecommendResult, RecommendationSource, Recommender, SourceStatus, VaryDim,
 };
 pub use service::recommend_provider_fetch::{
     fetch_manifest_blocking, fetch_recommend_blocking, get_cached_manifest,

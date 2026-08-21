@@ -10,7 +10,39 @@ use std::time::Duration;
 use overmax_core::{Difficulty, Mode, RecordKey};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecommendReasonKind {
+    /// V-Archive Top-50 컷라인 돌파 타깃
+    Top50Attack,
+    /// V-Archive Top-50 41~50위 수성
+    Top50Defend,
+    /// 세션 상승 모멘텀 상위 난이도 도전
+    Climbing,
+    /// 세션 회복/손풀기
+    Recovery,
+    /// 방치된 90~99% 기록 재도전
+    Retry,
+}
+
+impl RecommendReasonKind {
+    pub fn badge_label(&self) -> &'static str {
+        match self {
+            Self::Top50Attack => "TOP",
+            Self::Top50Defend => "DEF",
+            Self::Climbing => "UP",
+            Self::Recovery => "REST",
+            Self::Retry => "TRY",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecommendReason {
+    pub kind: RecommendReasonKind,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecommendEntry {
     pub song_id: i32,
     pub song_name: String,
@@ -23,6 +55,8 @@ pub struct RecommendEntry {
     pub rate: Option<f64>,
     pub is_max_combo: bool,
     pub score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<RecommendReason>,
 }
 
 impl RecommendEntry {
@@ -364,6 +398,64 @@ fn session_flow_score(cand_floor: f64, ref_floor: f64, trend: Option<SessionTren
     }
 }
 
+/// 후보 곡의 각 레인별 점수를 바탕으로 가장 지배적인 추천 사유를 도출한다.
+fn derive_recommend_reason(
+    retry_score: f64,
+    top50_score: f64,
+    flow_score: f64,
+    varchive_rank: Option<usize>,
+    trend: Option<SessionTrend>,
+) -> Option<RecommendReason> {
+    const REASON_THRESHOLD: f64 = 1.5;
+
+    let max_score = retry_score.max(top50_score).max(flow_score);
+    if max_score < REASON_THRESHOLD {
+        return None;
+    }
+
+    if (top50_score - max_score).abs() < 0.001 && top50_score >= REASON_THRESHOLD {
+        if let Some(rank) = varchive_rank {
+            if (41..=50).contains(&rank) {
+                return Some(RecommendReason {
+                    kind: RecommendReasonKind::Top50Defend,
+                    detail: format!("Top-50 수성 방어 타깃 (현재 {}위)", rank),
+                });
+            }
+        }
+        return Some(RecommendReason {
+            kind: RecommendReasonKind::Top50Attack,
+            detail: "Top-50 컷라인 돌파 추천 타깃".to_string(),
+        });
+    }
+
+    if (flow_score - max_score).abs() < 0.001 && flow_score >= REASON_THRESHOLD {
+        match trend {
+            Some(SessionTrend::Climbing) => {
+                return Some(RecommendReason {
+                    kind: RecommendReasonKind::Climbing,
+                    detail: "세션 상승 모멘텀 상위 난이도 도전".to_string(),
+                });
+            }
+            Some(SessionTrend::Recovery) => {
+                return Some(RecommendReason {
+                    kind: RecommendReasonKind::Recovery,
+                    detail: "세션 회복/손풀기 적정 난이도".to_string(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    if (retry_score - max_score).abs() < 0.001 && retry_score >= REASON_THRESHOLD {
+        return Some(RecommendReason {
+            kind: RecommendReasonKind::Retry,
+            detail: "방치된 기록 경신 재도전 추천".to_string(),
+        });
+    }
+
+    None
+}
+
 struct RawCandidate<'a> {
     song_id: i32,
     song: &'a crate::community::client::Song,
@@ -376,6 +468,7 @@ struct RawCandidate<'a> {
     is_max_combo: bool,
     updated_at: Option<i64>,
     varchive_rating: Option<f64>,
+    reason: Option<RecommendReason>,
 }
 
 impl<'a> RawCandidate<'a> {
@@ -396,6 +489,7 @@ impl<'a> RawCandidate<'a> {
             rate: self.rate,
             is_max_combo: self.is_max_combo,
             score: None,
+            reason: self.reason,
         }
     }
 }
@@ -534,6 +628,7 @@ impl LocalFloorRecommender {
                             is_max_combo: false,
                             updated_at: None,
                             varchive_rating: None,
+                            reason: None,
                         });
                     }
                 }
@@ -896,7 +991,30 @@ impl RecommendationSource for LocalFloorRecommender {
 
         candidates.truncate(ctx.max_results);
 
-        let final_entries = candidates.into_iter().map(|c| c.into_entry()).collect();
+        let final_entries = candidates
+            .into_iter()
+            .map(|mut c| {
+                if c.is_played() {
+                    let rank = top50.rank_map.get(&(c.song_id, c.mode, c.diff)).copied();
+                    let retry_score = retry_priority(c.rate.unwrap_or(0.0), c.updated_at, now_unix);
+                    let top50_score = top50_boundary_score(
+                        c.varchive_rating,
+                        rank,
+                        top50.cutoff_rating,
+                        top50.total_recorded_count,
+                    );
+                    let flow_score = session_flow_score(c.floor, final_ref_floor, session_trend);
+                    c.reason = derive_recommend_reason(
+                        retry_score,
+                        top50_score,
+                        flow_score,
+                        rank,
+                        session_trend,
+                    );
+                }
+                c.into_entry()
+            })
+            .collect();
 
         RecommendBundle {
             source_id: self.source_id().to_string(),
@@ -1054,6 +1172,7 @@ impl RecommendationSource for ProviderCacheReader {
                 rate: None,
                 is_max_combo: false,
                 score: pe.score,
+                reason: None,
             });
         }
 
@@ -1159,6 +1278,7 @@ impl CompositeRecommender {
                 rate: None,
                 is_max_combo: false,
                 score: entry.score,
+                reason: None,
             });
         }
 
@@ -1445,5 +1565,53 @@ mod tests {
         // Recovery: -0.3 회복곡에 최고 보너스(4.0)
         let rec_score = session_flow_score(11.7, 12.0, warmup_trend);
         assert!((rec_score - 4.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_derive_recommend_reason() {
+        // Case 1: Top-50 방어 (45위)
+        let reason_def = derive_recommend_reason(1.0, 4.5, 0.0, Some(45), None);
+        assert_eq!(
+            reason_def,
+            Some(RecommendReason {
+                kind: RecommendReasonKind::Top50Defend,
+                detail: "Top-50 수성 방어 타깃 (현재 45위)".to_string(),
+            })
+        );
+
+        // Case 2: Top-50 돌파 (컷라인 직하)
+        let reason_att = derive_recommend_reason(2.0, 5.8, 1.0, None, None);
+        assert_eq!(
+            reason_att,
+            Some(RecommendReason {
+                kind: RecommendReasonKind::Top50Attack,
+                detail: "Top-50 컷라인 돌파 추천 타깃".to_string(),
+            })
+        );
+
+        // Case 3: 세션 모멘텀 상승
+        let reason_climb =
+            derive_recommend_reason(0.0, 0.0, 4.0, None, Some(SessionTrend::Climbing));
+        assert_eq!(
+            reason_climb,
+            Some(RecommendReason {
+                kind: RecommendReasonKind::Climbing,
+                detail: "세션 상승 모멘텀 상위 난이도 도전".to_string(),
+            })
+        );
+
+        // Case 4: 방치 재도전
+        let reason_retry = derive_recommend_reason(4.5, 0.0, 0.0, None, None);
+        assert_eq!(
+            reason_retry,
+            Some(RecommendReason {
+                kind: RecommendReasonKind::Retry,
+                detail: "방치된 기록 경신 재도전 추천".to_string(),
+            })
+        );
+
+        // Case 5: 점수 미달 (< 1.5) -> 사유 없음(None, 뱃지 생략)
+        let reason_none = derive_recommend_reason(0.5, 0.0, 1.0, None, None);
+        assert_eq!(reason_none, None);
     }
 }
