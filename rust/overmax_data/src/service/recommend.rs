@@ -237,10 +237,30 @@ fn top50_boundary_score(
     0.0
 }
 
-/// 상대 상승 모멘텀 판별 편차 기준치 (개인 세션 평균 대비 +0.5% 이상)
-const MOMENTUM_CLIMB_DELTA: f64 = 0.5;
-/// 상대 저조/회복 판별 편차 기준치 (개인 세션 평균 대비 -1.0% 미만)
-const MOMENTUM_RECOVERY_DELTA: f64 = -1.0;
+/// 난이도(Floor, 0.0 ~ 15.0)와 정확도(Rate, %)를 기반으로 0 ~ 200점 만점 스케일의 Performance Rating을 계산한다.
+pub fn calculate_performance_rating(floor: f64, rate: f64) -> f64 {
+    if floor <= 0.0 || rate <= 0.0 {
+        return 0.0;
+    }
+    let max_rating = floor * (200.0 / 15.0);
+    let rate_ratio = if rate >= 100.0 {
+        1.0
+    } else if rate >= 99.0 {
+        0.95 + ((rate - 99.0) / 1.0) * 0.05
+    } else if rate >= 97.0 {
+        0.75 + ((rate - 97.0) / 2.0) * 0.20
+    } else if rate >= 90.0 {
+        0.40 + ((rate - 90.0) / 7.0) * 0.35
+    } else {
+        (rate / 90.0).max(0.0) * 0.40
+    };
+    max_rating * rate_ratio
+}
+
+/// 상대 상승 모멘텀 판별 레이팅 편차 기준치 (개인 세션 평균 대비 +3.0점 이상)
+const MOMENTUM_CLIMB_RATING_DELTA: f64 = 3.0;
+/// 상대 저조/회복 판별 레이팅 편차 기준치 (개인 세션 평균 대비 -6.0점 미만)
+const MOMENTUM_RECOVERY_RATING_DELTA: f64 = -6.0;
 /// 세션 모멘텀 추천 최대 보너스
 const MOMENTUM_MAX_BONUS: f64 = 4.0;
 /// 세션 만료 유효 윈도우 시간 (4시간)
@@ -248,51 +268,55 @@ const SESSION_IDLE_TIMEOUT_HOURS: f64 = 4.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionTrend {
-    /// 직전 성과 상승 추세 (개인 평균 대비 +0.5% 이상 또는 맥콤) -> 상위 난이도(+0.1 ~ +0.4) 도전 권장
+    /// 직전 성과 상승 추세 (개인 평균 레이팅 대비 +3.0점 이상 또는 맥콤) -> 상위 난이도(+0.1 ~ +0.4) 도전 권장
     Climbing,
-    /// 직전 성과 평이/세션 시작 (개인 평균 대비 ±1.0% 이내) -> 동급 난이도(±0.15) 안정화 권장
+    /// 직전 성과 평이/세션 시작 (개인 평균 레이팅 대비 -6.0 ~ +3.0점) -> 동급 난이도(±0.15) 안정화 권장
     Steady,
-    /// 직전 성과 저조 (개인 평균 대비 -1.0% 미만) -> 살짝 낮은 난이도(-0.2 ~ -0.5) 회복 권장
+    /// 직전 성과 저조 (개인 평균 레이팅 대비 -6.0점 미만) -> 살짝 낮은 난이도(-0.2 ~ -0.5) 회복 권장
     Recovery,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SessionPlayInfo {
+    pub rating: f64,
+    pub is_max_combo: bool,
+    pub updated_at: i64,
+}
+
 impl SessionTrend {
-    /// 최근 플레이 기록들로부터 플레이어 개인의 세션 평균 대비 상대적 성과 추세를 산출한다.
-    pub fn from_recent_plays(
-        recent_plays: &[crate::store::record_db::RecentRecordEntry],
-        now_unix: i64,
-    ) -> Option<Self> {
-        let last_play = recent_plays.first()?;
+    /// 최근 플레이 레이팅 기록들로부터 플레이어 개인의 세션 평균 대비 상대적 퍼포먼스 추세를 산출한다.
+    pub fn from_session_plays(session_plays: &[SessionPlayInfo], now_unix: i64) -> Option<Self> {
+        let last_play = session_plays.first()?;
         let elapsed_hours = ((now_unix - last_play.updated_at).max(0) as f64) / 3600.0;
         if elapsed_hours > SESSION_IDLE_TIMEOUT_HOURS {
             return None;
         }
 
         // 유효 세션 윈도우(4시간 이내) 내 플레이들만 추출
-        let session_plays: Vec<&crate::store::record_db::RecentRecordEntry> = recent_plays
+        let valid_plays: Vec<&SessionPlayInfo> = session_plays
             .iter()
             .filter(|r| {
                 ((now_unix - r.updated_at).max(0) as f64) / 3600.0 <= SESSION_IDLE_TIMEOUT_HOURS
-                    && r.rate > 0.0
+                    && r.rating > 0.0
             })
             .collect();
 
-        if session_plays.is_empty() {
+        if valid_plays.is_empty() {
             return None;
         }
 
         // 세션 첫 판 직후인 경우: 비교 기준이 없으므로 Steady(동급 탐색)로 시작
-        if session_plays.len() == 1 {
+        if valid_plays.len() == 1 {
             return Some(Self::Steady);
         }
 
-        let avg_rate =
-            session_plays.iter().map(|r| r.rate).sum::<f64>() / session_plays.len() as f64;
-        let delta = last_play.rate - avg_rate;
+        let avg_rating =
+            valid_plays.iter().map(|r| r.rating).sum::<f64>() / valid_plays.len() as f64;
+        let delta = last_play.rating - avg_rating;
 
-        if delta >= MOMENTUM_CLIMB_DELTA || (last_play.is_max_combo && delta >= 0.0) {
+        if delta >= MOMENTUM_CLIMB_RATING_DELTA || (last_play.is_max_combo && delta >= 0.0) {
             Some(Self::Climbing)
-        } else if delta >= MOMENTUM_RECOVERY_DELTA {
+        } else if delta >= MOMENTUM_RECOVERY_RATING_DELTA {
             Some(Self::Steady)
         } else {
             Some(Self::Recovery)
@@ -516,6 +540,35 @@ impl LocalFloorRecommender {
             }
         }
         candidates
+    }
+
+    fn find_pattern_floor(
+        &self,
+        song_id: i32,
+        mode: Mode,
+        diff: Difficulty,
+        use_official: bool,
+    ) -> f64 {
+        let song_id_str = song_id.to_string();
+        for s in &self.vdb.songs {
+            if s.title == song_id_str {
+                if let Some(p) = s.get_pattern(mode, diff) {
+                    if use_official {
+                        return p
+                            .level
+                            .map(|lvl| lvl as f64)
+                            .or_else(|| Self::parse_floor_value(p.floor_name.as_ref()))
+                            .unwrap_or(0.0);
+                    } else {
+                        return Self::parse_floor_value(p.floor_name.as_ref())
+                            .or_else(|| p.level.map(|lvl| lvl as f64))
+                            .unwrap_or(0.0);
+                    }
+                }
+                break;
+            }
+        }
+        0.0
     }
 
     fn merge_record_rates(&self, candidates: &mut [RawCandidate<'_>]) {
@@ -793,8 +846,21 @@ impl RecommendationSource for LocalFloorRecommender {
 
         let top50 = self.rdb.get_varchive_top50_summary(ctx.button_mode);
         let recent_plays = self.rdb.get_recent_records(ctx.button_mode, 10);
+        let session_play_infos: Vec<SessionPlayInfo> = recent_plays
+            .iter()
+            .map(|r| {
+                let floor =
+                    self.find_pattern_floor(r.song_id, r.button_mode, r.difficulty, use_official);
+                let rating = calculate_performance_rating(floor, r.rate);
+                SessionPlayInfo {
+                    rating,
+                    is_max_combo: r.is_max_combo,
+                    updated_at: r.updated_at,
+                }
+            })
+            .collect();
         let now_unix = Self::now_unix();
-        let session_trend = SessionTrend::from_recent_plays(&recent_plays, now_unix);
+        let session_trend = SessionTrend::from_session_plays(&session_play_infos, now_unix);
 
         candidates.sort_by(|a, b| {
             match (a.is_played(), b.is_played()) {
@@ -1302,123 +1368,82 @@ mod tests {
 
     #[test]
     fn test_session_flow_score_and_timeout() {
-        use crate::store::record_db::RecentRecordEntry;
         let now = 1_000_000i64;
 
-        // 1. 세션 만료 테스트 (5시간 전 플레이 -> timeout -> None)
-        let expired_play = vec![RecentRecordEntry {
-            song_id: 1,
-            button_mode: overmax_core::Mode::B4,
-            difficulty: overmax_core::Difficulty::NM,
-            rate: 99.5,
+        // 1. calculate_performance_rating 기본 검증
+        let r_15_perfect = calculate_performance_rating(15.0, 100.0);
+        assert!((r_15_perfect - 200.0).abs() < 0.01);
+        let r_15_99 = calculate_performance_rating(15.0, 99.0);
+        assert!((r_15_99 - 190.0).abs() < 0.01);
+        let r_8_high = calculate_performance_rating(8.0, 99.8);
+        assert!(r_8_high > 105.0 && r_8_high < 107.0);
+
+        // 2. 세션 만료 테스트 (5시간 전 플레이 -> timeout -> None)
+        let expired_play = vec![SessionPlayInfo {
+            rating: 180.0,
             is_max_combo: false,
             updated_at: now - 5 * 3600,
         }];
-        assert_eq!(SessionTrend::from_recent_plays(&expired_play, now), None);
+        assert_eq!(SessionTrend::from_session_plays(&expired_play, now), None);
 
-        // 2. 세션 첫 판 (1개 플레이 -> Steady)
-        let first_play = vec![RecentRecordEntry {
-            song_id: 1,
-            button_mode: overmax_core::Mode::B4,
-            difficulty: overmax_core::Difficulty::NM,
-            rate: 95.0,
+        // 3. 세션 첫 판 (1개 플레이 -> Steady)
+        let first_play = vec![SessionPlayInfo {
+            rating: 150.0,
             is_max_combo: false,
             updated_at: now - 600,
         }];
         assert_eq!(
-            SessionTrend::from_recent_plays(&first_play, now),
+            SessionTrend::from_session_plays(&first_play, now),
             Some(SessionTrend::Steady)
         );
 
-        // 3. 초보 유저 케이스 (세션 평균 92.0%, 직전 93.0% -> +1.0% 편차 -> Climbing!)
-        let beginner_plays = vec![
-            RecentRecordEntry {
-                song_id: 2,
-                button_mode: overmax_core::Mode::B4,
-                difficulty: overmax_core::Difficulty::NM,
-                rate: 93.0, // 직전 판 (신고점)
+        // 4. 난이도 정규화 시뮬레이션:
+        // Case A: 15층 97.0% 달성 (레이팅 150.0점) vs 세션 평균 (140.0점) -> +10.0점 편차 -> Climbing!
+        let pro_climbing = vec![
+            SessionPlayInfo {
+                rating: 150.0, // 15층 97.0% (고난도 도전 성공)
                 is_max_combo: false,
                 updated_at: now - 300,
             },
-            RecentRecordEntry {
-                song_id: 1,
-                button_mode: overmax_core::Mode::B4,
-                difficulty: overmax_core::Difficulty::NM,
-                rate: 91.0,
+            SessionPlayInfo {
+                rating: 135.0,
+                is_max_combo: false,
+                updated_at: now - 600,
+            },
+            SessionPlayInfo {
+                rating: 135.0,
                 is_max_combo: false,
                 updated_at: now - 900,
             },
         ];
-        let beginner_trend = SessionTrend::from_recent_plays(&beginner_plays, now);
-        assert_eq!(beginner_trend, Some(SessionTrend::Climbing));
+        let climb_trend = SessionTrend::from_session_plays(&pro_climbing, now);
+        assert_eq!(climb_trend, Some(SessionTrend::Climbing));
         // Climbing: +0.25 도전곡에 최고 보너스(4.0)
-        let climb_score = session_flow_score(12.25, 12.0, beginner_trend);
+        let climb_score = session_flow_score(12.25, 12.0, climb_trend);
         assert!((climb_score - 4.0).abs() < 0.01);
 
-        // 4. 고수 유저 케이스:
-        // Case A: 세션 평균 99.4%, 직전 99.8% -> Climbing
-        let pro_climbing = vec![
-            RecentRecordEntry {
-                song_id: 3,
-                button_mode: overmax_core::Mode::B4,
-                difficulty: overmax_core::Difficulty::SC,
-                rate: 99.8,
+        // Case B: 8층 99.8% 달성 (레이팅 105.6점, 단순 손풀기) vs 세션 평균 (140.0점) -> -34.4점 -> Recovery/Warmup
+        let warmup_play = vec![
+            SessionPlayInfo {
+                rating: 105.6, // 8층 99.8% 손풀기
                 is_max_combo: true,
                 updated_at: now - 300,
             },
-            RecentRecordEntry {
-                song_id: 2,
-                button_mode: overmax_core::Mode::B4,
-                difficulty: overmax_core::Difficulty::SC,
-                rate: 99.2,
+            SessionPlayInfo {
+                rating: 150.0,
                 is_max_combo: false,
                 updated_at: now - 600,
             },
-            RecentRecordEntry {
-                song_id: 1,
-                button_mode: overmax_core::Mode::B4,
-                difficulty: overmax_core::Difficulty::SC,
-                rate: 99.2,
+            SessionPlayInfo {
+                rating: 160.0,
                 is_max_combo: false,
                 updated_at: now - 900,
             },
         ];
-        assert_eq!(
-            SessionTrend::from_recent_plays(&pro_climbing, now),
-            Some(SessionTrend::Climbing)
-        );
-
-        // Case B: 세션 평균 98.8%, 직전 97.0% -> -1.8% 저조 -> Recovery
-        let pro_recovery = vec![
-            RecentRecordEntry {
-                song_id: 3,
-                button_mode: overmax_core::Mode::B4,
-                difficulty: overmax_core::Difficulty::SC,
-                rate: 97.0, // 고전/폭사
-                is_max_combo: false,
-                updated_at: now - 300,
-            },
-            RecentRecordEntry {
-                song_id: 2,
-                button_mode: overmax_core::Mode::B4,
-                difficulty: overmax_core::Difficulty::SC,
-                rate: 99.8,
-                is_max_combo: true,
-                updated_at: now - 600,
-            },
-            RecentRecordEntry {
-                song_id: 1,
-                button_mode: overmax_core::Mode::B4,
-                difficulty: overmax_core::Difficulty::SC,
-                rate: 99.6,
-                is_max_combo: false,
-                updated_at: now - 900,
-            },
-        ];
-        let recovery_trend = SessionTrend::from_recent_plays(&pro_recovery, now);
-        assert_eq!(recovery_trend, Some(SessionTrend::Recovery));
+        let warmup_trend = SessionTrend::from_session_plays(&warmup_play, now);
+        assert_eq!(warmup_trend, Some(SessionTrend::Recovery));
         // Recovery: -0.3 회복곡에 최고 보너스(4.0)
-        let rec_score = session_flow_score(11.7, 12.0, recovery_trend);
+        let rec_score = session_flow_score(11.7, 12.0, warmup_trend);
         assert!((rec_score - 4.0).abs() < 0.01);
     }
 }

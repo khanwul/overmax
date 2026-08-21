@@ -131,61 +131,88 @@ impl RecordManager {
 }
 ```
 
-### 2.4 세션 모멘텀 점수 순수 함수 (`session_flow_score`)
+### 2.4 Performance Rating 및 세션 모멘텀 점수 순수 함수
 
 **파일**: `rust/overmax_data/src/service/recommend.rs`
 
 - **상수 정의**:
-  - `MOMENTUM_CLIMB_DELTA: f64 = 0.5;` (상대 상승 편차 기준치)
-  - `MOMENTUM_RECOVERY_DELTA: f64 = -1.0;` (상대 저조 편차 기준치)
+  - `MOMENTUM_CLIMB_RATING_DELTA: f64 = 3.0;` (상대 상승 레이팅 편차 기준치)
+  - `MOMENTUM_RECOVERY_RATING_DELTA: f64 = -6.0;` (상대 저조 레이팅 편차 기준치)
   - `MOMENTUM_MAX_BONUS: f64 = 4.0;` (모멘텀 추천 최대 보너스)
   - `SESSION_IDLE_TIMEOUT_HOURS: f64 = 4.0;` (세션 만료 기준 시간)
 
 ```rust
+/// 난이도(Floor, 0.0 ~ 15.0)와 정확도(Rate, %)를 기반으로 0 ~ 200점 만점 스케일의 Performance Rating을 계산한다.
+pub fn calculate_performance_rating(floor: f64, rate: f64) -> f64 {
+    if floor <= 0.0 || rate <= 0.0 {
+        return 0.0;
+    }
+    let max_rating = floor * (200.0 / 15.0);
+    let rate_ratio = if rate >= 100.0 {
+        1.0
+    } else if rate >= 99.0 {
+        0.95 + ((rate - 99.0) / 1.0) * 0.05
+    } else if rate >= 97.0 {
+        0.75 + ((rate - 97.0) / 2.0) * 0.20
+    } else if rate >= 90.0 {
+        0.40 + ((rate - 90.0) / 7.0) * 0.35
+    } else {
+        (rate / 90.0).max(0.0) * 0.40
+    };
+    max_rating * rate_ratio
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionTrend {
-    /// 직전 성과 상승 추세 (개인 평균 대비 +0.5% 이상 또는 맥콤) -> 상위 난이도(+0.1 ~ +0.4) 도전 권장
+    /// 직전 성과 상승 추세 (개인 평균 레이팅 대비 +3.0점 이상 또는 맥콤) -> 상위 난이도(+0.1 ~ +0.4) 도전 권장
     Climbing,
-    /// 직전 성과 평이/세션 시작 (개인 평균 대비 ±1.0% 이내) -> 동급 난이도(±0.15) 안정화 권장
+    /// 직전 성과 평이/세션 시작 (개인 평균 레이팅 대비 -6.0 ~ +3.0점) -> 동급 난이도(±0.15) 안정화 권장
     Steady,
-    /// 직전 성과 저조 (개인 평균 대비 -1.0% 미만) -> 살짝 낮은 난이도(-0.2 ~ -0.5) 회복 권장
+    /// 직전 성과 저조 (개인 평균 레이팅 대비 -6.0점 미만) -> 살짝 낮은 난이도(-0.2 ~ -0.5) 회복 권장
     Recovery,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SessionPlayInfo {
+    pub rating: f64,
+    pub is_max_combo: bool,
+    pub updated_at: i64,
+}
+
 impl SessionTrend {
-    pub fn from_recent_plays(
-        recent_plays: &[RecentRecordEntry],
+    pub fn from_session_plays(
+        session_plays: &[SessionPlayInfo],
         now_unix: i64,
     ) -> Option<Self> {
-        let last_play = recent_plays.first()?;
+        let last_play = session_plays.first()?;
         let elapsed_hours = ((now_unix - last_play.updated_at).max(0) as f64) / 3600.0;
         if elapsed_hours > SESSION_IDLE_TIMEOUT_HOURS {
             return None;
         }
 
-        let session_plays: Vec<&RecentRecordEntry> = recent_plays
+        let valid_plays: Vec<&SessionPlayInfo> = session_plays
             .iter()
             .filter(|r| {
                 ((now_unix - r.updated_at).max(0) as f64) / 3600.0 <= SESSION_IDLE_TIMEOUT_HOURS
-                    && r.rate > 0.0
+                    && r.rating > 0.0
             })
             .collect();
 
-        if session_plays.is_empty() {
+        if valid_plays.is_empty() {
             return None;
         }
 
-        if session_plays.len() == 1 {
+        if valid_plays.len() == 1 {
             return Some(Self::Steady);
         }
 
-        let avg_rate =
-            session_plays.iter().map(|r| r.rate).sum::<f64>() / session_plays.len() as f64;
-        let delta = last_play.rate - avg_rate;
+        let avg_rating =
+            valid_plays.iter().map(|r| r.rating).sum::<f64>() / valid_plays.len() as f64;
+        let delta = last_play.rating - avg_rating;
 
-        if delta >= MOMENTUM_CLIMB_DELTA || (last_play.is_max_combo && delta >= 0.0) {
+        if delta >= MOMENTUM_CLIMB_RATING_DELTA || (last_play.is_max_combo && delta >= 0.0) {
             Some(Self::Climbing)
-        } else if delta >= MOMENTUM_RECOVERY_DELTA {
+        } else if delta >= MOMENTUM_RECOVERY_RATING_DELTA {
             Some(Self::Steady)
         } else {
             Some(Self::Recovery)
