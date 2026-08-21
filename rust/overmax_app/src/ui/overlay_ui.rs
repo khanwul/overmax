@@ -60,8 +60,8 @@ impl Px {
     pub(crate) fn mode_badge_h(&self) -> f32 {
         18.0 * self.scale
     }
-    pub(crate) fn settings_btn(&self) -> f32 {
-        24.0 * self.scale
+    pub(crate) fn header_btn_size(&self) -> f32 {
+        18.0 * self.scale
     }
     pub(crate) fn body_gap(&self) -> f32 {
         6.0 * self.scale

@@ -98,9 +98,9 @@ impl<'a> OverlayHeader<'a> {
                             .scale(self.px.scale),
                     );
 
-                    let btn_size_val = 22.0 * self.px.scale;
-                    let btn_gap_val = 4.0 * self.px.scale;
-                    let btn_radius = CornerRadius::same((5.0 * self.px.scale) as u8);
+                    let btn_size_val = self.px.header_btn_size();
+                    let btn_gap_val = 3.5 * self.px.scale;
+                    let btn_radius = CornerRadius::same((4.0 * self.px.scale) as u8);
                     let btn_size = Vec2::splat(btn_size_val);
 
                     let mut btn_count = 1;
@@ -128,7 +128,7 @@ impl<'a> OverlayHeader<'a> {
                         ui.spacing_mut().button_padding = Vec2::ZERO;
                         let text = RichText::new("⚙")
                             .color(Theme::TEXT_PRIMARY)
-                            .font(FontId::proportional(13.0 * self.px.scale));
+                            .font(FontId::proportional(11.0 * self.px.scale));
                         let btn = Button::new(text)
                             .fill(Theme::SECTION_BG)
                             .corner_radius(btn_radius)
@@ -146,7 +146,7 @@ impl<'a> OverlayHeader<'a> {
                             ui.add_space(btn_gap_val);
                             let sync_text = RichText::new("🔄")
                                 .color(Theme::TEXT_PRIMARY)
-                                .font(FontId::proportional(12.0 * self.px.scale));
+                                .font(FontId::proportional(10.0 * self.px.scale));
                             let sync_btn = Button::new(sync_text)
                                 .fill(Theme::SECTION_BG)
                                 .corner_radius(btn_radius)
@@ -173,7 +173,7 @@ impl<'a> OverlayHeader<'a> {
                                 } else {
                                     Theme::TEXT_MUTED
                                 })
-                                .font(FontId::proportional(12.0 * self.px.scale));
+                                .font(FontId::proportional(10.5 * self.px.scale));
 
                             let upload_btn = Button::new(upload_text)
                                 .fill(if self.varchive_account_configured {
