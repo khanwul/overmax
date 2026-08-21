@@ -108,6 +108,9 @@ impl RecommendStrategy {
 
                 params.candidates.truncate(params.max_results);
 
+                let skill_profile =
+                    derive_skill_profile(&top50, &params.find_floor, params.button_mode);
+
                 for c in params.candidates.iter_mut() {
                     if c.is_played() {
                         let rank = top50.rank_map.get(&(c.song_id, c.mode, c.diff)).copied();
@@ -125,12 +128,15 @@ impl RecommendStrategy {
                             params.ref_floor,
                             session_trend_state.as_ref(),
                         );
+                        let skill = skill_profile.for_diff(c.diff);
                         c.reason = derive_recommend_reason(
                             retry_score,
                             top50_score,
                             flow_score,
                             rank,
                             session_trend,
+                            c.floor,
+                            Some(skill),
                         );
                     } else {
                         let unplayed_score = unplayed_challenge_score(

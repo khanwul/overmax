@@ -581,70 +581,177 @@ fn test_session_flow_score_and_timeout() {
 
 #[test]
 fn test_recommend_reason_multi_signal_convergence() {
-    let r_attack = derive_recommend_reason(1.0, 5.5, 2.0, None, Some(SessionTrend::Climbing));
+    let skill = GaussianSkill::new(12.0, 1.0, 50);
+
+    let r_attack = derive_recommend_reason(
+        1.0,
+        5.5,
+        2.0,
+        None,
+        Some(SessionTrend::Climbing),
+        12.5,
+        Some(&skill),
+    );
     assert_eq!(
         r_attack.map(|r| r.kind),
         Some(RecommendReasonKind::Top50Attack)
     );
 
-    let r_defend = derive_recommend_reason(2.0, 4.5, 3.0, Some(45), Some(SessionTrend::Climbing));
+    let r_defend = derive_recommend_reason(
+        2.0,
+        4.5,
+        3.0,
+        Some(45),
+        Some(SessionTrend::Climbing),
+        12.5,
+        Some(&skill),
+    );
     assert_eq!(
         r_defend.map(|r| r.kind),
         Some(RecommendReasonKind::Top50Defend)
     );
 
-    let r_retry = derive_recommend_reason(8.5, 0.0, 2.0, None, Some(SessionTrend::Steady));
+    let r_retry = derive_recommend_reason(
+        8.5,
+        0.0,
+        2.0,
+        None,
+        Some(SessionTrend::Steady),
+        12.0,
+        Some(&skill),
+    );
     assert_eq!(r_retry.map(|r| r.kind), Some(RecommendReasonKind::Retry));
 
-    let r_climb = derive_recommend_reason(0.5, 0.0, 4.0, None, Some(SessionTrend::Climbing));
+    let r_climb = derive_recommend_reason(
+        0.5,
+        0.0,
+        4.0,
+        None,
+        Some(SessionTrend::Climbing),
+        12.5,
+        Some(&skill),
+    );
     assert_eq!(r_climb.map(|r| r.kind), Some(RecommendReasonKind::Climbing));
 
-    let r_recovery = derive_recommend_reason(0.5, 0.0, 4.0, None, Some(SessionTrend::Recovery));
+    // Recovery zone (10.0 <= 12.0 - 0.8*1.0 = 11.2)
+    let r_recovery = derive_recommend_reason(
+        0.5,
+        0.0,
+        4.0,
+        None,
+        Some(SessionTrend::Recovery),
+        10.0,
+        Some(&skill),
+    );
     assert_eq!(
         r_recovery.map(|r| r.kind),
         Some(RecommendReasonKind::Recovery)
     );
 
-    let r_none = derive_recommend_reason(0.2, 0.0, 0.5, None, Some(SessionTrend::Steady));
+    let r_none = derive_recommend_reason(
+        0.2,
+        0.0,
+        0.5,
+        None,
+        Some(SessionTrend::Steady),
+        12.0,
+        Some(&skill),
+    );
     assert_eq!(r_none, None);
 }
 
 #[test]
 fn test_derive_recommend_reason() {
-    let top_attack_reason = derive_recommend_reason(0.0, 5.0, 0.0, None, None);
+    let skill = GaussianSkill::new(12.0, 1.0, 50);
+
+    let top_attack_reason = derive_recommend_reason(0.0, 5.0, 0.0, None, None, 12.0, Some(&skill));
     assert_eq!(
         top_attack_reason.as_ref().map(|r| r.kind),
         Some(RecommendReasonKind::Top50Attack)
     );
 
-    let top_defend_reason = derive_recommend_reason(0.0, 4.0, 0.0, Some(45), None);
+    let top_defend_reason =
+        derive_recommend_reason(0.0, 4.0, 0.0, Some(45), None, 12.0, Some(&skill));
     assert_eq!(
         top_defend_reason.as_ref().map(|r| r.kind),
         Some(RecommendReasonKind::Top50Defend)
     );
 
-    let climbing_reason =
-        derive_recommend_reason(0.0, 0.0, 3.5, None, Some(SessionTrend::Climbing));
+    let climbing_reason = derive_recommend_reason(
+        0.0,
+        0.0,
+        3.5,
+        None,
+        Some(SessionTrend::Climbing),
+        12.5,
+        Some(&skill),
+    );
     assert_eq!(
         climbing_reason.as_ref().map(|r| r.kind),
         Some(RecommendReasonKind::Climbing)
     );
 
-    let recovery_reason =
-        derive_recommend_reason(0.0, 0.0, 3.5, None, Some(SessionTrend::Recovery));
+    // Recovery on low floor (10.0) -> Recovery reason
+    let recovery_reason = derive_recommend_reason(
+        0.0,
+        0.0,
+        3.5,
+        None,
+        Some(SessionTrend::Recovery),
+        10.0,
+        Some(&skill),
+    );
     assert_eq!(
         recovery_reason.as_ref().map(|r| r.kind),
         Some(RecommendReasonKind::Recovery)
     );
 
-    let retry_reason = derive_recommend_reason(5.0, 0.0, 0.0, None, None);
+    let retry_reason = derive_recommend_reason(5.0, 0.0, 0.0, None, None, 12.0, Some(&skill));
     assert_eq!(
         retry_reason.as_ref().map(|r| r.kind),
         Some(RecommendReasonKind::Retry)
     );
 
-    let low_score_reason = derive_recommend_reason(1.0, 1.2, 0.5, None, None);
+    let low_score_reason = derive_recommend_reason(1.0, 1.2, 0.5, None, None, 12.0, Some(&skill));
     assert_eq!(low_score_reason, None);
+}
+
+#[test]
+fn test_recovery_reason_gating_blocks_high_floor_rest_badge() {
+    // 플레이어 스킬: mu = 12.0, sigma = 1.0 (Recovery zone: Floor <= 11.2)
+    let skill = GaussianSkill::new(12.0, 1.0, 50);
+
+    // [버그 제보 시나리오]: 세션 트렌드가 Recovery일 때, 고난도 곡(Floor 14.0)을 조회하는 상황
+    // 14.0층은 고난도이므로 flow_score가 아무리 높아도 REST 뱃지가 발동되면 안 됨!
+    let high_floor_reason_no_retry = derive_recommend_reason(
+        0.0,                          // retry_score
+        0.0,                          // top50_score
+        4.0,                          // flow_score (높음)
+        None,                         // rank
+        Some(SessionTrend::Recovery), // trend = Recovery
+        14.0,                         // cand_floor (고난도!)
+        Some(&skill),
+    );
+    assert_eq!(
+        high_floor_reason_no_retry, None,
+        "High floor (14.0) MUST NOT receive REST badge even when session trend is Recovery!"
+    );
+
+    // 만약 고난도 곡에 과거 미흡 기록이 있어 retry_score가 높다면, REST 대신 TRY로 안전하게 전환되어야 함
+    let high_floor_reason_with_retry = derive_recommend_reason(
+        3.5,                          // retry_score (충분함)
+        0.0,                          // top50_score
+        4.0,                          // flow_score
+        None,                         // rank
+        Some(SessionTrend::Recovery), // trend = Recovery
+        14.0,                         // cand_floor
+        Some(&skill),
+    );
+    assert_eq!(
+        high_floor_reason_with_retry.map(|r| r.kind),
+        Some(RecommendReasonKind::Retry),
+        "High floor during Recovery should gracefully fallback to Retry reason if retry_score is eligible"
+    );
 }
 
 #[test]

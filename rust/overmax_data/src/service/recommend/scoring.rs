@@ -619,21 +619,20 @@ pub(crate) fn derive_recommended_level(
 }
 
 /// 후보 곡의 각 레인별 점수를 바탕으로 가장 지배적인 추천 사유를 도출한다.
+/// - 실력 분포(GaussianSkill)를 기반으로 도메인 가드를 적용하여 비정상적인 뱃지(고난도 REST 등) 부여를 원천 차단한다.
 pub(crate) fn derive_recommend_reason(
     retry_score: f64,
     top50_score: f64,
     flow_score: f64,
     varchive_rank: Option<usize>,
     trend: Option<SessionTrend>,
+    cand_floor: f64,
+    skill: Option<&GaussianSkill>,
 ) -> Option<RecommendReason> {
     const REASON_THRESHOLD: f64 = 1.5;
 
-    let max_score = retry_score.max(top50_score).max(flow_score);
-    if max_score < REASON_THRESHOLD {
-        return None;
-    }
-
-    if (top50_score - max_score).abs() < 0.001 && top50_score >= REASON_THRESHOLD {
+    // 1. Top-50 수성 / 돌파 (레인 A) - 절대적 1순위
+    if top50_score >= REASON_THRESHOLD && top50_score >= retry_score && top50_score >= flow_score {
         if let Some(rank) = varchive_rank {
             if (41..=50).contains(&rank) {
                 return Some(RecommendReason {
@@ -650,27 +649,41 @@ pub(crate) fn derive_recommend_reason(
         });
     }
 
-    if (flow_score - max_score).abs() < 0.001 && flow_score >= REASON_THRESHOLD {
+    // 2. 세션 모멘텀 플로우 (레인 D) - 실력 분포 도메인 가드 적용
+    if flow_score >= REASON_THRESHOLD && flow_score >= retry_score {
         match trend {
             Some(SessionTrend::Climbing) => {
-                return Some(RecommendReason {
-                    kind: RecommendReasonKind::Climbing,
-                    detail: "세션 상승 모멘텀 상위 난이도 도전".to_string(),
-                    rank: None,
+                // Climbing zone (mu <= Floor <= mu + 1.2*sigma) 가드
+                let is_valid = skill.map_or(true, |s| {
+                    s.is_climbing_zone(cand_floor) || cand_floor >= s.mu
                 });
+                if is_valid {
+                    return Some(RecommendReason {
+                        kind: RecommendReasonKind::Climbing,
+                        detail: "세션 상승 모멘텀 상위 난이도 도전".to_string(),
+                        rank: None,
+                    });
+                }
             }
             Some(SessionTrend::Recovery) => {
-                return Some(RecommendReason {
-                    kind: RecommendReasonKind::Recovery,
-                    detail: "세션 회복/손풀기 적정 난이도".to_string(),
-                    rank: None,
-                });
+                // Recovery zone (Floor <= mu - 0.8*sigma) 필수 가드!
+                // 고난도(Floor > mu - 0.8*sigma)에는 절대로 REST 뱃지를 달지 않는다!
+                let is_valid = skill.map_or(true, |s| s.is_recovery_zone(cand_floor));
+                if is_valid {
+                    return Some(RecommendReason {
+                        kind: RecommendReasonKind::Recovery,
+                        detail: "세션 회복/손풀기 적정 난이도".to_string(),
+                        rank: None,
+                    });
+                }
+                // 만약 저난도가 아니라면 Recovery 뱃지 대신 아래 Retry로 폴백 시도
             }
             _ => {}
         }
     }
 
-    if (retry_score - max_score).abs() < 0.001 && retry_score >= REASON_THRESHOLD {
+    // 3. 방치된 기록 재도전 (레인 B)
+    if retry_score >= REASON_THRESHOLD {
         return Some(RecommendReason {
             kind: RecommendReasonKind::Retry,
             detail: "방치된 기록 경신 재도전 추천".to_string(),
