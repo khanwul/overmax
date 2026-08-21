@@ -87,17 +87,17 @@ Microsoft TrueSkill / TrueMatch의 핵심 아이디어인 **실력의 정규분�
 ## 3. 단계별 실행 계획
 
 - [x] **Plan: 상세 스펙 및 자가 비판 검증 문서화**
-- [ ] **Step 1: Skill Distribution (`SkillProfile`) 코어 데이터 모델 구현**
+- [x] **Step 1: Skill Distribution (`SkillProfile`) 코어 데이터 모델 구현**
   - `overmax_data::service::recommend::scoring`에 `SkillProfile` 구조체 정의 ($\mu, \sigma$, 2-Track SC/Pad).
   - Top 50 및 누적 기록 기반 프로필 산출 순수 함수 구현 및 단위 테스트.
-- [ ] **Step 2: `derive_footer_level` 리팩토링 (커서 오염 제거 & SC 우선)**
+- [x] **Step 2: `derive_footer_level` 리팩토링 (커서 오염 제거 & SC 우선)**
   - 현재 곡 패턴의 `use_official`에 의존하지 않고, 현재 탭 모드(SC vs Pad)에 맞춰 고정된 `SkillProfile` 기반 레벨 표기.
-- [ ] **Step 3: `derive_recommend_reason` 및 `session_flow_score`에 실력 분포 게이팅 적용**
+- [x] **Step 3: `derive_recommend_reason` 및 `session_flow_score`에 실력 분포 게이팅 적용**
   - $F > \mu - 0.8\sigma$인 고난도 곡에서 `REST` 뱃지가 생성되는 현상 원천 차단.
   - 컨디션 저조 시 고난도 곡 탐색 중에는 무리한 flow 보너스 대신 안정 정렬로 폴백.
-- [ ] **Step 4: 단위 테스트 및 실데이터(8B End of Moonlight 시나리오) 회귀 검증**
+- [x] **Step 4: 단위 테스트 및 실데이터(8B End of Moonlight 시나리오) 회귀 검증**
   - 실제 사용자 DB 이력을 모의한 테스트 케이스 작성 및 검증.
-- [ ] **Step 5: 정적 검증(`cargo clippy`, `cargo test`) 및 문서 동기화 (`CONTEXT.md`, Decision Log)**
+- [x] **Step 5: 정적 검증(`cargo clippy`, `cargo test`) 및 문서 동기화 (`CONTEXT.md`, Decision Log)**
 
 ---
 
