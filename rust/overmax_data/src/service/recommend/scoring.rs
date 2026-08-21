@@ -438,6 +438,15 @@ pub struct SkillProfile {
     pub pad: GaussianSkill,
 }
 
+impl Default for SkillProfile {
+    fn default() -> Self {
+        Self {
+            sc: GaussianSkill::DEFAULT_SC,
+            pad: GaussianSkill::DEFAULT_PAD,
+        }
+    }
+}
+
 impl SkillProfile {
     pub fn for_diff(&self, diff: Difficulty) -> &GaussianSkill {
         if diff.is_sc() {
@@ -653,8 +662,51 @@ pub(crate) fn derive_recommended_level(
 
     if is_sc {
         Some(format!("SC {}", clamped_level))
-    } else {
+    } else if clamped_level <= 10 {
+        // 패드 10 이하: SC 대응이 없는 순수 패드 난이도 영역이므로 단독 표기
         Some(format!("{}", clamped_level))
+    } else {
+        // 패드 11~15: 고난도 구간이므로 대응 SC 레벨을 친절히 병기
+        let sc_equiv = if skill_profile.sc.sample_count > 0 {
+            (skill_profile.sc.mu.round() as u32).clamp(1, 15)
+        } else {
+            pad_level_to_sc_equivalent(clamped_level).unwrap_or(clamped_level)
+        };
+        Some(format!("{} (SC {})", clamped_level, sc_equiv))
+    }
+}
+
+/// 패드 공식 레벨(1~15)을 V-Archive 비공식 난이도 중앙값(Median) 기준의 SC 레벨로 환산한다.
+/// - 10 이하: 순수 패드 영역 (SC 대응 없음 -> None)
+/// - 11~12: SC 2~3 (중앙값 SC 2.3)
+/// - 13: SC 4 (중앙값 SC 4.3)
+/// - 14: SC 7 (중앙값 SC 7.1)
+/// - 15: SC 9 (중앙값 SC 9.1)
+pub fn pad_level_to_sc_equivalent(pad_level: u32) -> Option<u32> {
+    match pad_level {
+        15 => Some(9),
+        14 => Some(7),
+        13 => Some(4),
+        12 => Some(3),
+        11 => Some(2),
+        _ => None,
+    }
+}
+
+/// SC Floor(1.0 ~ 15.0)를 패드 공식 레벨(1~15)로 환산한다.
+pub fn sc_floor_to_pad_equivalent(sc_floor: f64) -> u32 {
+    if sc_floor >= 8.5 {
+        15
+    } else if sc_floor >= 5.8 {
+        14
+    } else if sc_floor >= 3.5 {
+        13
+    } else if sc_floor >= 1.5 {
+        12
+    } else if sc_floor >= 1.0 {
+        11
+    } else {
+        (sc_floor.round() as u32).clamp(1, 10)
     }
 }
 

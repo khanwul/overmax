@@ -45,7 +45,28 @@ impl LocalFloorRecommender {
     }
 
     pub(crate) fn parse_floor_value(floor_name: Option<&Arc<str>>) -> Option<f64> {
-        floor_name.and_then(|s| s.parse::<f64>().ok())
+        let s = floor_name?.trim();
+        if s.is_empty() {
+            return None;
+        }
+
+        // V-Archive 비공식 난이도 체계:
+        // .2: 해당 층의 적정 기준 (offset 0.0) -> N.0
+        // .1: 물렙 / 하위 난이도 (offset -0.3) -> N.0 - 0.3
+        // .3: 불렙 / 상위 난이도 (offset +0.3) -> N.0 + 0.3
+        if let Some((base_str, sub_str)) = s.split_once('.') {
+            if let Ok(base_num) = base_str.parse::<f64>() {
+                if sub_str == "1" {
+                    return Some((base_num - 0.3).max(0.1));
+                } else if sub_str == "2" {
+                    return Some(base_num);
+                } else if sub_str == "3" {
+                    return Some(base_num + 0.3);
+                }
+            }
+        }
+
+        s.parse::<f64>().ok()
     }
 
     fn floor_to_millis(floor: f64) -> i64 {

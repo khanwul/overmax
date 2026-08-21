@@ -395,7 +395,9 @@ fn test_derive_recommended_level() {
         None
     );
 
-    let normal_play = vec![SessionPlayInfo {
+    // 6. Top 50 기록이 없고 세션 기록만 1판 있을 때:
+    // 6-1. 패드 11 (고난도, SC 대응 구간) -> "11 (SC 2)" 병기
+    let normal_play_11 = vec![SessionPlayInfo {
         rating: 139.3,
         floor: 11.0,
         rate: 99.0,
@@ -404,8 +406,22 @@ fn test_derive_recommended_level() {
         updated_at: now - 100,
     }];
     assert_eq!(
-        derive_recommended_level(None, &normal_play, Difficulty::MX, &empty_profile),
-        Some("11".to_string())
+        derive_recommended_level(None, &normal_play_11, Difficulty::MX, &empty_profile),
+        Some("11 (SC 2)".to_string())
+    );
+
+    // 5-2. 패드 8 (저난도, 패드 10 이하) -> "8" 단독 표기
+    let normal_play_8 = vec![SessionPlayInfo {
+        rating: 101.3,
+        floor: 8.0,
+        rate: 99.0,
+        diff: Difficulty::HD,
+        is_max_combo: false,
+        updated_at: now - 100,
+    }];
+    assert_eq!(
+        derive_recommended_level(None, &normal_play_8, Difficulty::HD, &empty_profile),
+        Some("8".to_string())
     );
 }
 
@@ -1476,7 +1492,7 @@ fn test_pad_patterns_maintain_consistent_footer_level_across_nm_hd_mx() {
     // [핵심 검증]: NM, HD, MX 어느 패턴을 가리키든 Pad 추천 레벨은 100% 동일하게 일관성 유지!
     assert_eq!(
         footer_nm.recommended_level,
-        Some("13".to_string()),
+        Some("13 (SC 12)".to_string()),
         "NM cursor recommendation"
     );
     assert_eq!(
@@ -1734,4 +1750,70 @@ fn test_skill_profile_estimation_uses_effective_floor_from_performance_rating() 
     // 하단 푸터 권장 레벨 도출 시에도 "SC 11"로 안정적으로 도출됨 (액면 13으로 뻥튀기 방지)
     let footer_level = derive_recommended_level(None, &[], Difficulty::SC, &profile);
     assert_eq!(footer_level, Some("SC 11".to_string()));
+}
+
+#[test]
+fn test_varchive_unofficial_floor_offsets_and_pad_integration() {
+    use crate::service::recommend::scoring::{
+        pad_level_to_sc_equivalent, sc_floor_to_pad_equivalent,
+    };
+
+    // 1. 비공식 난이도 .1 (-0.3), .2 (0.0), .3 (+0.3) 오프셋 파싱 검증
+    let str_13_2: std::sync::Arc<str> = "13.2".into();
+    let str_13_1: std::sync::Arc<str> = "13.1".into();
+    let str_13_3: std::sync::Arc<str> = "13.3".into();
+
+    assert!(
+        (LocalFloorRecommender::parse_floor_value(Some(&str_13_2)).unwrap() - 13.0).abs() < 1e-6
+    );
+    assert!(
+        (LocalFloorRecommender::parse_floor_value(Some(&str_13_1)).unwrap() - 12.7).abs() < 1e-6
+    );
+    assert!(
+        (LocalFloorRecommender::parse_floor_value(Some(&str_13_3)).unwrap() - 13.3).abs() < 1e-6
+    );
+
+    // 2. 패드 레벨 <-> SC 레벨 상호 환산 매핑 검증
+    assert_eq!(pad_level_to_sc_equivalent(15), Some(9));
+    assert_eq!(pad_level_to_sc_equivalent(14), Some(7));
+    assert_eq!(pad_level_to_sc_equivalent(13), Some(4));
+    assert_eq!(pad_level_to_sc_equivalent(12), Some(3));
+    assert_eq!(pad_level_to_sc_equivalent(11), Some(2));
+    assert_eq!(pad_level_to_sc_equivalent(10), None); // 패드 10 이하는 SC 대응 없음
+
+    assert_eq!(sc_floor_to_pad_equivalent(9.1), 15);
+    assert_eq!(sc_floor_to_pad_equivalent(7.1), 14);
+    assert_eq!(sc_floor_to_pad_equivalent(4.3), 13);
+    assert_eq!(sc_floor_to_pad_equivalent(2.3), 12);
+
+    // 3. 푸터 권장 난이도 포맷팅 검증
+    let empty_profile = SkillProfile::default();
+
+    // 패드 14 플레이 시 -> "14 (SC 7)"
+    let play_14 = vec![SessionPlayInfo {
+        rating: 177.3,
+        floor: 14.0,
+        rate: 99.0,
+        diff: Difficulty::MX,
+        is_max_combo: false,
+        updated_at: 1000,
+    }];
+    assert_eq!(
+        derive_recommended_level(None, &play_14, Difficulty::MX, &empty_profile),
+        Some("14 (SC 7)".to_string())
+    );
+
+    // 패드 7 플레이 시 -> "7" (SC 병기 생략)
+    let play_7 = vec![SessionPlayInfo {
+        rating: 88.6,
+        floor: 7.0,
+        rate: 99.0,
+        diff: Difficulty::NM,
+        is_max_combo: false,
+        updated_at: 1000,
+    }];
+    assert_eq!(
+        derive_recommended_level(None, &play_7, Difficulty::NM, &empty_profile),
+        Some("7".to_string())
+    );
 }
