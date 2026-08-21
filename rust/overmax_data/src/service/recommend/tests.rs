@@ -259,10 +259,18 @@ fn test_smart_recommend_false_sorts_by_classic_rate_and_omits_reason() {
 #[test]
 fn test_derive_recommended_level() {
     let now = 100000;
+    let profile_15 = SkillProfile {
+        sc: GaussianSkill::new(14.8, 1.0, 50),
+        pad: GaussianSkill::new(15.0, 1.0, 0),
+    };
+    let empty_profile = SkillProfile {
+        sc: GaussianSkill::new(0.0, 1.5, 0),
+        pad: GaussianSkill::new(0.0, 2.0, 0),
+    };
 
     // 1. Top 50 기반 초기 권장 레벨 (세션 0판): SC 14.8 -> SC 15
     assert_eq!(
-        derive_recommended_level(None, &[], Difficulty::SC, Some(14.8)),
+        derive_recommended_level(None, &[], Difficulty::SC, &profile_15),
         Some("SC 15".to_string())
     );
 
@@ -286,7 +294,7 @@ fn test_derive_recommended_level() {
         Some(&warmup_single_state),
         &warmup_single_play,
         Difficulty::SC,
-        Some(14.8),
+        &profile_15,
     );
     assert_eq!(
         rec_level_warmup_guard,
@@ -320,7 +328,12 @@ fn test_derive_recommended_level() {
         last_diff: Difficulty::SC,
     };
     assert_eq!(
-        derive_recommended_level(Some(&mixed_state), &mixed_plays, Difficulty::SC, Some(14.8)),
+        derive_recommended_level(
+            Some(&mixed_state),
+            &mixed_plays,
+            Difficulty::SC,
+            &profile_15
+        ),
         Some("SC 15".to_string())
     );
 
@@ -370,14 +383,14 @@ fn test_derive_recommended_level() {
             Some(&climbing_state),
             &session_4_plays,
             Difficulty::SC,
-            Some(14.8)
+            &profile_15
         ),
         Some("SC 14".to_string()) // 13.8 + 0.3 = 14.1 -> SC 14
     );
 
     // 5. Top 50 기록이 없는 경우
     assert_eq!(
-        derive_recommended_level(None, &[], Difficulty::SC, None),
+        derive_recommended_level(None, &[], Difficulty::SC, &empty_profile),
         None
     );
 
@@ -390,7 +403,7 @@ fn test_derive_recommended_level() {
         updated_at: now - 100,
     }];
     assert_eq!(
-        derive_recommended_level(None, &normal_play, Difficulty::MX, None),
+        derive_recommended_level(None, &normal_play, Difficulty::MX, &empty_profile),
         Some("11".to_string())
     );
 }

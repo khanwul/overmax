@@ -501,6 +501,7 @@ where
 
 /// V-Archive Top 50 곡들 중 현재 난이도 계열(SC vs 일반)에 해당하는 패턴들의 중앙값(Median Floor)을 기본 실력대 앵커로 산출한다.
 /// 최상위 한계곡(Peak)에 편향되지 않고 플레이어의 주력 난이도 허리를 가장 정직하게 대변한다.
+#[cfg(test)]
 pub(crate) fn derive_top50_base_floor<F>(
     top50: &crate::store::record_db::VArchiveTop50Summary,
     find_floor: &F,
@@ -534,17 +535,18 @@ where
     Some(median)
 }
 
-/// Top 50 기반 장기 실력대 및 최근 세션 모멘텀을 결합하여 인게임 공식 레벨 라벨(예: "SC 13", "12")을 도출한다.
+/// SkillProfile 기반 장기 실력대 및 최근 세션 모멘텀을 결합하여 인게임 공식 레벨 라벨(예: "SC 13", "12")을 도출한다.
 /// - 선곡창 커서(현재 곡)에 반응하지 않고 플레이어의 실력/세션 상태만으로 결정된다.
-/// - Top 50 실력대를 앵커로 유지하여, 손풀기 곡(SC 5 등)을 플레이하더라도 권장 레벨이 급락하지 않는다.
+/// - SC 및 일반(Pad) 2-Track 실력 프로필을 기반으로 하여, 패턴 변경 시에도 일관된 기준을 유지한다.
 /// - 세션 주력곡 플레이가 누적됨에 따라 세션 데이터를 점진적으로(스근하게) 블렌딩한다.
 pub(crate) fn derive_recommended_level(
     trend_state: Option<&SessionTrendState>,
     session_plays: &[SessionPlayInfo],
     current_diff: Difficulty,
-    top50_base_floor: Option<f64>,
+    skill_profile: &SkillProfile,
 ) -> Option<String> {
     let is_sc = current_diff.is_sc();
+    let skill = skill_profile.for_diff(current_diff);
 
     // 1. 현재 탭 난이도 계열(SC vs 일반)과 일치하는 유효 세션 플레이들
     let same_diff_plays: Vec<&SessionPlayInfo> = session_plays
@@ -558,16 +560,13 @@ pub(crate) fn derive_recommended_level(
         .map(|p| p.floor)
         .fold(0.0f64, |acc, f| acc.max(f));
 
-    // 3. 글로벌 앵커 난이도 (Top 50 주력 실력대 우선, 없으면 세션 최고 난이도)
-    let anchor_floor = match top50_base_floor {
-        Some(t_floor) => t_floor,
-        None => {
-            if session_peak > 0.0 {
-                session_peak
-            } else {
-                return None;
-            }
-        }
+    // 3. 글로벌 앵커 난이도 (스킬 프로필의 표본이 있으면 mu 우선, 없으면 세션 최고 난이도)
+    let anchor_floor = if skill.sample_count > 0 {
+        skill.mu
+    } else if session_peak > 0.0 {
+        session_peak
+    } else {
+        return None;
     };
 
     // 4. 세션 플레이 분석 및 손풀기 가드 & 점진적 블렌딩
@@ -581,7 +580,7 @@ pub(crate) fn derive_recommended_level(
 
     let base_floor = if core_session_plays.is_empty() {
         // 세션에 주력 플레이가 아직 없는 경우 (손풀기만 쳤거나 0판):
-        // Top 50 앵커를 그대로 유지하여 저난도로 곤두박질치는 것을 방어!
+        // 앵커를 그대로 유지하여 저난도로 곤두박질치는 것을 방어!
         anchor_floor
     } else {
         // 세션 주력곡들의 중앙값과 직전 주력곡의 조화로 세션 대표 난이도 산출
@@ -592,12 +591,11 @@ pub(crate) fn derive_recommended_level(
         let session_floor = (session_median + last_core_floor) / 2.0;
 
         let core_count = core_session_plays.len();
-
-        if let Some(t_floor) = top50_base_floor {
+        if skill.sample_count > 0 {
             // 주력 플레이 수에 따라 세션 데이터를 스근하게 블렌딩
             // 1판: 25% 세션, 2판: 50% 세션, 3판: 75% 세션, 4판 이상: 100% 세션
             let session_weight = (core_count as f64 / 4.0).min(1.0);
-            (1.0 - session_weight) * t_floor + session_weight * session_floor
+            (1.0 - session_weight) * anchor_floor + session_weight * session_floor
         } else {
             session_floor
         }

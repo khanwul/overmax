@@ -94,7 +94,7 @@ impl LocalFloorRecommender {
 
         let recommended_level = ctx.strategy.derive_footer_level(StrategyFooterParams {
             rdb: &self.rdb,
-            find_floor: |sid, m, d| self.find_pattern_floor(sid, m, d, use_official),
+            find_floor: |sid, m, d| self.find_pattern_floor(sid, m, d, false),
             button_mode: ctx.button_mode,
             current_diff: ctx.difficulty,
             now_unix: Self::now_unix(),
@@ -530,7 +530,7 @@ impl RecommendationSource for LocalFloorRecommender {
         ctx.strategy.sort_and_annotate(StrategySortParams {
             candidates: &mut candidates,
             rdb: &self.rdb,
-            find_floor: |sid, m, d| self.find_pattern_floor(sid, m, d, use_official),
+            find_floor: |sid, m, d| self.find_pattern_floor(sid, m, d, false),
             button_mode: ctx.button_mode,
             ref_floor: final_ref_floor,
             max_results: ctx.max_results,

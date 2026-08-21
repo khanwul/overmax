@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 
 use super::scoring::{
     calculate_performance_rating, derive_recommend_reason, derive_recommended_level,
-    derive_top50_base_floor, retry_priority, session_flow_score, top50_boundary_score,
+    derive_skill_profile, retry_priority, session_flow_score, top50_boundary_score,
     unplayed_challenge_score, SessionPlayInfo, SessionTrend,
 };
 use super::types::{
@@ -181,15 +181,14 @@ impl RecommendStrategy {
                 let session_trend_state =
                     SessionTrend::analyze_session(&session_play_infos, params.now_unix);
 
-                let is_sc = params.current_diff.is_sc();
-                let top50_base_floor =
-                    derive_top50_base_floor(&top50, &params.find_floor, params.button_mode, is_sc);
+                let skill_profile =
+                    derive_skill_profile(&top50, &params.find_floor, params.button_mode);
 
                 derive_recommended_level(
                     session_trend_state.as_ref(),
                     &session_play_infos,
                     params.current_diff,
-                    top50_base_floor,
+                    &skill_profile,
                 )
             }
         }
