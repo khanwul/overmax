@@ -97,7 +97,6 @@ impl LocalFloorRecommender {
             find_floor: |sid, m, d| self.find_pattern_floor(sid, m, d, use_official),
             button_mode: ctx.button_mode,
             current_diff: ctx.difficulty,
-            ref_floor: final_ref_floor,
             now_unix: Self::now_unix(),
         });
 

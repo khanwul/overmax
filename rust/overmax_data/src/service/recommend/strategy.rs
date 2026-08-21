@@ -3,8 +3,8 @@ use std::cmp::Ordering;
 
 use super::scoring::{
     calculate_performance_rating, derive_recommend_reason, derive_recommended_level,
-    retry_priority, session_flow_score, top50_boundary_score, unplayed_challenge_score,
-    SessionPlayInfo, SessionTrend,
+    derive_top50_base_floor, retry_priority, session_flow_score, top50_boundary_score,
+    unplayed_challenge_score, SessionPlayInfo, SessionTrend,
 };
 use super::types::{
     RecommendReason, RecommendReasonKind, RecommendStrategy, StrategyFooterParams,
@@ -161,6 +161,7 @@ impl RecommendStrategy {
         match self {
             Self::Classic => None,
             Self::Smart => {
+                let top50 = params.rdb.get_varchive_top50_summary(params.button_mode);
                 let recent_plays = params.rdb.get_recent_records(params.button_mode, 10);
                 let session_play_infos: Vec<SessionPlayInfo> = recent_plays
                     .iter()
@@ -179,11 +180,16 @@ impl RecommendStrategy {
                     .collect();
                 let session_trend_state =
                     SessionTrend::analyze_session(&session_play_infos, params.now_unix);
+
+                let is_sc = params.current_diff.is_sc();
+                let top50_base_floor =
+                    derive_top50_base_floor(&top50, &params.find_floor, params.button_mode, is_sc);
+
                 derive_recommended_level(
                     session_trend_state.as_ref(),
                     &session_play_infos,
                     params.current_diff,
-                    params.ref_floor,
+                    top50_base_floor,
                 )
             }
         }

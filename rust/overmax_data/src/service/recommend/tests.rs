@@ -6,8 +6,8 @@ use overmax_core::{Difficulty, Mode};
 use crate::community::client::VArchiveDB;
 use crate::service::recommend::scoring::{
     calculate_performance_rating, derive_recommend_reason, derive_recommended_level,
-    retry_priority, session_flow_score, top50_boundary_score, SessionPlayInfo, SessionTrend,
-    SessionTrendState,
+    derive_top50_base_floor, retry_priority, session_flow_score, top50_boundary_score,
+    SessionPlayInfo, SessionTrend, SessionTrendState,
 };
 use crate::service::recommend::{
     CompositeRecommender, LocalFloorRecommender, ProviderCacheReader, RecommendContext,
@@ -258,98 +258,179 @@ fn test_smart_recommend_false_sorts_by_classic_rate_and_omits_reason() {
 #[test]
 fn test_derive_recommended_level() {
     let now = 100000;
-    let base_plays = vec![
+
+    // 1. Top 50 기반 초기 권장 레벨 (세션 0판): SC 14.8 -> SC 15
+    assert_eq!(
+        derive_recommended_level(None, &[], Difficulty::SC, Some(14.8)),
+        Some("SC 15".to_string())
+    );
+
+    // 2. [사용자 제보 버그 검증] Top 50 SC 15 유저가 세션 첫 판으로 손풀기 SC 5.0을 플레이했을 때
+    //    권장 레벨이 SC 5로 급락하지 않고 Top 50 앵커(SC 15)로 완벽 방어됨을 검증!
+    let warmup_single_play = vec![SessionPlayInfo {
+        rating: 66.0, // 5.0층 99.8%
+        floor: 5.0,
+        rate: 99.8,
+        diff: Difficulty::SC,
+        is_max_combo: true,
+        updated_at: now - 100,
+    }];
+    let warmup_single_state = SessionTrendState {
+        trend: SessionTrend::Steady,
+        avg_rating: 66.0,
+        last_floor: 5.0,
+        last_diff: Difficulty::SC,
+    };
+    let rec_level_warmup_guard = derive_recommended_level(
+        Some(&warmup_single_state),
+        &warmup_single_play,
+        Difficulty::SC,
+        Some(14.8),
+    );
+    assert_eq!(
+        rec_level_warmup_guard,
+        Some("SC 15".to_string()),
+        "Single warmup play (SC 5) must NOT drag recommended level down from Top 50 anchor (SC 15)"
+    );
+
+    // 3. 실전곡 1판(SC 14.0) 추가 시 스근한 블렌딩 (75% Top 50 + 25% Session -> 14.6 -> SC 15)
+    let mixed_plays = vec![
         SessionPlayInfo {
-            rating: 150.0,
-            floor: 12.0,
+            rating: 180.0,
+            floor: 14.0,
             rate: 98.0,
             diff: Difficulty::SC,
             is_max_combo: false,
-            updated_at: now - 100,
+            updated_at: now - 50,
         },
         SessionPlayInfo {
-            rating: 155.0,
-            floor: 12.0,
-            rate: 99.0,
+            rating: 66.0,
+            floor: 5.0,
+            rate: 99.8,
             diff: Difficulty::SC,
             is_max_combo: true,
             updated_at: now - 300,
         },
     ];
-
-    let climbing_state = SessionTrendState {
-        trend: SessionTrend::Climbing,
-        avg_rating: 152.5,
-        last_floor: 12.0,
+    let mixed_state = SessionTrendState {
+        trend: SessionTrend::Steady,
+        avg_rating: 180.0,
+        last_floor: 14.0,
         last_diff: Difficulty::SC,
     };
-    let rec_level =
-        derive_recommended_level(Some(&climbing_state), &base_plays, Difficulty::SC, 12.0);
-    assert_eq!(rec_level, Some("SC 12".to_string()));
+    assert_eq!(
+        derive_recommended_level(Some(&mixed_state), &mixed_plays, Difficulty::SC, Some(14.8)),
+        Some("SC 15".to_string())
+    );
 
-    let high_plays = vec![SessionPlayInfo {
-        rating: 170.0,
-        floor: 13.8,
-        rate: 99.0,
-        diff: Difficulty::SC,
-        is_max_combo: false,
-        updated_at: now - 100,
-    }];
-    let climbing_high = SessionTrendState {
+    // 4. 주력 플레이 4판 누적 시 세션 데이터 100% 반영 + Climbing 모멘텀 (+0.3)
+    let session_4_plays = vec![
+        SessionPlayInfo {
+            rating: 180.0,
+            floor: 13.8,
+            rate: 99.0,
+            diff: Difficulty::SC,
+            is_max_combo: false,
+            updated_at: now - 50,
+        },
+        SessionPlayInfo {
+            rating: 180.0,
+            floor: 13.8,
+            rate: 99.0,
+            diff: Difficulty::SC,
+            is_max_combo: false,
+            updated_at: now - 150,
+        },
+        SessionPlayInfo {
+            rating: 180.0,
+            floor: 13.8,
+            rate: 99.0,
+            diff: Difficulty::SC,
+            is_max_combo: false,
+            updated_at: now - 250,
+        },
+        SessionPlayInfo {
+            rating: 180.0,
+            floor: 13.8,
+            rate: 99.0,
+            diff: Difficulty::SC,
+            is_max_combo: false,
+            updated_at: now - 350,
+        },
+    ];
+    let climbing_state = SessionTrendState {
         trend: SessionTrend::Climbing,
-        avg_rating: 170.0,
+        avg_rating: 180.0,
         last_floor: 13.8,
         last_diff: Difficulty::SC,
     };
-    let rec_level_high =
-        derive_recommended_level(Some(&climbing_high), &high_plays, Difficulty::SC, 13.8);
-    assert_eq!(rec_level_high, Some("SC 14".to_string()));
-
-    let recovery_state = SessionTrendState {
-        trend: SessionTrend::Recovery,
-        avg_rating: 152.5,
-        last_floor: 12.0,
-        last_diff: Difficulty::SC,
-    };
-    let rec_level_low =
-        derive_recommended_level(Some(&recovery_state), &base_plays, Difficulty::SC, 12.0);
-    assert_eq!(rec_level_low, Some("SC 12".to_string()));
-
-    let warmup_mixed_plays = vec![
-        SessionPlayInfo {
-            rating: 100.0,
-            floor: 8.0,
-            rate: 99.8,
-            diff: Difficulty::SC,
-            is_max_combo: true,
-            updated_at: now - 100,
-        },
-        SessionPlayInfo {
-            rating: 165.0,
-            floor: 13.0,
-            rate: 98.5,
-            diff: Difficulty::SC,
-            is_max_combo: false,
-            updated_at: now - 600,
-        },
-    ];
-    let warmup_state = SessionTrendState {
-        trend: SessionTrend::Steady,
-        avg_rating: 165.0,
-        last_floor: 8.0,
-        last_diff: Difficulty::SC,
-    };
-    let rec_level_warmup = derive_recommended_level(
-        Some(&warmup_state),
-        &warmup_mixed_plays,
-        Difficulty::SC,
-        13.0,
-    );
     assert_eq!(
-        rec_level_warmup,
-        Some("SC 13".to_string()),
-        "Warmup play (floor 8) must not drag recommended level down from core floor 13"
+        derive_recommended_level(
+            Some(&climbing_state),
+            &session_4_plays,
+            Difficulty::SC,
+            Some(14.8)
+        ),
+        Some("SC 14".to_string()) // 13.8 + 0.3 = 14.1 -> SC 14
     );
+
+    // 5. Top 50 기록이 없는 경우
+    assert_eq!(
+        derive_recommended_level(None, &[], Difficulty::SC, None),
+        None
+    );
+
+    let normal_play = vec![SessionPlayInfo {
+        rating: 120.0,
+        floor: 11.0,
+        rate: 98.0,
+        diff: Difficulty::MX,
+        is_max_combo: false,
+        updated_at: now - 100,
+    }];
+    assert_eq!(
+        derive_recommended_level(None, &normal_play, Difficulty::MX, None),
+        Some("11".to_string())
+    );
+}
+
+#[test]
+fn test_derive_top50_base_floor() {
+    let mut rank_map = std::collections::HashMap::new();
+    // SC 패턴들: 101 -> 15.0, 102 -> 14.5, 103 -> 14.0
+    rank_map.insert((101, Mode::B4, Difficulty::SC), 1);
+    rank_map.insert((102, Mode::B4, Difficulty::SC), 2);
+    rank_map.insert((103, Mode::B4, Difficulty::SC), 3);
+    // 일반 패턴들: 201 -> 12.0
+    rank_map.insert((201, Mode::B4, Difficulty::MX), 4);
+
+    let summary = crate::store::record_db::VArchiveTop50Summary {
+        cutoff_rating: 150.0,
+        rank_map,
+        total_recorded_count: 4,
+    };
+
+    let find_floor = |sid: i32, _m: Mode, _d: Difficulty| match sid {
+        101 => 15.0,
+        102 => 14.5,
+        103 => 14.0,
+        201 => 12.0,
+        _ => 0.0,
+    };
+
+    // SC 계열: (15.0 + 14.5 + 14.0) / 3 = 14.5
+    let sc_floor = derive_top50_base_floor(&summary, &find_floor, Mode::B4, true);
+    assert!(sc_floor.is_some());
+    assert!((sc_floor.unwrap() - 14.5).abs() < 1e-6);
+
+    // 일반 계열: 12.0
+    let mx_floor = derive_top50_base_floor(&summary, &find_floor, Mode::B4, false);
+    assert!(mx_floor.is_some());
+    assert!((mx_floor.unwrap() - 12.0).abs() < 1e-6);
+
+    // 없는 모드
+    let b5_floor = derive_top50_base_floor(&summary, &find_floor, Mode::B5, true);
+    assert!(b5_floor.is_none());
 }
 
 #[test]

@@ -290,6 +290,5 @@ where
     pub find_floor: F,
     pub button_mode: Mode,
     pub current_diff: Difficulty,
-    pub ref_floor: f64,
     pub now_unix: i64,
 }

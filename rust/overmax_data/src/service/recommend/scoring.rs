@@ -364,46 +364,96 @@ pub(crate) fn session_flow_score(
     }
 }
 
-/// 최근 플레이 기록 및 세션 모멘텀을 기반으로 인게임 공식 레벨 라벨(예: "SC 13", "12")을 도출한다.
-/// 손풀기 곡으로 인해 권장 레벨이 급락하지 않도록 세션 내 최고/주력 난이도를 앵커로 방어한다.
+/// V-Archive Top 50 곡들 중 현재 난이도 계열(SC vs 일반)에 해당하는 패턴들의 상위 난이도 평균(기본 실력대 Floor)을 산출한다.
+pub(crate) fn derive_top50_base_floor<F>(
+    top50: &crate::store::record_db::VArchiveTop50Summary,
+    find_floor: &F,
+    button_mode: overmax_core::Mode,
+    is_sc: bool,
+) -> Option<f64>
+where
+    F: Fn(i32, overmax_core::Mode, Difficulty) -> f64,
+{
+    let mut floors: Vec<f64> = top50
+        .rank_map
+        .keys()
+        .filter(|&(_, m, d)| *m == button_mode && (d.is_sc() == is_sc))
+        .map(|&(sid, m, d)| find_floor(sid, m, d))
+        .filter(|&f| f > 0.0)
+        .collect();
+
+    if floors.is_empty() {
+        return None;
+    }
+
+    floors.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+
+    let sample_count = floors.len().min(15);
+    let avg = floors.iter().take(sample_count).sum::<f64>() / sample_count as f64;
+    Some(avg)
+}
+
+/// Top 50 기반 장기 실력대 및 최근 세션 모멘텀을 결합하여 인게임 공식 레벨 라벨(예: "SC 13", "12")을 도출한다.
+/// - 선곡창 커서(현재 곡)에 반응하지 않고 플레이어의 실력/세션 상태만으로 결정된다.
+/// - Top 50 실력대를 앵커로 유지하여, 손풀기 곡(SC 5 등)을 플레이하더라도 권장 레벨이 급락하지 않는다.
+/// - 세션 주력곡 플레이가 누적됨에 따라 세션 데이터를 점진적으로(스근하게) 블렌딩한다.
 pub(crate) fn derive_recommended_level(
     trend_state: Option<&SessionTrendState>,
     session_plays: &[SessionPlayInfo],
     current_diff: Difficulty,
-    current_floor: f64,
+    top50_base_floor: Option<f64>,
 ) -> Option<String> {
-    let is_sc = current_diff == Difficulty::SC;
+    let is_sc = current_diff.is_sc();
 
-    // 1. 현재 탭 난이도 계열(SC vs 일반)과 일치하는 세션 플레이들
+    // 1. 현재 탭 난이도 계열(SC vs 일반)과 일치하는 유효 세션 플레이들
     let same_diff_plays: Vec<&SessionPlayInfo> = session_plays
         .iter()
-        .filter(|p| (p.diff == Difficulty::SC) == is_sc && p.floor > 0.0)
+        .filter(|p| p.diff.is_sc() == is_sc && p.floor > 0.0)
         .collect();
 
-    // 2. 세션 내 최고 난이도(Peak Floor)
-    let peak_floor = same_diff_plays
+    // 2. 세션 내 최고 난이도 (Session Peak Floor)
+    let session_peak = same_diff_plays
         .iter()
         .map(|p| p.floor)
         .fold(0.0f64, |acc, f| acc.max(f));
 
-    // 3. 기준 난이도(Base Floor) 결정
-    let base_floor = if same_diff_plays.is_empty() {
-        current_floor
-    } else {
-        let core_floor = peak_floor.max(current_floor);
-        let last_play = same_diff_plays.first().unwrap();
+    // 3. 글로벌 앵커 난이도 (Top 50 주력 실력대 우선, 없으면 세션 최고 난이도)
+    let anchor_floor = match (top50_base_floor, session_peak > 0.0) {
+        (Some(t_floor), true) => t_floor.max(session_peak),
+        (Some(t_floor), false) => t_floor,
+        (None, true) => session_peak,
+        (None, false) => return None,
+    };
 
-        const WARMUP_FLOOR_GAP: f64 = 2.5;
-        if core_floor - last_play.floor >= WARMUP_FLOOR_GAP {
-            // 직전 곡이 주력층 대비 2.5레벨 이상 낮은 손풀기 곡이면 주력층(core_floor)을 유지!
-            core_floor
+    // 4. 세션 플레이 분석 및 손풀기 가드 & 점진적 블렌딩
+    const WARMUP_FLOOR_GAP: f64 = 2.5;
+
+    // 앵커 대비 2.5 미만 차이의 주력 플레이들
+    let core_session_plays: Vec<&&SessionPlayInfo> = same_diff_plays
+        .iter()
+        .filter(|p| anchor_floor - p.floor < WARMUP_FLOOR_GAP)
+        .collect();
+
+    let base_floor = if core_session_plays.is_empty() {
+        // 세션에 주력 플레이가 아직 없는 경우 (손풀기만 쳤거나 0판):
+        // Top 50 앵커를 그대로 유지하여 저난도로 곤두박질치는 것을 방어!
+        anchor_floor
+    } else {
+        // 직전 주력 플레이 난이도
+        let last_core_floor = core_session_plays.first().unwrap().floor;
+        let core_count = core_session_plays.len();
+
+        if let Some(t_floor) = top50_base_floor {
+            // 주력 플레이 수에 따라 세션 데이터를 스근하게 블렌딩
+            // 1판: 25% 세션, 2판: 50% 세션, 3판: 75% 세션, 4판 이상: 100% 세션
+            let session_weight = (core_count as f64 / 4.0).min(1.0);
+            (1.0 - session_weight) * t_floor + session_weight * last_core_floor
         } else {
-            // 주력 곡이면 직전 플레이 난이도와 현재 선곡창 난이도 중 유효한 난이도 반영
-            last_play.floor.max(current_floor.min(core_floor))
+            last_core_floor
         }
     };
 
-    // 4. 컨디션 모멘텀 오프셋 적용
+    // 5. 컨디션 모멘텀 오프셋 적용
     let target_floor = match trend_state.map(|s| s.trend) {
         Some(SessionTrend::Climbing) => base_floor + 0.3,
         Some(SessionTrend::Recovery) => (base_floor - 0.3).max(1.0),
