@@ -194,6 +194,49 @@ fn retry_priority(rate: f64, updated_at: Option<i64>, now_unix: i64) -> f64 {
     rate_gap * recency_weight
 }
 
+/// Top-50 방어 대상 시작 순위 (41위~50위)
+const TOP50_DEFENSE_RANK_START: usize = 41;
+/// 컷라인 기준 돌파 후보 탐색 델타 (컷라인 - 2.0 이내)
+const TOP50_ATTACK_RATING_DELTA: f64 = 2.0;
+/// 41~50위 수성 보너스 최대치
+const TOP50_DEFENSE_BONUS: f64 = 5.0;
+/// 51위 이하 컷라인 최근접 돌파 보너스 최대치
+const TOP50_ATTACK_MAX_BONUS: f64 = 6.0;
+
+/// Top-50 경계 추천 점수 계산 순수 함수.
+/// - rank가 Some(41..=50): 컷라인 방어 타깃 (순위가 50위에 가까울수록 높은 보너스 3.0 ~ 5.0)
+/// - rank가 None이거나 51위 이상이고 rating이 cutoff_rating - 2.0 이상: 컷라인 돌파 타깃 (0.0 ~ 6.0)
+/// - Top-50 데이터가 부족하거나(50개 미만) 무관한 구간: 0.0
+fn top50_boundary_score(
+    varchive_rating: Option<f64>,
+    rank: Option<usize>,
+    cutoff_rating: f64,
+    total_top_count: usize,
+) -> f64 {
+    if total_top_count < 50 || cutoff_rating <= 0.0 {
+        return 0.0;
+    }
+
+    if let Some(r) = rank {
+        if (TOP50_DEFENSE_RANK_START..=50).contains(&r) {
+            // 41위(3.0) -> 50위(5.0) 로 갈수록 위기감이 크므로 가중치 상승
+            let t = (r - TOP50_DEFENSE_RANK_START) as f64 / (50 - TOP50_DEFENSE_RANK_START) as f64;
+            return 3.0 + (t * (TOP50_DEFENSE_BONUS - 3.0));
+        }
+    }
+
+    if let Some(rating) = varchive_rating {
+        if rating < cutoff_rating && rating >= (cutoff_rating - TOP50_ATTACK_RATING_DELTA) {
+            // 컷라인에 가까울수록 (delta가 0에 가까울수록) 높은 점수
+            let delta = cutoff_rating - rating;
+            let ratio = 1.0 - (delta / TOP50_ATTACK_RATING_DELTA).clamp(0.0, 1.0);
+            return ratio * TOP50_ATTACK_MAX_BONUS;
+        }
+    }
+
+    0.0
+}
+
 struct RawCandidate<'a> {
     song_id: i32,
     song: &'a crate::community::client::Song,
@@ -205,6 +248,7 @@ struct RawCandidate<'a> {
     rate: Option<f64>,
     is_max_combo: bool,
     updated_at: Option<i64>,
+    varchive_rating: Option<f64>,
 }
 
 impl<'a> RawCandidate<'a> {
@@ -362,6 +406,7 @@ impl LocalFloorRecommender {
                             rate: None,
                             is_max_combo: false,
                             updated_at: None,
+                            varchive_rating: None,
                         });
                     }
                 }
@@ -384,6 +429,7 @@ impl LocalFloorRecommender {
 
         let rate_map = self.rdb.get_rate_map(&unique_ids);
         let updated_at_map = self.rdb.get_local_updated_at_map(&unique_ids);
+        let varchive_rating_map = self.rdb.get_varchive_rating_map(&unique_ids);
 
         for entry in candidates.iter_mut() {
             let key = (entry.song_id, entry.mode, entry.diff);
@@ -392,6 +438,7 @@ impl LocalFloorRecommender {
                 entry.is_max_combo = is_max_combo;
             }
             entry.updated_at = updated_at_map.get(&key).copied();
+            entry.varchive_rating = varchive_rating_map.get(&key).copied();
         }
     }
 
@@ -641,14 +688,29 @@ impl RecommendationSource for LocalFloorRecommender {
 
         self.merge_record_rates(&mut candidates);
 
+        let top50 = self.rdb.get_varchive_top50_summary(ctx.button_mode);
         let now_unix = Self::now_unix();
         candidates.sort_by(|a, b| {
             match (a.is_played(), b.is_played()) {
                 (true, false) => Ordering::Less,
                 (false, true) => Ordering::Greater,
                 (true, true) => {
-                    let pa = retry_priority(a.rate.unwrap_or(0.0), a.updated_at, now_unix);
-                    let pb = retry_priority(b.rate.unwrap_or(0.0), b.updated_at, now_unix);
+                    let a_rank = top50.rank_map.get(&(a.song_id, a.mode, a.diff)).copied();
+                    let b_rank = top50.rank_map.get(&(b.song_id, b.mode, b.diff)).copied();
+                    let pa = retry_priority(a.rate.unwrap_or(0.0), a.updated_at, now_unix)
+                        + top50_boundary_score(
+                            a.varchive_rating,
+                            a_rank,
+                            top50.cutoff_rating,
+                            top50.total_recorded_count,
+                        );
+                    let pb = retry_priority(b.rate.unwrap_or(0.0), b.updated_at, now_unix)
+                        + top50_boundary_score(
+                            b.varchive_rating,
+                            b_rank,
+                            top50.cutoff_rating,
+                            top50.total_recorded_count,
+                        );
                     // 우선순위 내림차순 정렬: cmp(b, a) 형태로 비교
                     pb.partial_cmp(&pa)
                         .unwrap_or(Ordering::Equal)
@@ -1098,5 +1160,35 @@ mod tests {
         // updated_at 없음(레거시 로우) -> 최근성 가중 없이 순수 격차만 반환 (기존 동작과 호환)
         let no_timestamp = retry_priority(95.0, None, now);
         assert_eq!(no_timestamp, 4.5);
+    }
+
+    #[test]
+    fn test_top50_boundary_score_cases() {
+        let cutoff = 172.96;
+        let count = 50;
+
+        // Case 1: 41위 (방어 하한, 3.0점)
+        let rank_41 = top50_boundary_score(Some(173.78), Some(41), cutoff, count);
+        assert!((rank_41 - 3.0).abs() < 0.01);
+
+        // Case 2: 50위 (방어 상한, 5.0점)
+        let rank_50 = top50_boundary_score(Some(172.96), Some(50), cutoff, count);
+        assert!((rank_50 - 5.0).abs() < 0.01);
+
+        // Case 3: 1위 (상위 1~40위 안정권 -> 0.0)
+        let rank_1 = top50_boundary_score(Some(185.85), Some(1), cutoff, count);
+        assert_eq!(rank_1, 0.0);
+
+        // Case 4: 51위 이하 컷라인 직하 (cutoff - 0.1) -> 높은 돌파 보너스 (~5.7점)
+        let near_attack = top50_boundary_score(Some(cutoff - 0.1), None, cutoff, count);
+        assert!(near_attack > 5.5 && near_attack <= 6.0);
+
+        // Case 5: 컷라인 - 2.0 초과 격차 (cutoff - 3.0) -> 0.0
+        let far_attack = top50_boundary_score(Some(cutoff - 3.0), None, cutoff, count);
+        assert_eq!(far_attack, 0.0);
+
+        // Case 6: Top-50 미만 (데이터 부족, count < 50) -> 항상 0.0
+        let insufficient = top50_boundary_score(Some(cutoff - 0.1), None, cutoff, 30);
+        assert_eq!(insufficient, 0.0);
     }
 }

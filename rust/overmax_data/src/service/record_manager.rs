@@ -1,4 +1,4 @@
-use crate::store::record_db::RecordDB;
+use crate::store::record_db::{RecordDB, VArchiveTop50Summary};
 use overmax_core::{Difficulty, Mode, RecordKey, RecordValue, VerifiedPlayEvent};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -148,6 +148,18 @@ impl RecordManager {
         song_ids: &[i32],
     ) -> std::collections::HashMap<RecordKey, i64> {
         self.record_db.get_updated_at_map(song_ids)
+    }
+
+    pub fn get_varchive_top50_summary(&self, mode: Mode) -> VArchiveTop50Summary {
+        let steam_id = self.record_db.get_steam_id();
+        self.record_db.get_varchive_top50_summary(&steam_id, mode)
+    }
+
+    pub fn get_varchive_rating_map(
+        &self,
+        song_ids: &[i32],
+    ) -> std::collections::HashMap<RecordKey, f64> {
+        self.record_db.get_varchive_rating_map(song_ids)
     }
 
     pub fn get_varchive_cache_record(

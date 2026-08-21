@@ -275,12 +275,12 @@ fn top50_boundary_score(
 
 ## 4. Definition of Done
 
-- [ ] `varchive_records` 테이블에 `idx_varchive_top50` 복합 인덱스 추가
-- [ ] `VArchiveTop50Summary` 정의 및 `RecordDB::get_varchive_top50_summary` 추가
-- [ ] `RecordDB::get_varchive_rating_map` 추가
-- [ ] `RecordManager` pass-through 메서드 2종 추가
-- [ ] `top50_boundary_score()` 순수 함수 및 단위 테스트 4종 작성
-- [ ] `LocalFloorRecommender`에 레인 A 점수 블렌딩 통합
-- [ ] `cargo test --workspace --locked` 전체 통과
-- [ ] `cargo clippy --workspace --all-targets --locked` 경고 없음
-- [ ] `overmax_data` 크레이트 외 파일 변경 없음
+- [x] `varchive_records` 테이블에 `idx_varchive_top50` 복합 인덱스 추가
+- [x] `VArchiveTop50Summary` 정의 및 `RecordDB::get_varchive_top50_summary` 추가
+- [x] `RecordDB::get_varchive_rating_map` 추가
+- [x] `RecordManager` pass-through 메서드 2종 추가
+- [x] `top50_boundary_score()` 순수 함수 및 단위 테스트 4종 작성
+- [x] `LocalFloorRecommender`에 레인 A 점수 블렌딩 통합
+- [x] `cargo test --workspace --locked` 전체 통과
+- [x] `cargo clippy --workspace --all-targets --locked` 경고 없음
+- [x] `overmax_data` 크레이트 외 파일 변경 없음

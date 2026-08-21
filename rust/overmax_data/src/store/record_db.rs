@@ -15,6 +15,16 @@ pub struct RawSyncCandidateRow {
     pub varchive_mc: Option<bool>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct VArchiveTop50Summary {
+    /// 50위 곡의 레이팅 (50개 미만인 경우 가장 낮은 곡의 레이팅 또는 0.0)
+    pub cutoff_rating: f64,
+    /// 1위 ~ 50위 곡들의 순위 맵 (RecordKey -> 1-based rank)
+    pub rank_map: std::collections::HashMap<RecordKey, usize>,
+    /// 모드 내 등록된 유효 레이팅(rating > 0) 곡 수
+    pub total_recorded_count: usize,
+}
+
 pub struct RecordDB {
     db_path: PathBuf,
     steam_id: Mutex<String>,
@@ -147,6 +157,10 @@ impl RecordDB {
             "CREATE INDEX IF NOT EXISTS idx_varchive_rating ON varchive_records (rating)",
             [],
         )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_varchive_top50 ON varchive_records (steam_id, button_mode, rating DESC)",
+            [],
+        )?;
         Ok(())
     }
 
@@ -174,6 +188,10 @@ impl RecordDB {
                 let _ = self.create_records_table(conn);
             }
         }
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_varchive_top50 ON varchive_records (steam_id, button_mode, rating DESC)",
+            [],
+        );
     }
 
     pub fn set_steam_id(&self, steam_id: Option<&str>) -> (bool, String, String) {
@@ -454,6 +472,60 @@ impl RecordDB {
         map
     }
 
+    pub fn get_varchive_rating_map(
+        &self,
+        song_ids: &[i32],
+    ) -> std::collections::HashMap<RecordKey, f64> {
+        if !self.is_ready || song_ids.is_empty() {
+            return std::collections::HashMap::new();
+        }
+
+        let steam_id = self.get_steam_id();
+        if steam_id.is_empty() || steam_id == Self::UNKNOWN_STEAM_ID {
+            return std::collections::HashMap::new();
+        }
+
+        let placeholders = vec!["?"; song_ids.len()].join(",");
+        let query = format!(
+            "SELECT song_id, button_mode, difficulty, rating
+             FROM varchive_records
+             WHERE steam_id=?1 AND song_id IN ({}) AND rating > 0",
+            placeholders
+        );
+
+        let mut map = std::collections::HashMap::new();
+        let _ = self.with_rate_map_connection(|conn| {
+            if let Ok(mut stmt) = conn.prepare(&query) {
+                let mut p = Vec::new();
+                p.push(&steam_id as &dyn rusqlite::ToSql);
+                let song_ids_str: Vec<String> = song_ids.iter().map(|s| s.to_string()).collect();
+                for id_str in &song_ids_str {
+                    p.push(id_str as &dyn rusqlite::ToSql);
+                }
+                if let Ok(mut rows) = stmt.query(&*p) {
+                    while let Ok(Some(row)) = rows.next() {
+                        if let (Ok(song_id_str), Ok(button_mode), Ok(difficulty), Ok(rating)) = (
+                            row.get::<_, String>(0),
+                            row.get::<_, String>(1),
+                            row.get::<_, String>(2),
+                            row.get::<_, f64>(3),
+                        ) {
+                            if let Ok(sid) = song_id_str.parse::<i32>() {
+                                if let (Some(m), Some(d)) = (
+                                    Mode::from_str(&button_mode),
+                                    Difficulty::from_str(&difficulty),
+                                ) {
+                                    map.insert((sid, m, d), rating);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        map
+    }
+
     /// All local rows for a Steam id (for sync). Ignores internal `steam_id` mutex.
     pub fn all_records_for_steam(
         &self,
@@ -730,6 +802,55 @@ impl RecordDB {
         Ok(())
     }
 
+    pub fn get_varchive_top50_summary(&self, steam_id: &str, mode: Mode) -> VArchiveTop50Summary {
+        if !self.is_ready || steam_id.is_empty() || steam_id == Self::UNKNOWN_STEAM_ID {
+            return VArchiveTop50Summary::default();
+        }
+
+        let Ok(conn) = self.open_conn() else {
+            return VArchiveTop50Summary::default();
+        };
+
+        let button_mode = mode.as_str();
+        let query = "SELECT song_id, difficulty, rating
+                     FROM varchive_records
+                     WHERE steam_id = ?1 AND button_mode = ?2 AND rating > 0
+                     ORDER BY rating DESC
+                     LIMIT 50";
+
+        let mut rank_map = std::collections::HashMap::new();
+        let mut cutoff_rating = 0.0f64;
+        let mut total_count = 0usize;
+
+        if let Ok(mut stmt) = conn.prepare(query) {
+            if let Ok(mut rows) = stmt.query(rusqlite::params![steam_id, button_mode]) {
+                let mut rank = 1;
+                while let Ok(Some(row)) = rows.next() {
+                    if let (Ok(song_id_str), Ok(diff_str), Ok(rating)) = (
+                        row.get::<_, String>(0),
+                        row.get::<_, String>(1),
+                        row.get::<_, f64>(2),
+                    ) {
+                        if let (Ok(sid), Some(diff)) =
+                            (song_id_str.parse::<i32>(), Difficulty::from_str(&diff_str))
+                        {
+                            rank_map.insert((sid, mode, diff), rank);
+                            cutoff_rating = rating;
+                            total_count += 1;
+                            rank += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        VArchiveTop50Summary {
+            cutoff_rating,
+            rank_map,
+            total_recorded_count: total_count,
+        }
+    }
+
     pub fn get_varchive_top50_rank(
         &self,
         steam_id: &str,
@@ -847,5 +968,57 @@ mod tests {
         let updated_102 = map.get(&(102, Mode::B6, Difficulty::HD)).copied().unwrap();
         assert!(updated_101 >= before);
         assert!(updated_102 >= before);
+    }
+
+    #[test]
+    fn test_get_varchive_top50_summary_and_rating_map() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("record_varchive_top50.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let conn = db.open_conn().unwrap();
+        for i in 1..=55 {
+            let json = serde_json::json!({
+                "score": 99.0 + (i as f64 * 0.01),
+                "maxCombo": true,
+                "updatedAt": "2026-08-21T00:00:00.000Z",
+                "rating": 100.0 + (i as f64 * 1.0),
+            });
+            conn.execute(
+                "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "76561198000000001",
+                    i.to_string(),
+                    "4B",
+                    "SC",
+                    json.to_string(),
+                ],
+            ).unwrap();
+        }
+
+        let summary = db.get_varchive_top50_summary("76561198000000001", Mode::B4);
+        assert_eq!(summary.total_recorded_count, 50);
+        assert_eq!(summary.rank_map.len(), 50);
+        assert_eq!(
+            summary.rank_map.get(&(55, Mode::B4, Difficulty::SC)),
+            Some(&1)
+        );
+        assert_eq!(
+            summary.rank_map.get(&(6, Mode::B4, Difficulty::SC)),
+            Some(&50)
+        );
+        assert_eq!(summary.cutoff_rating, 106.0);
+        assert_eq!(summary.rank_map.get(&(5, Mode::B4, Difficulty::SC)), None);
+
+        let rating_map = db.get_varchive_rating_map(&[55, 6, 5, 999]);
+        assert_eq!(rating_map.len(), 3);
+        assert_eq!(
+            rating_map.get(&(55, Mode::B4, Difficulty::SC)),
+            Some(&155.0)
+        );
+        assert_eq!(rating_map.get(&(6, Mode::B4, Difficulty::SC)), Some(&106.0));
+        assert_eq!(rating_map.get(&(5, Mode::B4, Difficulty::SC)), Some(&105.0));
     }
 }
