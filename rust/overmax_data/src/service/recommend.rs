@@ -22,6 +22,8 @@ pub enum RecommendReasonKind {
     Recovery,
     /// 방치된 90~99% 기록 재도전
     Retry,
+    /// 미플레이 첫 클리어 도전 추천
+    Unplayed,
 }
 
 impl RecommendReasonKind {
@@ -32,6 +34,7 @@ impl RecommendReasonKind {
             Self::Climbing => "UP",
             Self::Recovery => "REST",
             Self::Retry => "TRY",
+            Self::Unplayed => "CLR",
         }
     }
 }
@@ -241,6 +244,76 @@ struct CandidateSearchParams {
     ref_diff_grp: &'static str,
     floor_range: f64,
     same_mode_only: bool,
+}
+
+/// 기본 번들 팩(RESPECT 본편, Portable 1/2, Guilty Gear)인지 확인한다.
+pub fn is_base_bundle_dlc(dlc_code: &str) -> bool {
+    let dlc = dlc_code.to_lowercase().replace(char::is_whitespace, "");
+    matches!(
+        dlc.as_str(),
+        "r" | "rv"
+            | "respect"
+            | "respect/v"
+            | "p1"
+            | "portable1"
+            | "p2"
+            | "portable2"
+            | "gg"
+            | "guiltygear"
+            | "guilty gear"
+    )
+}
+
+/// 미플레이 신규 도전 추천 기본 최대 보너스
+const UNPLAYED_MAX_BONUS: f64 = 5.5;
+
+/// 미플레이 곡의 난이도 적합도와 세션 모멘텀을 기반으로 추천 점수를 산출한다.
+fn unplayed_challenge_score(
+    cand_floor: f64,
+    ref_floor: f64,
+    trend_state: Option<&SessionTrendState>,
+) -> f64 {
+    let delta = cand_floor - ref_floor;
+
+    let Some(state) = trend_state else {
+        // 세션 데이터가 없을 때: 현재 층과 가까울수록 높은 기본 점수 (최대 5.0)
+        let dist = delta.abs();
+        if dist <= 0.3 {
+            return (1.0 - (dist / 0.3)) * (UNPLAYED_MAX_BONUS - 0.5);
+        }
+        return 0.0;
+    };
+
+    match state.trend {
+        SessionTrend::Climbing => {
+            // 컨디션 쾌조: 동급(0.0) ~ 상위 난이도(+0.25) 도전에 최고 점수 (5.5점)
+            if (0.0..=0.35).contains(&delta) {
+                let center = 0.15;
+                let dist = (delta - center).abs();
+                (1.0 - (dist / 0.20)).max(0.0) * UNPLAYED_MAX_BONUS
+            } else {
+                0.0
+            }
+        }
+        SessionTrend::Steady => {
+            // 안정 순항: 현재 선곡 난이도와 일치하는(±0.15) 미플레이 곡에 5.0점
+            if delta.abs() <= 0.15 {
+                (1.0 - (delta.abs() / 0.15)) * (UNPLAYED_MAX_BONUS - 0.5)
+            } else {
+                0.0
+            }
+        }
+        SessionTrend::Recovery => {
+            // 컨디션 저조: 살짝 낮은 층(-0.2)의 부담 없는 미플레이 곡에 4.5점
+            if (-0.4..=0.0).contains(&delta) {
+                let center = -0.2;
+                let dist = (delta - center).abs();
+                (1.0 - (dist / 0.2)).max(0.0) * (UNPLAYED_MAX_BONUS - 1.0)
+            } else {
+                0.0
+            }
+        }
+    }
 }
 
 /// 재도전 목표 정확도. 100.0(퍼펙트) 대신 현실적인 재도전 유인 지점으로 설정.
@@ -761,52 +834,57 @@ impl RecommendStrategy {
                     SessionTrend::analyze_session(&session_play_infos, params.now_unix);
                 let session_trend = session_trend_state.as_ref().map(|s| s.trend);
 
-                params
-                    .candidates
-                    .sort_by(|a, b| match (a.is_played(), b.is_played()) {
-                        (true, false) => Ordering::Less,
-                        (false, true) => Ordering::Greater,
-                        (true, true) => {
-                            let a_rank = top50.rank_map.get(&(a.song_id, a.mode, a.diff)).copied();
-                            let b_rank = top50.rank_map.get(&(b.song_id, b.mode, b.diff)).copied();
-                            let pa = retry_priority(
-                                a.rate.unwrap_or(0.0),
-                                a.updated_at,
-                                params.now_unix,
-                            ) + top50_boundary_score(
+                params.candidates.sort_by(|a, b| {
+                    let pa = if a.is_played() {
+                        let a_rank = top50.rank_map.get(&(a.song_id, a.mode, a.diff)).copied();
+                        retry_priority(a.rate.unwrap_or(0.0), a.updated_at, params.now_unix)
+                            + top50_boundary_score(
                                 a.varchive_rating,
                                 a_rank,
                                 top50.cutoff_rating,
                                 top50.total_recorded_count,
-                            ) + session_flow_score(
+                            )
+                            + session_flow_score(
                                 a.floor,
                                 a.rate,
                                 params.ref_floor,
                                 session_trend_state.as_ref(),
-                            );
-                            let pb = retry_priority(
-                                b.rate.unwrap_or(0.0),
-                                b.updated_at,
-                                params.now_unix,
-                            ) + top50_boundary_score(
+                            )
+                    } else {
+                        unplayed_challenge_score(
+                            a.floor,
+                            params.ref_floor,
+                            session_trend_state.as_ref(),
+                        )
+                    };
+
+                    let pb = if b.is_played() {
+                        let b_rank = top50.rank_map.get(&(b.song_id, b.mode, b.diff)).copied();
+                        retry_priority(b.rate.unwrap_or(0.0), b.updated_at, params.now_unix)
+                            + top50_boundary_score(
                                 b.varchive_rating,
                                 b_rank,
                                 top50.cutoff_rating,
                                 top50.total_recorded_count,
-                            ) + session_flow_score(
+                            )
+                            + session_flow_score(
                                 b.floor,
                                 b.rate,
                                 params.ref_floor,
                                 session_trend_state.as_ref(),
-                            );
-                            pb.partial_cmp(&pa)
-                                .unwrap_or(Ordering::Equal)
-                                .then_with(|| {
-                                    a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal)
-                                })
-                        }
-                        (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
-                    });
+                            )
+                    } else {
+                        unplayed_challenge_score(
+                            b.floor,
+                            params.ref_floor,
+                            session_trend_state.as_ref(),
+                        )
+                    };
+
+                    pb.partial_cmp(&pa)
+                        .unwrap_or(Ordering::Equal)
+                        .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal))
+                });
 
                 params.candidates.truncate(params.max_results);
 
@@ -834,6 +912,19 @@ impl RecommendStrategy {
                             rank,
                             session_trend,
                         );
+                    } else {
+                        let unplayed_score = unplayed_challenge_score(
+                            c.floor,
+                            params.ref_floor,
+                            session_trend_state.as_ref(),
+                        );
+                        if unplayed_score >= 1.5 {
+                            c.reason = Some(RecommendReason {
+                                kind: RecommendReasonKind::Unplayed,
+                                detail: "미플레이 첫 클리어 도전 추천".to_string(),
+                                rank: None,
+                            });
+                        }
                     }
                 }
             }
@@ -959,6 +1050,36 @@ impl LocalFloorRecommender {
             total_count: summary.total_count,
             recommended_level,
         }
+    }
+
+    /// 기본 5개 번들 팩 및 사용자의 플레이 이력에 존재하는 DLC 코드 집합을 추출한다.
+    pub fn get_owned_dlc_set(&self) -> std::collections::HashSet<String> {
+        let mut owned = std::collections::HashSet::new();
+        // 기본 5개 번들 팩은 무조건 보유 인정
+        owned.insert("r".to_string());
+        owned.insert("rv".to_string());
+        owned.insert("p1".to_string());
+        owned.insert("p2".to_string());
+        owned.insert("gg".to_string());
+
+        if self.rdb.is_ready() {
+            let recorded_ids = self.rdb.get_all_recorded_song_ids();
+            for song in &self.vdb.songs {
+                if let Ok(sid) = song.title.parse::<i32>() {
+                    if recorded_ids.contains(&sid) {
+                        let dlc_norm = song
+                            .dlc_code
+                            .to_lowercase()
+                            .replace(char::is_whitespace, "");
+                        if !dlc_norm.is_empty() {
+                            owned.insert(dlc_norm);
+                        }
+                    }
+                }
+            }
+        }
+
+        owned
     }
 
     fn get_candidates<'a>(&'a self, params: CandidateSearchParams) -> Vec<RawCandidate<'a>> {
@@ -1330,6 +1451,20 @@ impl RecommendationSource for LocalFloorRecommender {
         });
 
         self.merge_record_rates(&mut candidates);
+
+        // 보유 DLC 팩이 아닌 미플레이 곡은 추천 풀에서 제외 (기록이 있는 곡은 100% 보존)
+        let owned_dlcs = self.get_owned_dlc_set();
+        candidates.retain(|c| {
+            if c.is_played() {
+                return true;
+            }
+            let dlc_norm = c
+                .song
+                .dlc_code
+                .to_lowercase()
+                .replace(char::is_whitespace, "");
+            is_base_bundle_dlc(&dlc_norm) || owned_dlcs.contains(&dlc_norm)
+        });
 
         let now_unix = Self::now_unix();
         ctx.strategy.sort_and_annotate(StrategySortParams {
@@ -2457,23 +2592,26 @@ mod tests {
     /// 실제 Candidate Ranking Pipeline 통합 테스트 (End-to-End Ranking Verification).
     ///
     /// 검증 목적:
-    /// - 여러 신호(Retry, Top-50, Session Flow)가 실제 DB/V-Archive/PlayEvents와 결합되었을 때
-    ///   의도된 우선순위 계층(Hierarchy)에 따라 후보들이 올바르게 정렬되는지 직접 검증한다.
+    /// - 여러 신호(Retry, Top-50, Session Flow, Unplayed)가 실제 DB/V-Archive/PlayEvents와 결합되었을 때
+    ///   의도된 우선순위 계층(Hierarchy)에 따라 후보들이 올바르게 정렬되고 미보유 DLC가 필터링되는지 직접 검증한다.
     ///
     /// 검증 계층:
     /// 1. Top-50 돌파 + Session Flow 복합 신호 (Score ~10.4) → Strong Retry(8.5)를 역전하여 1위
     /// 2. 단독 Strong Retry (Score 8.5) → 단독으로도 강력한 우선순위로 2위
-    /// 3. 중간 Retry (Score 4.5) → 단독 Session Flow(4.0)보다 높은 우선순위로 3위
-    /// 4. 단독 Session Flow (Score 4.0) → 4위
-    /// 5. 약한 신호 플레이곡 (Score 0.0) → 5위
-    /// 6. 미플레이 곡 → 플레이 완료곡들 뒤에 정렬 (6위)
+    /// 3. 미플레이 첫 클리어 도전 추천 (Score 5.5, CLR 뱃지) → 적정 난이도에서 3위 진입!
+    /// 4. 중간 Retry (Score 4.5) → 단독 Session Flow(4.0)보다 높은 우선순위로 4위
+    /// 5. 단독 Session Flow (Score 4.0) → 5위
+    /// 6. 미플레이 일반 곡 (Score 1.375) → 6위
+    /// 7. 약한 신호 플레이곡 (Score 0.0) → 7위
+    ///
+    /// (미보유 DLC 곡은 후보 목록에서 원천 필터링되어 0개 등장)
     #[test]
     fn test_candidate_ranking_integration_multi_signal_hierarchy() {
         let now = LocalFloorRecommender::now_unix();
 
-        // 1. VArchiveDB 구성 (후보 곡 0~6 및 세션 플레이 곡 997~999)
+        // 1. VArchiveDB 구성 (후보 곡 0~8 및 세션 플레이 곡 997~999)
         let mut vdb = VArchiveDB::new();
-        let make_song = |id: i32, name: &str, floor_str: Option<&str>| {
+        let make_song = |id: i32, name: &str, floor_str: Option<&str>, dlc: &str| {
             let patterns = if let Some(f) = floor_str {
                 serde_json::json!({
                     "4B": {
@@ -2496,23 +2634,34 @@ mod tests {
                 "name": name,
                 "title": id.to_string(),
                 "composer": "Artist",
-                "dlcCode": "pack",
+                "dlcCode": dlc,
                 "patterns": patterns
             })
         };
 
         vdb.songs = vec![
-            serde_json::from_value(make_song(0, "Current Song", Some("13.0"))).unwrap(),
-            serde_json::from_value(make_song(1, "Combo (Top50+Flow)", Some("13.25"))).unwrap(),
-            serde_json::from_value(make_song(2, "Strong Retry", Some("13.0"))).unwrap(),
-            serde_json::from_value(make_song(3, "Mid Retry", Some("13.0"))).unwrap(),
-            serde_json::from_value(make_song(4, "Pure Flow", Some("13.25"))).unwrap(),
-            serde_json::from_value(make_song(5, "Weak Signal", Some("13.0"))).unwrap(),
-            serde_json::from_value(make_song(6, "Unplayed Song", Some("13.0"))).unwrap(),
+            serde_json::from_value(make_song(0, "Current Song", Some("13.0"), "RV")).unwrap(),
+            serde_json::from_value(make_song(1, "Combo (Top50+Flow)", Some("13.25"), "RV"))
+                .unwrap(),
+            serde_json::from_value(make_song(2, "Strong Retry", Some("13.0"), "RV")).unwrap(),
+            serde_json::from_value(make_song(3, "Mid Retry", Some("13.0"), "RV")).unwrap(),
+            serde_json::from_value(make_song(4, "Pure Flow", Some("13.25"), "RV")).unwrap(),
+            serde_json::from_value(make_song(5, "Weak Signal", Some("13.0"), "RV")).unwrap(),
+            serde_json::from_value(make_song(6, "Unplayed Regular", Some("13.0"), "RV")).unwrap(),
+            serde_json::from_value(make_song(7, "Unplayed New Target", Some("13.15"), "P1"))
+                .unwrap(),
+            // Song 8: 미보유 팩 곡 (기록 없음 & 기본 5개 팩 아님 -> 필터링되어야 함)
+            serde_json::from_value(make_song(
+                8,
+                "Unowned DLC Song",
+                Some("13.15"),
+                "UNOWNED_COLLAB",
+            ))
+            .unwrap(),
             // 세션 기록 곡들 (후보 범위 12.5~13.5 밖으로 설정하여 추천 목록 오염 방지)
-            serde_json::from_value(make_song(999, "Session Core 11", Some("11.0"))).unwrap(),
-            serde_json::from_value(make_song(998, "Session Core 10", Some("10.0"))).unwrap(),
-            serde_json::from_value(make_song(997, "Session Warmup 7", Some("7.0"))).unwrap(),
+            serde_json::from_value(make_song(999, "Session Core 11", Some("11.0"), "RV")).unwrap(),
+            serde_json::from_value(make_song(998, "Session Core 10", Some("10.0"), "RV")).unwrap(),
+            serde_json::from_value(make_song(997, "Session Warmup 7", Some("7.0"), "RV")).unwrap(),
         ];
 
         // 2. DB 구성
@@ -2524,7 +2673,6 @@ mod tests {
 
         let conn = db.open_conn().unwrap();
 
-        // 2-1. V-Archive Top50 (51개 데이터 추가, Cutoff = 173.0)
         // 2-1. V-Archive Top50 (49개 기준 곡 + Song 4 = 총 50개 Top50, Cutoff = 174.0)
         for i in 101..=149 {
             let rating = 174.0 + ((i - 101) as f64 * 0.4); // 174.0 ~ 193.2
@@ -2623,10 +2771,11 @@ mod tests {
         let entries = bundle.entries;
 
         // 4. Ranking 순위 및 사유(Reason) 검증
+        // Song 0(현재 곡)과 Song 8(미보유 DLC)은 제외되어 총 7개 후보
         assert_eq!(
             entries.len(),
-            6,
-            "Total 6 candidates (excluding current song 0)"
+            7,
+            "Total 7 candidates (Song 0 and unowned Song 8 excluded)"
         );
 
         // 1위: Song 1 (Top50 + Flow 복합 신호가 Strong Retry를 역전)
@@ -2643,27 +2792,35 @@ mod tests {
             Some(RecommendReasonKind::Retry)
         );
 
-        // 3위: Song 3 (중간 Retry가 Pure Flow보다 우위)
-        assert_eq!(entries[2].song_id, 3);
+        // 3위: Song 7 (적정 난이도 미플레이 신규 도전 추천 - 점수 5.5점으로 3위 랭크인!)
+        assert_eq!(entries[2].song_id, 7);
         assert_eq!(
             entries[2].reason.as_ref().map(|r| r.kind),
+            Some(RecommendReasonKind::Unplayed)
+        );
+        assert_eq!(entries[2].rate, None); // 미플레이
+
+        // 4위: Song 3 (중간 Retry가 Pure Flow보다 우위)
+        assert_eq!(entries[3].song_id, 3);
+        assert_eq!(
+            entries[3].reason.as_ref().map(|r| r.kind),
             Some(RecommendReasonKind::Retry)
         );
 
-        // 4위: Song 4 (Pure Session Flow)
-        assert_eq!(entries[3].song_id, 4);
+        // 5위: Song 4 (Pure Session Flow)
+        assert_eq!(entries[4].song_id, 4);
         assert_eq!(
-            entries[3].reason.as_ref().map(|r| r.kind),
+            entries[4].reason.as_ref().map(|r| r.kind),
             Some(RecommendReasonKind::Climbing)
         );
 
-        // 5위: Song 5 (약한 신호 플레이곡 - score 0)
-        assert_eq!(entries[4].song_id, 5);
-        assert_eq!(entries[4].reason, None);
-
-        // 6위: Song 6 (미플레이 곡 - 플레이 완료곡들 뒤에 배치)
+        // 6위: Song 6 (미플레이 일반 곡 - score 1.375로 0점 플레이곡을 앞서며, 뱃지 임계치 1.5 미만)
         assert_eq!(entries[5].song_id, 6);
         assert_eq!(entries[5].rate, None);
         assert_eq!(entries[5].reason, None);
+
+        // 7위: Song 5 (약한 신호 플레이곡 - score 0.0)
+        assert_eq!(entries[6].song_id, 5);
+        assert_eq!(entries[6].reason, None);
     }
 }

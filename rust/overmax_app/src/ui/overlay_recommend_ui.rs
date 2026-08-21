@@ -184,6 +184,7 @@ fn draw_reason_badge(ui: &mut egui::Ui, reason: &overmax_data::RecommendReason, 
         overmax_data::RecommendReasonKind::Climbing => Color32::from_rgb(50, 180, 255),    // 블루
         overmax_data::RecommendReasonKind::Recovery => Color32::from_rgb(40, 190, 130), // 에메랄드
         overmax_data::RecommendReasonKind::Retry => Color32::from_rgb(255, 95, 95),     // 코랄레드
+        overmax_data::RecommendReasonKind::Unplayed => Color32::from_rgb(30, 200, 160), // 민트/청록 (신규)
     };
     ui.painter()
         .rect_filled(badge_rect, CornerRadius::same((3.0 * scale) as u8), color);
@@ -216,6 +217,9 @@ fn reason_tooltip(reason: &overmax_data::RecommendReason) -> String {
             crate::t!("reco-reason-recovery").to_string()
         }
         overmax_data::RecommendReasonKind::Retry => crate::t!("reco-reason-retry").to_string(),
+        overmax_data::RecommendReasonKind::Unplayed => {
+            crate::t!("reco-reason-unplayed").to_string()
+        }
     }
 }
 
@@ -445,6 +449,10 @@ mod tests {
         assert_eq!(
             overmax_data::RecommendReasonKind::Retry.badge_label(),
             "TRY"
+        );
+        assert_eq!(
+            overmax_data::RecommendReasonKind::Unplayed.badge_label(),
+            "CLR"
         );
     }
 }

@@ -175,6 +175,11 @@ impl RecordManager {
         self.record_db.get_recent_records(&steam_id, mode, limit)
     }
 
+    pub fn get_all_recorded_song_ids(&self) -> std::collections::HashSet<i32> {
+        let steam_id = self.record_db.get_steam_id();
+        self.record_db.get_all_recorded_song_ids(&steam_id)
+    }
+
     pub fn get_varchive_cache_record(
         &self,
         song_id: i32,

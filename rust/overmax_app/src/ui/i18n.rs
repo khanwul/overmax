@@ -222,6 +222,12 @@ macro_rules! t {
             En => "Stale record improvement retry"
         )
     };
+    ("reco-reason-unplayed") => {
+        $crate::t_select!(
+            Ko => "미플레이 첫 클리어 도전 추천",
+            En => "Unplayed first clear challenge"
+        )
+    };
     ("status-account-path-missing") => {
         $crate::t_select!(
             Ko => "account.txt 경로 설정 필요",

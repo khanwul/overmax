@@ -626,6 +626,62 @@ impl RecordDB {
         result.unwrap_or(false)
     }
 
+    /// 사용자의 모든 플레이/동기화 이력(records, varchive_records, play_events)에 등장하는 모든 song_id 집합을 반환한다.
+    /// 보유 DLC 자동 추론에 사용된다.
+    pub fn get_all_recorded_song_ids(&self, steam_id: &str) -> std::collections::HashSet<i32> {
+        let mut set = std::collections::HashSet::new();
+        if !self.is_ready {
+            return set;
+        }
+
+        let _ = self.with_rate_map_connection(|conn| {
+            // 1. records
+            if let Ok(mut stmt) =
+                conn.prepare("SELECT DISTINCT song_id FROM records WHERE steam_id = ?1")
+            {
+                if let Ok(mut rows) = stmt.query([steam_id]) {
+                    while let Ok(Some(row)) = rows.next() {
+                        if let Ok(id_str) = row.get::<_, String>(0) {
+                            if let Ok(id) = id_str.parse::<i32>() {
+                                set.insert(id);
+                            }
+                        }
+                    }
+                }
+            }
+            // 2. varchive_records
+            if let Ok(mut stmt) =
+                conn.prepare("SELECT DISTINCT song_id FROM varchive_records WHERE steam_id = ?1")
+            {
+                if let Ok(mut rows) = stmt.query([steam_id]) {
+                    while let Ok(Some(row)) = rows.next() {
+                        if let Ok(id_str) = row.get::<_, String>(0) {
+                            if let Ok(id) = id_str.parse::<i32>() {
+                                set.insert(id);
+                            }
+                        }
+                    }
+                }
+            }
+            // 3. play_events
+            if let Ok(mut stmt) =
+                conn.prepare("SELECT DISTINCT song_id FROM play_events WHERE steam_id = ?1")
+            {
+                if let Ok(mut rows) = stmt.query([steam_id]) {
+                    while let Ok(Some(row)) = rows.next() {
+                        if let Ok(id_str) = row.get::<_, String>(0) {
+                            if let Ok(id) = id_str.parse::<i32>() {
+                                set.insert(id);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        set
+    }
+
     pub fn get_recent_records(
         &self,
         steam_id: &str,
