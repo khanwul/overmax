@@ -25,6 +25,16 @@ pub struct VArchiveTop50Summary {
     pub total_recorded_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecentRecordEntry {
+    pub song_id: i32,
+    pub button_mode: Mode,
+    pub difficulty: Difficulty,
+    pub rate: f64,
+    pub is_max_combo: bool,
+    pub updated_at: i64,
+}
+
 pub struct RecordDB {
     db_path: PathBuf,
     steam_id: Mutex<String>,
@@ -130,6 +140,10 @@ impl RecordDB {
             )",
             [],
         )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_records_recent ON records (steam_id, button_mode, updated_at DESC)",
+            [],
+        )?;
         Ok(())
     }
 
@@ -188,6 +202,10 @@ impl RecordDB {
                 let _ = self.create_records_table(conn);
             }
         }
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_records_recent ON records (steam_id, button_mode, updated_at DESC)",
+            [],
+        );
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_varchive_top50 ON varchive_records (steam_id, button_mode, rating DESC)",
             [],
@@ -524,6 +542,64 @@ impl RecordDB {
             }
         });
         map
+    }
+
+    pub fn get_recent_records(
+        &self,
+        steam_id: &str,
+        mode: Mode,
+        limit: usize,
+    ) -> Vec<RecentRecordEntry> {
+        if !self.is_ready || steam_id.is_empty() || steam_id == Self::UNKNOWN_STEAM_ID || limit == 0
+        {
+            return Vec::new();
+        }
+
+        let button_mode = mode.as_str();
+        let query = "SELECT song_id, difficulty, rate, is_max_combo, updated_at
+                     FROM records
+                     WHERE steam_id = ?1 AND button_mode = ?2
+                     ORDER BY updated_at DESC
+                     LIMIT ?3";
+
+        let mut results = Vec::new();
+        let _ = self.with_rate_map_connection(|conn| {
+            if let Ok(mut stmt) = conn.prepare(query) {
+                if let Ok(mut rows) =
+                    stmt.query(rusqlite::params![steam_id, button_mode, limit as i64])
+                {
+                    while let Ok(Some(row)) = rows.next() {
+                        if let (
+                            Ok(song_id_str),
+                            Ok(diff_str),
+                            Ok(rate),
+                            Ok(mc_int),
+                            Ok(updated_at),
+                        ) = (
+                            row.get::<_, String>(0),
+                            row.get::<_, String>(1),
+                            row.get::<_, f64>(2),
+                            row.get::<_, i32>(3),
+                            row.get::<_, i64>(4),
+                        ) {
+                            if let (Ok(sid), Some(diff)) =
+                                (song_id_str.parse::<i32>(), Difficulty::from_str(&diff_str))
+                            {
+                                results.push(RecentRecordEntry {
+                                    song_id: sid,
+                                    button_mode: mode,
+                                    difficulty: diff,
+                                    rate,
+                                    is_max_combo: mc_int != 0,
+                                    updated_at,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        results
     }
 
     /// All local rows for a Steam id (for sync). Ignores internal `steam_id` mutex.
@@ -1020,5 +1096,37 @@ mod tests {
         );
         assert_eq!(rating_map.get(&(6, Mode::B4, Difficulty::SC)), Some(&106.0));
         assert_eq!(rating_map.get(&(5, Mode::B4, Difficulty::SC)), Some(&105.0));
+    }
+
+    #[test]
+    fn test_get_recent_records() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("record_recent.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let conn = db.open_conn().unwrap();
+        for i in 1..=5 {
+            conn.execute(
+                "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    "76561198000000001",
+                    i.to_string(),
+                    "4B",
+                    "NM",
+                    98.0 + (i as f64 * 0.2),
+                    1,
+                    1000 + i * 10,
+                ],
+            ).unwrap();
+        }
+
+        let recent = db.get_recent_records("76561198000000001", Mode::B4, 3);
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent[0].song_id, 5);
+        assert_eq!(recent[0].updated_at, 1050);
+        assert_eq!(recent[1].song_id, 4);
+        assert_eq!(recent[2].song_id, 3);
     }
 }

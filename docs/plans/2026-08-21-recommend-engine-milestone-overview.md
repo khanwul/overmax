@@ -25,7 +25,7 @@
 | 선행 작업 | `play_events` 이력 로그 스키마 | overmax_data | 없음 | 별도 진행 중 | (별도 트래킹) |
 | Phase 1 | 레인 B(정체/재도전) — rate 격차 × 최근성 가중 블렌딩 | overmax_data | 없음 (스키마 변경 없음) | 완료 | `2026-08-21-recommend-phase1-retry-lane-spec.md` |
 | Phase 2 | 레인 A(V-Archive 레이팅 top-50 경계 후보) | overmax_data | `get_varchive_top50_rank` 확장 | 완료 | `2026-08-21-recommend-phase2-top50-boundary-spec.md` |
-| Phase 3 | 레인 D(세션 모멘텀 & 최근 플레이 히스토리 기반 동적 플로우) | overmax_data | Phase 1 이후 권장 | 스펙 완료, 착수 대기 | `2026-08-21-recommend-phase3-session-flow-spec.md` |
+| Phase 3 | 레인 D(세션 모멘텀 & 최근 플레이 히스토리 기반 동적 플로우) | overmax_data | Phase 1 이후 권장 | 완료 | `2026-08-21-recommend-phase3-session-flow-spec.md` |
 | Phase 4 | 위 세 레인 + play_events 기반 신호 통합, "이유 배지" UI 표시 | overmax_data, overmax_app | 선행 작업 완료 + Phase 1~3 | 착수 전 | - |
 
 Phase 1~3은 서로 독립적으로 구현 가능하고(각자 다른 데이터 소스 사용), 순서를 바꿔도 무방하다.
@@ -51,6 +51,6 @@ Phase 1~3은 서로 독립적으로 구현 가능하고(각자 다른 데이터 
 ## 다음 액션
 
 1. Phase 1(레인 B) 완료 (`a55b79d`).
-2. Phase 2(레인 A) 완료.
-3. Phase 3(레인 D) 스펙 작성 및 착수.
+2. Phase 2(레인 A) 완료 (`ac0fe02`).
+3. Phase 3(레인 D) 완료.
 4. 선행 작업(`play_events`) 완료 시점에 맞춰 Phase 4 스펙 작성 착수.

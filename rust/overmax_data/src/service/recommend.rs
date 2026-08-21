@@ -237,6 +237,84 @@ fn top50_boundary_score(
     0.0
 }
 
+/// 상승 모멘텀 판별 달성률 기준치 (99.0% 이상)
+const MOMENTUM_HIGH_RATE_THRESHOLD: f64 = 99.0;
+/// 안정화/회복 판별 달성률 하한치 (97.0% 이상)
+const MOMENTUM_LOW_RATE_THRESHOLD: f64 = 97.0;
+/// 세션 모멘텀 추천 최대 보너스
+const MOMENTUM_MAX_BONUS: f64 = 4.0;
+/// 세션 만료 유효 윈도우 시간 (4시간)
+const SESSION_IDLE_TIMEOUT_HOURS: f64 = 4.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionTrend {
+    /// 직전 성과 우수 (99.0% 이상) -> 상위 난이도(+0.1 ~ +0.4) 도전 권장
+    Climbing,
+    /// 직전 성과 보통 (97.0% ~ 99.0%) -> 동급 난이도(±0.15) 안정화 권장
+    Steady,
+    /// 직전 성과 저조 (97.0% 미만) -> 살짝 낮은 난이도(-0.2 ~ -0.5) 회복 권장
+    Recovery,
+}
+
+impl SessionTrend {
+    pub fn from_recent_play(rate: f64, updated_at: i64, now_unix: i64) -> Option<Self> {
+        let elapsed_hours = ((now_unix - updated_at).max(0) as f64) / 3600.0;
+        if elapsed_hours > SESSION_IDLE_TIMEOUT_HOURS {
+            return None;
+        }
+
+        if rate >= MOMENTUM_HIGH_RATE_THRESHOLD {
+            Some(Self::Climbing)
+        } else if rate >= MOMENTUM_LOW_RATE_THRESHOLD {
+            Some(Self::Steady)
+        } else if rate > 0.0 {
+            Some(Self::Recovery)
+        } else {
+            None
+        }
+    }
+}
+
+/// 직전 플레이 성과와 후보 곡의 Floor 관계를 평가하여 세션 모멘텀 가중치를 반환한다.
+fn session_flow_score(cand_floor: f64, ref_floor: f64, trend: Option<SessionTrend>) -> f64 {
+    let Some(trend) = trend else {
+        return 0.0;
+    };
+
+    let delta = cand_floor - ref_floor;
+
+    match trend {
+        SessionTrend::Climbing => {
+            // +0.1 ~ +0.4 구간에서 최고 점수 (최대 4.0)
+            if (0.0..=0.4).contains(&delta) && delta > 0.0 {
+                let center = 0.25;
+                let dist = (delta - center).abs();
+                (1.0 - (dist / 0.25)).max(0.0) * MOMENTUM_MAX_BONUS
+            } else {
+                0.0
+            }
+        }
+        SessionTrend::Steady => {
+            // ±0.15 이내 동급 난이도에서 최고 점수 (최대 3.0)
+            if delta.abs() <= 0.15 {
+                (1.0 - (delta.abs() / 0.15)) * (MOMENTUM_MAX_BONUS * 0.75)
+            } else {
+                0.0
+            }
+        }
+        SessionTrend::Recovery => {
+            // -0.5 ~ -0.1 구간에서 최고 점수 (최대 4.0)
+            if (-0.5..0.0).contains(&delta) {
+                let center = -0.3;
+                let dist = (delta - center).abs();
+                (1.0 - (dist / 0.3)).max(0.0) * MOMENTUM_MAX_BONUS
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
 struct RawCandidate<'a> {
     song_id: i32,
     song: &'a crate::community::client::Song,
@@ -689,7 +767,12 @@ impl RecommendationSource for LocalFloorRecommender {
         self.merge_record_rates(&mut candidates);
 
         let top50 = self.rdb.get_varchive_top50_summary(ctx.button_mode);
+        let recent_plays = self.rdb.get_recent_records(ctx.button_mode, 1);
         let now_unix = Self::now_unix();
+        let session_trend = recent_plays
+            .first()
+            .and_then(|r| SessionTrend::from_recent_play(r.rate, r.updated_at, now_unix));
+
         candidates.sort_by(|a, b| {
             match (a.is_played(), b.is_played()) {
                 (true, false) => Ordering::Less,
@@ -703,14 +786,16 @@ impl RecommendationSource for LocalFloorRecommender {
                             a_rank,
                             top50.cutoff_rating,
                             top50.total_recorded_count,
-                        );
+                        )
+                        + session_flow_score(a.floor, final_ref_floor, session_trend);
                     let pb = retry_priority(b.rate.unwrap_or(0.0), b.updated_at, now_unix)
                         + top50_boundary_score(
                             b.varchive_rating,
                             b_rank,
                             top50.cutoff_rating,
                             top50.total_recorded_count,
-                        );
+                        )
+                        + session_flow_score(b.floor, final_ref_floor, session_trend);
                     // 우선순위 내림차순 정렬: cmp(b, a) 형태로 비교
                     pb.partial_cmp(&pa)
                         .unwrap_or(Ordering::Equal)
@@ -1190,5 +1275,39 @@ mod tests {
         // Case 6: Top-50 미만 (데이터 부족, count < 50) -> 항상 0.0
         let insufficient = top50_boundary_score(Some(cutoff - 0.1), None, cutoff, 30);
         assert_eq!(insufficient, 0.0);
+    }
+
+    #[test]
+    fn test_session_flow_score_and_timeout() {
+        let now = 1_000_000i64;
+
+        // 1. 세션 만료 테스트 (5시간 전 플레이 -> timeout -> None)
+        let expired = SessionTrend::from_recent_play(99.5, now - 5 * 3600, now);
+        assert_eq!(expired, None);
+
+        // 2. 세션 유효 (10분 전 99.5% -> Climbing)
+        let climbing = SessionTrend::from_recent_play(99.5, now - 600, now);
+        assert_eq!(climbing, Some(SessionTrend::Climbing));
+
+        // 3. Climbing 모멘텀: +0.25 도전곡에 최고 보너스(4.0), 동급(0.0)이나 음수에는 0.0
+        let climb_target = session_flow_score(12.25, 12.0, climbing);
+        assert!((climb_target - 4.0).abs() < 0.01);
+        let climb_same = session_flow_score(12.0, 12.0, climbing);
+        assert_eq!(climb_same, 0.0);
+
+        // 4. Steady 모멘텀: 98.0% -> 동급(±0.0)에 보너스(3.0)
+        let steady = SessionTrend::from_recent_play(98.0, now - 600, now);
+        assert_eq!(steady, Some(SessionTrend::Steady));
+        let steady_same = session_flow_score(12.0, 12.0, steady);
+        assert!((steady_same - 3.0).abs() < 0.01);
+
+        // 5. Recovery 모멘텀: 95.0% -> -0.3 회복곡에 최고 보너스(4.0)
+        let recovery = SessionTrend::from_recent_play(95.0, now - 600, now);
+        assert_eq!(recovery, Some(SessionTrend::Recovery));
+        let recovery_target = session_flow_score(11.7, 12.0, recovery);
+        assert!((recovery_target - 4.0).abs() < 0.01);
+
+        // 6. None 추세 -> 0.0
+        assert_eq!(session_flow_score(12.25, 12.0, None), 0.0);
     }
 }

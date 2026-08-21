@@ -244,11 +244,11 @@ fn session_flow_score(
 
 ## 4. Definition of Done
 
-- [ ] `records` 테이블에 `idx_records_recent` 복합 인덱스 추가
-- [ ] `RecentRecordEntry` 정의 및 `RecordDB::get_recent_records` 추가
-- [ ] `RecordManager::get_recent_records` pass-through 추가
-- [ ] `SessionTrend`, `session_flow_score()` 순수 함수 및 단위 테스트 작성
-- [ ] `LocalFloorRecommender`에 세션 모멘텀 점수 블렌딩 통합
-- [ ] `cargo test --workspace --locked` 전체 통과
-- [ ] `cargo clippy --workspace --all-targets --locked` 경고 없음
-- [ ] `overmax_data` 크레이트 외 파일 변경 없음
+- [x] `records` 테이블에 `idx_records_recent` 복합 인덱스 추가
+- [x] `RecentRecordEntry` 정의 및 `RecordDB::get_recent_records` 추가
+- [x] `RecordManager::get_recent_records` pass-through 추가
+- [x] `SessionTrend`, `session_flow_score()` 순수 함수 및 단위 테스트 작성
+- [x] `LocalFloorRecommender`에 세션 모멘텀 점수 블렌딩 통합
+- [x] `cargo test --workspace --locked` 전체 통과
+- [x] `cargo clippy --workspace --all-targets --locked` 경고 없음
+- [x] `overmax_data` 크레이트 외 파일 변경 없음
