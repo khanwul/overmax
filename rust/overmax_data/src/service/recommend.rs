@@ -2125,4 +2125,545 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    // ============================================================
+    //  Score Scale Analysis Tests
+    //
+    //  아래 테스트들은 각 추천 score의 범위와 최종 ranking에서의
+    //  상대적 영향력을 검증한다.
+    //
+    //  Score 범위 요약 (의도된 설계):
+    //  - retry_priority:       0.0 ~ 9.5  (99.5 - rate, rate=90.0일 때 최대)
+    //  - top50_boundary_score: 0.0 ~ 6.0  (attack max) / 3.0 ~ 5.0 (defend)
+    //  - session_flow_score:   0.0 ~ 4.0  (MOMENTUM_MAX_BONUS)
+    //
+    //  합산 최대: 9.5 + 6.0 + 4.0 = 19.5
+    //
+    //  의도적 설계 근거:
+    //  - retry가 가장 강한 영향력 (rate 90%대 방치곡은 경신 욕구가 가장 강함)
+    //  - top50은 중간 영향력 (컷라인 공략은 동기부여가 크지만 모든 곡에 해당하지 않음)
+    //  - session_flow는 보조 영향력 (동급 난이도 내 미세 정렬 역할)
+    // ============================================================
+
+    #[test]
+    fn test_score_scale_ranges_and_dominance() {
+        let now = 1_000_000i64;
+
+        // 1. retry_priority 범위 검증
+        // rate=90.0, 2주 전 → 최대치에 근접
+        let retry_max = retry_priority(90.0, Some(now - 15 * 86400), now);
+        assert!(
+            retry_max > 9.0 && retry_max <= 9.5,
+            "retry_priority max expected 9.0~9.5, got {}",
+            retry_max
+        );
+
+        // rate=99.0, 2주 전 → 격차 0.5
+        let retry_small = retry_priority(99.0, Some(now - 15 * 86400), now);
+        assert!(
+            retry_small > 0.4 && retry_small <= 0.5,
+            "retry_priority near-max rate expected 0.4~0.5, got {}",
+            retry_small
+        );
+
+        // rate=95.0, 1시간 전(유예 이내) → ~0
+        let retry_recent = retry_priority(95.0, Some(now - 3600), now);
+        assert!(
+            retry_recent < 0.1,
+            "retry_priority within grace period should be ~0, got {}",
+            retry_recent
+        );
+
+        // 2. top50_boundary_score 범위 검증
+        let cutoff = 172.96;
+        let top50_defend_max = top50_boundary_score(Some(172.96), Some(50), cutoff, 50);
+        assert!(
+            (top50_defend_max - 5.0).abs() < 0.01,
+            "top50 defend max expected 5.0, got {}",
+            top50_defend_max
+        );
+
+        let top50_attack_max = top50_boundary_score(Some(cutoff - 0.01), None, cutoff, 50);
+        assert!(
+            top50_attack_max > 5.9 && top50_attack_max <= 6.0,
+            "top50 attack max expected ~6.0, got {}",
+            top50_attack_max
+        );
+
+        // 3. session_flow_score 범위 검증
+        let trend_climb = SessionTrendState {
+            trend: SessionTrend::Climbing,
+            avg_rating: 150.0,
+            last_floor: 13.0,
+            last_diff: Difficulty::SC,
+        };
+        // Climbing 최적 지점 (floor+0.25)
+        let flow_max = session_flow_score(13.25, None, 13.0, Some(&trend_climb));
+        assert!(
+            (flow_max - 4.0).abs() < 0.01,
+            "session_flow climbing max expected 4.0, got {}",
+            flow_max
+        );
+
+        // 4. 지배력(Dominance) 분석:
+        //    단일 score가 ranking을 결정할 수 있는 시나리오 검증
+        //
+        //    Scenario A: retry=9.5 vs top50=6.0+flow=4.0=10.0
+        //    → top50+flow가 retry를 이길 수 있음 (의도: 복합 신호가 단일 신호를 넘을 수 있어야 함)
+        let combo_signal = 6.0 + 4.0; // top50_max + flow_max
+        assert!(
+            combo_signal > retry_max,
+            "combo signals should be able to outweigh retry: {} vs {}",
+            combo_signal,
+            retry_max
+        );
+
+        //    Scenario B: retry=5.0(적당한 갭) vs top50_defend=5.0
+        //    → 동등한 영향력 (의도: 중간 갭의 방치곡과 Top50 수성은 비슷한 우선순위)
+        let retry_mid = retry_priority(94.5, Some(now - 15 * 86400), now);
+        assert!(
+            (retry_mid - 5.0).abs() < 0.1,
+            "retry mid-gap expected ~5.0, got {}",
+            retry_mid
+        );
+
+        //    Scenario C: flow 단독 최대(4.0)는 retry 중간(5.0)을 넘지 못함
+        //    → 의도: session flow는 같은 층 내 미세 정렬이므로 단독으로 ranking을 역전하면 안 됨
+        assert!(
+            flow_max < retry_mid,
+            "flow alone should not dominate over mid-gap retry: {} vs {}",
+            flow_max,
+            retry_mid
+        );
+    }
+
+    /// 서로 다른 추천 신호가 동일 곡을 가리키는 경우와 충돌하는 경우의
+    /// reason 도출 검증.
+    ///
+    /// Extrapolation 패턴:
+    /// - 실제 분포에서 retry 대상곡은 대개 rate 90~98%, floor 11~14
+    /// - Top50 경계곡은 rating 170~175 근처 (cutoff ±2)
+    /// - session flow 대상은 현재 floor ±0.4 범위
+    #[test]
+    fn test_recommend_reason_multi_signal_convergence() {
+        // Case 1: 모든 신호가 동시에 높은 경우 → 가장 높은 score의 reason이 선택됨
+        // retry=5.0, top50=5.5, flow=3.5 → top50이 지배 → Top50Attack
+        let reason = derive_recommend_reason(5.0, 5.5, 3.5, None, Some(SessionTrend::Climbing));
+        assert_eq!(reason.unwrap().kind, RecommendReasonKind::Top50Attack);
+
+        // Case 2: retry가 지배 (방치된 고난도 곡)
+        // retry=8.0, top50=3.0, flow=2.0 → retry 지배 → Retry
+        let reason = derive_recommend_reason(8.0, 3.0, 2.0, None, Some(SessionTrend::Steady));
+        assert_eq!(reason.unwrap().kind, RecommendReasonKind::Retry);
+
+        // Case 3: flow가 지배 (세션 상승 중 적정 난이도 곡)
+        // retry=0.5, top50=0.0, flow=3.8 → flow 지배 → Climbing
+        let reason = derive_recommend_reason(0.5, 0.0, 3.8, None, Some(SessionTrend::Climbing));
+        assert_eq!(reason.unwrap().kind, RecommendReasonKind::Climbing);
+
+        // Case 4: 모든 score가 임계치(1.5) 미만 → reason 없음 (뱃지 생략)
+        let reason = derive_recommend_reason(1.0, 1.2, 0.8, None, None);
+        assert_eq!(reason, None);
+
+        // Case 5: Top50 방어 + retry 동시 해당 (41~50위이면서 rate<99.5)
+        // → top50_defend 우선 (순위 보존이 경신보다 급함)
+        let reason = derive_recommend_reason(4.0, 4.5, 0.0, Some(45), None);
+        assert_eq!(reason.unwrap().kind, RecommendReasonKind::Top50Defend);
+    }
+
+    /// 실제 사용자 기록 분포를 기반으로 한 Performance Rating 범위 검증.
+    ///
+    /// 실제 데이터에서 관찰되는 분포:
+    /// - Floor 8~9 (중급): rate 95~99%, rating 80~120
+    /// - Floor 11~13 (상급): rate 90~98%, rating 110~170
+    /// - Floor 14~15 (최상급): rate 85~97%, rating 120~195
+    #[test]
+    fn test_performance_rating_realistic_distribution() {
+        // Floor 8, rate 99.8% → 고정확도 중급 = 약 106점
+        let mid_high = calculate_performance_rating(8.0, 99.8);
+        assert!(
+            mid_high > 100.0 && mid_high < 110.0,
+            "floor 8 rate 99.8% expected 100~110, got {}",
+            mid_high
+        );
+
+        // Floor 13, rate 97.0% → 상급 표준 = 약 130점
+        let high_standard = calculate_performance_rating(13.0, 97.0);
+        assert!(
+            high_standard > 120.0 && high_standard < 140.0,
+            "floor 13 rate 97% expected 120~140, got {}",
+            high_standard
+        );
+
+        // Floor 15, rate 100.0% → 최대 = 200점
+        let max = calculate_performance_rating(15.0, 100.0);
+        assert!((max - 200.0).abs() < 0.01);
+
+        // Floor 13, rate 90.0% → 경계 (retry 대상) = 약 69점
+        let retry_target = calculate_performance_rating(13.0, 90.0);
+        assert!(
+            retry_target > 60.0 && retry_target < 80.0,
+            "floor 13 rate 90% expected 60~80, got {}",
+            retry_target
+        );
+
+        // Floor 0 또는 rate 0 → 0점 (미플레이)
+        assert_eq!(calculate_performance_rating(0.0, 99.0), 0.0);
+        assert_eq!(calculate_performance_rating(13.0, 0.0), 0.0);
+    }
+
+    /// 세션 내 다양한 플레이 패턴에서의 trend 분석 검증.
+    ///
+    /// Extrapolation:
+    /// - 실제 세션에서 3~5판 연속 플레이 후 상승/하락 판별
+    /// - 손풀기(warmup)→주력곡→고난도 도전 순서가 일반적
+    /// - 세션 간 4시간 이상 간격이면 세션 만료
+    #[test]
+    fn test_session_trend_various_patterns() {
+        let now = 1_000_000i64;
+
+        // Pattern 1: 점진적 상승 (warmup → 주력 → 고난도 성공)
+        // 실제 패턴: 8층 손풀기 → 12층 안정 → 13층 도전 성공
+        let gradual_climb = vec![
+            SessionPlayInfo {
+                rating: 170.0, // 13층 99.0%
+                floor: 13.0,
+                rate: 99.0,
+                diff: Difficulty::SC,
+                is_max_combo: false,
+                updated_at: now - 300,
+            },
+            SessionPlayInfo {
+                rating: 155.0, // 12층 99.0%
+                floor: 12.0,
+                rate: 99.0,
+                diff: Difficulty::SC,
+                is_max_combo: false,
+                updated_at: now - 600,
+            },
+            SessionPlayInfo {
+                rating: 105.0, // 8층 99.8% (warmup)
+                floor: 8.0,
+                rate: 99.8,
+                diff: Difficulty::SC,
+                is_max_combo: true,
+                updated_at: now - 900,
+            },
+        ];
+        let state = SessionTrend::analyze_session(&gradual_climb, now);
+        assert_eq!(
+            state.as_ref().map(|s| s.trend),
+            Some(SessionTrend::Climbing)
+        );
+        // 세션 평균은 손풀기 제외: (170 + 155) / 2 = 162.5
+        let avg = state.as_ref().unwrap().avg_rating;
+        assert!(
+            (avg - 162.5).abs() < 0.1,
+            "avg_rating expected 162.5, got {}",
+            avg
+        );
+
+        // Pattern 2: 하락세 (주력 → 실패 → 저조)
+        // 실제 패턴: 13층 98% → 14층 88% → 세션 회복 필요
+        let declining = vec![
+            SessionPlayInfo {
+                rating: 102.0, // 14층 88% (대실패)
+                floor: 14.0,
+                rate: 88.0,
+                diff: Difficulty::SC,
+                is_max_combo: false,
+                updated_at: now - 300,
+            },
+            SessionPlayInfo {
+                rating: 160.0, // 13층 98%
+                floor: 13.0,
+                rate: 98.0,
+                diff: Difficulty::SC,
+                is_max_combo: false,
+                updated_at: now - 600,
+            },
+            SessionPlayInfo {
+                rating: 155.0, // 12층 99%
+                floor: 12.0,
+                rate: 99.0,
+                diff: Difficulty::SC,
+                is_max_combo: false,
+                updated_at: now - 900,
+            },
+        ];
+        let state = SessionTrend::analyze_session(&declining, now);
+        assert_eq!(
+            state.as_ref().map(|s| s.trend),
+            Some(SessionTrend::Recovery)
+        );
+
+        // Pattern 3: 안정 순항 (동일 층 반복 플레이)
+        let steady = vec![
+            SessionPlayInfo {
+                rating: 162.0,
+                floor: 13.0,
+                rate: 98.5,
+                diff: Difficulty::SC,
+                is_max_combo: false,
+                updated_at: now - 300,
+            },
+            SessionPlayInfo {
+                rating: 160.0,
+                floor: 13.0,
+                rate: 98.0,
+                diff: Difficulty::SC,
+                is_max_combo: false,
+                updated_at: now - 600,
+            },
+            SessionPlayInfo {
+                rating: 159.0,
+                floor: 13.0,
+                rate: 97.8,
+                diff: Difficulty::SC,
+                is_max_combo: false,
+                updated_at: now - 900,
+            },
+        ];
+        let state = SessionTrend::analyze_session(&steady, now);
+        assert_eq!(state.as_ref().map(|s| s.trend), Some(SessionTrend::Steady));
+
+        // Pattern 4: 맥콤으로 인한 Climbing 인정
+        let mc_climb = vec![
+            SessionPlayInfo {
+                rating: 162.0,
+                floor: 13.0,
+                rate: 98.5,
+                diff: Difficulty::SC,
+                is_max_combo: true, // 맥콤!
+                updated_at: now - 300,
+            },
+            SessionPlayInfo {
+                rating: 160.0,
+                floor: 13.0,
+                rate: 98.0,
+                diff: Difficulty::SC,
+                is_max_combo: false,
+                updated_at: now - 600,
+            },
+        ];
+        let state = SessionTrend::analyze_session(&mc_climb, now);
+        // delta = 162 - 161 = 1.0 < 3.0 이지만, is_max_combo && delta >= 0.0 → Climbing
+        assert_eq!(
+            state.as_ref().map(|s| s.trend),
+            Some(SessionTrend::Climbing)
+        );
+    }
+
+    /// 실제 Candidate Ranking Pipeline 통합 테스트 (End-to-End Ranking Verification).
+    ///
+    /// 검증 목적:
+    /// - 여러 신호(Retry, Top-50, Session Flow)가 실제 DB/V-Archive/PlayEvents와 결합되었을 때
+    ///   의도된 우선순위 계층(Hierarchy)에 따라 후보들이 올바르게 정렬되는지 직접 검증한다.
+    ///
+    /// 검증 계층:
+    /// 1. Top-50 돌파 + Session Flow 복합 신호 (Score ~10.4) → Strong Retry(8.5)를 역전하여 1위
+    /// 2. 단독 Strong Retry (Score 8.5) → 단독으로도 강력한 우선순위로 2위
+    /// 3. 중간 Retry (Score 4.5) → 단독 Session Flow(4.0)보다 높은 우선순위로 3위
+    /// 4. 단독 Session Flow (Score 4.0) → 4위
+    /// 5. 약한 신호 플레이곡 (Score 0.0) → 5위
+    /// 6. 미플레이 곡 → 플레이 완료곡들 뒤에 정렬 (6위)
+    #[test]
+    fn test_candidate_ranking_integration_multi_signal_hierarchy() {
+        let now = LocalFloorRecommender::now_unix();
+
+        // 1. VArchiveDB 구성 (후보 곡 0~6 및 세션 플레이 곡 997~999)
+        let mut vdb = VArchiveDB::new();
+        let make_song = |id: i32, name: &str, floor_str: Option<&str>| {
+            let patterns = if let Some(f) = floor_str {
+                serde_json::json!({
+                    "4B": {
+                        "SC": {
+                            "level": 13,
+                            "floorName": f
+                        }
+                    }
+                })
+            } else {
+                serde_json::json!({
+                    "4B": {
+                        "SC": {
+                            "level": 13
+                        }
+                    }
+                })
+            };
+            serde_json::json!({
+                "name": name,
+                "title": id.to_string(),
+                "composer": "Artist",
+                "dlcCode": "pack",
+                "patterns": patterns
+            })
+        };
+
+        vdb.songs = vec![
+            serde_json::from_value(make_song(0, "Current Song", Some("13.0"))).unwrap(),
+            serde_json::from_value(make_song(1, "Combo (Top50+Flow)", Some("13.25"))).unwrap(),
+            serde_json::from_value(make_song(2, "Strong Retry", Some("13.0"))).unwrap(),
+            serde_json::from_value(make_song(3, "Mid Retry", Some("13.0"))).unwrap(),
+            serde_json::from_value(make_song(4, "Pure Flow", Some("13.25"))).unwrap(),
+            serde_json::from_value(make_song(5, "Weak Signal", Some("13.0"))).unwrap(),
+            serde_json::from_value(make_song(6, "Unplayed Song", Some("13.0"))).unwrap(),
+            // 세션 기록 곡들 (후보 범위 12.5~13.5 밖으로 설정하여 추천 목록 오염 방지)
+            serde_json::from_value(make_song(999, "Session Core 11", Some("11.0"))).unwrap(),
+            serde_json::from_value(make_song(998, "Session Core 10", Some("10.0"))).unwrap(),
+            serde_json::from_value(make_song(997, "Session Warmup 7", Some("7.0"))).unwrap(),
+        ];
+
+        // 2. DB 구성
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("rec_ranking_integration.db");
+        let steam_id = "76561198000000001";
+        let mut db = crate::store::record_db::RecordDB::new(&db_path, Some(steam_id));
+        assert!(db.initialize());
+
+        let conn = db.open_conn().unwrap();
+
+        // 2-1. V-Archive Top50 (51개 데이터 추가, Cutoff = 173.0)
+        // 2-1. V-Archive Top50 (49개 기준 곡 + Song 4 = 총 50개 Top50, Cutoff = 174.0)
+        for i in 101..=149 {
+            let rating = 174.0 + ((i - 101) as f64 * 0.4); // 174.0 ~ 193.2
+            let json = serde_json::json!({
+                "score": 99.0,
+                "maxCombo": true,
+                "updatedAt": "2026-08-01T00:00:00.000Z",
+                "rating": rating,
+            });
+            conn.execute(
+                "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![steam_id, i.to_string(), "4B", "SC", json.to_string()],
+            ).unwrap();
+        }
+
+        // Song 4: rating 188.0 (Top-50 상위 15위권 안정 순위 -> top50_score = 0.0)
+        let json_song4 = serde_json::json!({
+            "score": 99.5,
+            "maxCombo": true,
+            "updatedAt": "2026-08-01T00:00:00.000Z",
+            "rating": 188.0,
+        });
+        conn.execute(
+            "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![steam_id, "4", "4B", "SC", json_song4.to_string()],
+        )
+        .unwrap();
+
+        // Song 1: rating 173.8 (Cutoff 174.0 직하 delta=0.2 돌파 타깃 -> top50_attack = 5.4)
+        let json_song1 = serde_json::json!({
+            "score": 98.5,
+            "maxCombo": false,
+            "updatedAt": "2026-08-01T00:00:00.000Z",
+            "rating": 173.8,
+        });
+        conn.execute(
+            "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![steam_id, "1", "4B", "SC", json_song1.to_string()],
+        )
+        .unwrap();
+
+        // 2-2. play_events 구성 (Climbing 세션: 손풀기 8층 -> 12층 -> 13층 성공)
+        let session_events = [
+            (999, "SC", 99.5, now - 300), // 13층 99.5% (Rating ~168.0)
+            (998, "SC", 98.0, now - 600), // 12층 98.0% (Rating ~135.0)
+            (997, "SC", 99.8, now - 900), // 8층 99.8% (Warmup, Rating ~105.0)
+        ];
+        for (sid, diff, rate, ts) in session_events {
+            conn.execute(
+                "INSERT INTO play_events (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, played_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![steam_id, sid.to_string(), "4B", diff, rate, 0, ts],
+            ).unwrap();
+        }
+
+        // 2-3. records 테이블에 각 후보곡의 과거 기록 삽입
+        let long_ago = now - 15 * 86400; // 15일 전 (recency_weight = 1.0)
+        let older = now - 5 * 3600; // 5시간 전 (세션 윈도우 4시간 밖, retry는 99.4%라 0.1 이하)
+        let records = [
+            (1, 98.5, long_ago), // Song 1: retry = 1.0, top50 ~ 5.4, flow = 4.0 -> Total ~ 10.4
+            (2, 91.0, long_ago), // Song 2: retry = 8.5, top50 = 0, flow = 0 -> Total = 8.5
+            (3, 95.0, long_ago), // Song 3: retry = 4.5, top50 = 0, flow = 0 -> Total = 4.5
+            (4, 99.5, long_ago), // Song 4: retry = 0.0, top50 = 0, flow = 4.0 -> Total = 4.0
+            (5, 99.4, older),    // Song 5: retry ~ 0.0, top50 = 0, flow = 0.0 -> Total ~ 0.0
+                                 // Song 6은 records 없음 (미플레이)
+        ];
+        for (sid, rate, ts) in records {
+            conn.execute(
+                "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![steam_id, sid.to_string(), "4B", "SC", rate, 0, ts],
+            ).unwrap();
+        }
+        drop(conn);
+
+        // 3. Recommender 실행
+        let rdb = Arc::new(RecordManager::new(Arc::new(db)));
+        rdb.refresh();
+        let recommender = LocalFloorRecommender::new(Arc::new(vdb), rdb);
+
+        let ctx = RecommendContext {
+            song_id: 0,
+            button_mode: Mode::B4,
+            difficulty: Difficulty::SC,
+            floor_range: 0.5,
+            max_results: 10,
+            same_mode_only: true,
+            v_id: None,
+            strategy: RecommendStrategy::Smart,
+        };
+
+        let bundle = recommender.recommend(&ctx);
+        let entries = bundle.entries;
+
+        // 4. Ranking 순위 및 사유(Reason) 검증
+        assert_eq!(
+            entries.len(),
+            6,
+            "Total 6 candidates (excluding current song 0)"
+        );
+
+        // 1위: Song 1 (Top50 + Flow 복합 신호가 Strong Retry를 역전)
+        assert_eq!(entries[0].song_id, 1);
+        assert_eq!(
+            entries[0].reason.as_ref().map(|r| r.kind),
+            Some(RecommendReasonKind::Top50Attack)
+        );
+
+        // 2위: Song 2 (강한 Retry 신호 단독으로 2위 차지)
+        assert_eq!(entries[1].song_id, 2);
+        assert_eq!(
+            entries[1].reason.as_ref().map(|r| r.kind),
+            Some(RecommendReasonKind::Retry)
+        );
+
+        // 3위: Song 3 (중간 Retry가 Pure Flow보다 우위)
+        assert_eq!(entries[2].song_id, 3);
+        assert_eq!(
+            entries[2].reason.as_ref().map(|r| r.kind),
+            Some(RecommendReasonKind::Retry)
+        );
+
+        // 4위: Song 4 (Pure Session Flow)
+        assert_eq!(entries[3].song_id, 4);
+        assert_eq!(
+            entries[3].reason.as_ref().map(|r| r.kind),
+            Some(RecommendReasonKind::Climbing)
+        );
+
+        // 5위: Song 5 (약한 신호 플레이곡 - score 0)
+        assert_eq!(entries[4].song_id, 5);
+        assert_eq!(entries[4].reason, None);
+
+        // 6위: Song 6 (미플레이 곡 - 플레이 완료곡들 뒤에 배치)
+        assert_eq!(entries[5].song_id, 6);
+        assert_eq!(entries[5].rate, None);
+        assert_eq!(entries[5].reason, None);
+    }
 }

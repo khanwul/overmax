@@ -684,23 +684,36 @@ impl RecordDB {
             }
         });
 
-        if !results.is_empty() {
+        if results.len() >= limit {
             return results;
         }
 
-        // 2. play_events에 기록이 없는 경우(신규 DB/기존 기록 마이그레이션 전) records 테이블로 fallback
+        // 2. play_events의 결과가 limit에 못 미치면, records 테이블에서 나머지 슬롯을 보충한다.
+        //    play_events가 실제 플레이 타임라인이므로 항상 우선하며,
+        //    records는 최고 기록 갱신 시각 기준이므로 보충 역할만 수행한다.
+        let remaining = limit - results.len();
+        let fetch_extra = remaining + results.len(); // 중복 제거 여유분
+
         let query_records = "SELECT song_id, difficulty, rate, is_max_combo, updated_at
                              FROM records
                              WHERE steam_id = ?1 AND button_mode = ?2
                              ORDER BY updated_at DESC
                              LIMIT ?3";
 
+        let existing_keys: std::collections::HashSet<(i32, String)> = results
+            .iter()
+            .map(|r| (r.song_id, r.difficulty.as_str().to_string()))
+            .collect();
+
         let _ = self.with_rate_map_connection(|conn| {
             if let Ok(mut stmt) = conn.prepare(query_records) {
                 if let Ok(mut rows) =
-                    stmt.query(rusqlite::params![steam_id, button_mode, limit as i64])
+                    stmt.query(rusqlite::params![steam_id, button_mode, fetch_extra as i64])
                 {
                     while let Ok(Some(row)) = rows.next() {
+                        if results.len() >= limit {
+                            break;
+                        }
                         if let (
                             Ok(song_id_str),
                             Ok(diff_str),
@@ -717,6 +730,9 @@ impl RecordDB {
                             if let (Ok(sid), Some(diff)) =
                                 (song_id_str.parse::<i32>(), Difficulty::from_str(&diff_str))
                             {
+                                if existing_keys.contains(&(sid, diff_str.clone())) {
+                                    continue;
+                                }
                                 results.push(RecentRecordEntry {
                                     song_id: sid,
                                     button_mode: mode,
@@ -1322,5 +1338,107 @@ mod tests {
         assert_eq!(recent[0].rate, 99.0);
         assert_eq!(recent[1].updated_at, 1000);
         assert_eq!(recent[1].rate, 98.5);
+    }
+
+    /// play_events가 limit 미만일 때 records로 보충하되 중복 제거하는 fallback 검증.
+    ///
+    /// 테스트 시나리오:
+    /// - play_events: 곡 100(SC), 101(SC) — 2건만 존재
+    /// - records: 곡 100(SC), 200(NM), 201(NM), 202(NM), 203(NM) — 5건 존재
+    /// - limit=5 요청 시:
+    ///   1. play_events에서 100, 101 (2건) 우선 반환
+    ///   2. records에서 200, 201, 202 보충 (100은 중복이므로 스킵)
+    ///   3. 최종 5건 반환, play_events 항목이 앞에 위치
+    ///
+    /// 실제 마이그레이션 상황에서의 동작:
+    /// - play_events 도입 직후 사용자: play_events 1~2건 + records 다수 → 세션 분석에 충분한 데이터 제공
+    /// - play_events가 전혀 없는 기존 사용자: records에서만 limit개 반환 (기존 동작 유지)
+    /// - play_events가 limit 이상인 정상 사용자: play_events만으로 반환 (records 미참조)
+    #[test]
+    fn test_recent_records_fallback_supplements_from_records_with_dedup() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("record_fallback.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let conn = db.open_conn().unwrap();
+
+        // records 테이블: 5건 (갱신 시각 기준 정렬)
+        // 곡 100(SC)은 play_events에도 존재 → 중복 제거 대상
+        for &(sid, diff, rate, ts) in &[
+            (100, "SC", 97.5, 900), // play_events와 중복 (스킵 대상)
+            (200, "NM", 96.0, 800),
+            (201, "NM", 95.5, 700),
+            (202, "NM", 95.0, 600),
+            (203, "NM", 94.0, 500),
+        ] {
+            conn.execute(
+                "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    "76561198000000001",
+                    sid.to_string(),
+                    "4B",
+                    diff,
+                    rate,
+                    0,
+                    ts,
+                ],
+            )
+            .unwrap();
+        }
+
+        // play_events 테이블: 2건 (실제 플레이 이력)
+        for (sid, diff, rate, ts) in [(100, "SC", 98.5, 2000), (101, "SC", 97.0, 1900)] {
+            conn.execute(
+                "INSERT INTO play_events (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, played_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    "76561198000000001",
+                    sid.to_string(),
+                    "4B",
+                    diff,
+                    rate,
+                    0,
+                    ts,
+                ],
+            )
+            .unwrap();
+        }
+        drop(conn);
+
+        // Case 1: limit=5 → play_events 2건 + records 3건(중복 제거) = 5건
+        let recent = db.get_recent_records("76561198000000001", Mode::B4, 5);
+        assert_eq!(recent.len(), 5);
+        // play_events가 먼저 (temporal order 보장)
+        assert_eq!(recent[0].song_id, 100);
+        assert_eq!(recent[0].updated_at, 2000); // play_events의 played_at
+        assert_eq!(recent[1].song_id, 101);
+        assert_eq!(recent[1].updated_at, 1900);
+        // records에서 보충 (곡 100은 중복으로 스킵됨)
+        assert_eq!(recent[2].song_id, 200);
+        assert_eq!(recent[3].song_id, 201);
+        assert_eq!(recent[4].song_id, 202);
+
+        // Case 2: limit=2 → play_events만으로 충분 → records 미참조
+        let recent_small = db.get_recent_records("76561198000000001", Mode::B4, 2);
+        assert_eq!(recent_small.len(), 2);
+        assert_eq!(recent_small[0].song_id, 100);
+        assert_eq!(recent_small[1].song_id, 101);
+
+        // Case 3: play_events가 없는 다른 모드 → records에서만 조회 (기존 동작 유지)
+        let conn = db.open_conn().unwrap();
+        conn.execute(
+            "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params!["76561198000000001", "300", "6B", "MX", 99.0, 1, 3000],
+        )
+        .unwrap();
+        drop(conn);
+
+        let recent_6b = db.get_recent_records("76561198000000001", Mode::B6, 5);
+        assert_eq!(recent_6b.len(), 1);
+        assert_eq!(recent_6b[0].song_id, 300);
+        assert_eq!(recent_6b[0].rate, 99.0);
     }
 }
