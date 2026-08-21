@@ -33,7 +33,9 @@ impl RecommendStrategy {
                 params.candidates.truncate(params.max_results);
             }
             Self::Smart => {
-                let top50 = params.rdb.get_varchive_top50_summary(params.button_mode);
+                let top50 = params
+                    .rdb
+                    .get_top50_summary_with_fallback(params.button_mode, &params.find_floor);
                 let recent_plays = params.rdb.get_recent_records(params.button_mode, 10);
                 let session_play_infos: Vec<SessionPlayInfo> = recent_plays
                     .iter()
@@ -167,7 +169,9 @@ impl RecommendStrategy {
         match self {
             Self::Classic => None,
             Self::Smart => {
-                let top50 = params.rdb.get_varchive_top50_summary(params.button_mode);
+                let top50 = params
+                    .rdb
+                    .get_top50_summary_with_fallback(params.button_mode, &params.find_floor);
                 let recent_plays = params.rdb.get_recent_records(params.button_mode, 10);
                 let session_play_infos: Vec<SessionPlayInfo> = recent_plays
                     .iter()

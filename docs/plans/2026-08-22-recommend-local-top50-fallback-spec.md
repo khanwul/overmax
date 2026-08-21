@@ -36,14 +36,14 @@
 
 ## 3. 단계별 실행 계획
 
-- [ ] **Step 1: `RecordDB` 및 `RecordManager`에 로컬 기록 기반 Top-50 산출 메서드 구현**
+- [x] **Step 1: `RecordDB` 및 `RecordManager`에 로컬 기록 기반 Top-50 산출 메서드 구현**
   - `RecordDB::get_local_records_by_mode`: 버튼 모드별 `records` 조회.
   - `RecordManager::get_top50_summary_with_fallback`: V-Archive 우선 + 로컬 Fallback.
-- [ ] **Step 2: `RecommendStrategy` (`Smart`) 연동**
+- [x] **Step 2: `RecommendStrategy` (`Smart`) 연동**
   - `strategy.rs`의 `sort_and_annotate` 및 `derive_footer_level`에서 `get_top50_summary_with_fallback`을 호출하도록 연동.
-- [ ] **Step 3: 단위 및 통합 테스트 작성**
+- [x] **Step 3: 단위 및 통합 테스트 작성**
   - V-Archive 미연동 상태에서 로컬 `records`만으로 Top 50 요약 및 추천 레벨이 정상 도출되는지 검증.
   - V-Archive 기록 존재 시 공식 기록이 우선하는지 검증.
-- [ ] **Step 4: 검증 및 문서화**
+- [x] **Step 4: 검증 및 문서화**
   - `cargo test --workspace`, `cargo clippy --all-targets` 검증.
   - Decision Log 및 `CONTEXT.md` 동기화.

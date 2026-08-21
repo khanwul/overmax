@@ -163,6 +163,63 @@ impl RecordManager {
         self.record_db.get_varchive_top50_summary(&steam_id, mode)
     }
 
+    /// V-Archive 공식 Top 50 기록이 존재하면 우선 반환하고,
+    /// 비어있는 경우 로컬 `records` 테이블의 기록과 자체 Performance Rating을 결합하여 Top 50 요약을 산출한다.
+    pub fn get_top50_summary_with_fallback<F>(
+        &self,
+        mode: Mode,
+        find_floor: F,
+    ) -> VArchiveTop50Summary
+    where
+        F: Fn(i32, Mode, Difficulty) -> f64,
+    {
+        let steam_id = self.record_db.get_steam_id();
+        let summary = self.record_db.get_varchive_top50_summary(&steam_id, mode);
+        if summary.total_recorded_count > 0 {
+            return summary;
+        }
+
+        // V-Archive 공식 기록이 없는 경우: 로컬 기록(`records`) 기반으로 자체 Performance Rating 산출하여 Top 50 구성
+        let local_records = self.record_db.get_local_records_by_mode(&steam_id, mode);
+        if local_records.is_empty() {
+            return VArchiveTop50Summary::default();
+        }
+
+        let mut rated_records: Vec<(i32, Difficulty, f64)> = local_records
+            .into_iter()
+            .filter_map(|r| {
+                let floor = find_floor(r.song_id, mode, r.difficulty);
+                if floor > 0.0 {
+                    let rating = crate::service::recommend::scoring::calculate_performance_rating(
+                        floor, r.rate,
+                    );
+                    Some((r.song_id, r.difficulty, rating))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Rating 내림차순 정렬
+        rated_records.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+        let top50_slice = &rated_records[..rated_records.len().min(50)];
+        let mut rank_map = std::collections::HashMap::new();
+        let mut cutoff_rating = 0.0f64;
+
+        for (idx, &(song_id, diff, rating)) in top50_slice.iter().enumerate() {
+            let rank = idx + 1;
+            rank_map.insert((song_id, mode, diff), rank);
+            cutoff_rating = rating;
+        }
+
+        VArchiveTop50Summary {
+            cutoff_rating,
+            rank_map,
+            total_recorded_count: top50_slice.len(),
+        }
+    }
+
     pub fn get_varchive_rating_map(
         &self,
         song_ids: &[i32],

@@ -1484,3 +1484,174 @@ fn test_pad_patterns_maintain_consistent_footer_level_across_nm_hd_mx() {
         "MX cursor MUST match NM recommendation"
     );
 }
+
+#[test]
+fn test_local_top50_fallback_when_varchive_unconnected() {
+    let steam_id = "test_user_offline";
+    let now = 1787325000i64;
+
+    let mut vdb = VArchiveDB::new();
+    let make_song = |id: i32, name: &str, floor_str: &str, level: i32| {
+        serde_json::json!({
+            "name": name,
+            "title": id.to_string(),
+            "composer": "Artist",
+            "dlcCode": "RV",
+            "patterns": {
+                "4B": {
+                    "SC": {
+                        "level": level,
+                        "floorName": floor_str
+                    }
+                }
+            }
+        })
+    };
+
+    vdb.songs = vec![
+        serde_json::from_value(make_song(1, "Song 1 (SC 12.2)", "12.2", 12)).unwrap(),
+        serde_json::from_value(make_song(2, "Song 2 (SC 12.0)", "12.0", 12)).unwrap(),
+        serde_json::from_value(make_song(3, "Song 3 (SC 11.5)", "11.5", 11)).unwrap(),
+    ];
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("rec_local_top50_fallback.db");
+    let mut db = crate::store::record_db::RecordDB::new(&db_path, Some(steam_id));
+    assert!(db.initialize());
+
+    let conn = db.open_conn().unwrap();
+    // V-Archive 기록은 0건인 상태에서 로컬 `records` 테이블에만 플레이 기록 저장
+    let records = [
+        (1, "4B", "SC", 99.60, now - 5000), // Rating ~ 176.4
+        (2, "4B", "SC", 99.40, now - 4000), // Rating ~ 172.0
+        (3, "4B", "SC", 99.10, now - 3000), // Rating ~ 164.5
+    ];
+    for (sid, mode, diff, rate, ts) in records {
+        conn.execute(
+            "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)",
+            rusqlite::params![steam_id, sid.to_string(), mode, diff, rate, ts],
+        ).unwrap();
+    }
+    drop(conn);
+
+    let rdb = Arc::new(RecordManager::new(Arc::new(db)));
+    rdb.refresh();
+
+    // 1. RecordManager의 get_top50_summary_with_fallback 검증
+    let find_floor = |sid: i32, _m: Mode, _d: Difficulty| match sid {
+        1 => 12.2,
+        2 => 12.0,
+        3 => 11.5,
+        _ => 0.0,
+    };
+    let summary = rdb.get_top50_summary_with_fallback(Mode::B4, find_floor);
+    assert_eq!(summary.total_recorded_count, 3);
+    assert_eq!(
+        summary.rank_map.get(&(1, Mode::B4, Difficulty::SC)),
+        Some(&1)
+    );
+    assert_eq!(
+        summary.rank_map.get(&(2, Mode::B4, Difficulty::SC)),
+        Some(&2)
+    );
+    assert_eq!(
+        summary.rank_map.get(&(3, Mode::B4, Difficulty::SC)),
+        Some(&3)
+    );
+    assert!(summary.cutoff_rating > 110.0);
+
+    // 2. LocalFloorRecommender: V-Archive 연동 및 당일 세션 플레이(play_events)가 0건이어도 즉시 추천 레벨 산출!
+    let recommender = LocalFloorRecommender::new(Arc::new(vdb), rdb);
+    let ctx = RecommendContext {
+        song_id: 1,
+        button_mode: Mode::B4,
+        difficulty: Difficulty::SC,
+        floor_range: 0.5,
+        max_results: 6,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer = recommender.floor_summary(&ctx);
+    assert_eq!(
+        footer.recommended_level,
+        Some("SC 12".to_string()),
+        "Offline/Unlinked user MUST immediately get recommended level from local records Top-50!"
+    );
+}
+
+#[test]
+fn test_varchive_records_take_precedence_over_local_records_in_top50() {
+    let steam_id = "test_user_precedence";
+    let now = 1787325000i64;
+
+    let mut vdb = VArchiveDB::new();
+    let make_song = |id: i32, name: &str, floor_str: &str, level: i32| {
+        serde_json::json!({
+            "name": name,
+            "title": id.to_string(),
+            "composer": "Artist",
+            "dlcCode": "RV",
+            "patterns": {
+                "4B": {
+                    "SC": {
+                        "level": level,
+                        "floorName": floor_str
+                    }
+                }
+            }
+        })
+    };
+
+    vdb.songs = vec![
+        serde_json::from_value(make_song(1, "Song 1", "12.2", 12)).unwrap(),
+        serde_json::from_value(make_song(2, "Song 2", "15.0", 15)).unwrap(),
+    ];
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("rec_top50_precedence.db");
+    let mut db = crate::store::record_db::RecordDB::new(&db_path, Some(steam_id));
+    assert!(db.initialize());
+
+    let conn = db.open_conn().unwrap();
+    // 로컬 records에는 Song 1 (Rating 176.4) 저장
+    conn.execute(
+        "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+         VALUES (?1, '1', '4B', 'SC', 99.60, 1, ?2)",
+        rusqlite::params![steam_id, now - 5000],
+    ).unwrap();
+
+    // V-Archive records에는 Song 2 (Rating 195.0) 저장
+    let varchive_json = serde_json::json!({
+        "score": 998000,
+        "maxCombo": true,
+        "updatedAt": "2026-08-01T00:00:00.000Z",
+        "rating": 195.0,
+    });
+    conn.execute(
+        "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+         VALUES (?1, '2', '4B', 'SC', ?2)",
+        rusqlite::params![steam_id, varchive_json.to_string()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let rdb = Arc::new(RecordManager::new(Arc::new(db)));
+    rdb.refresh();
+
+    let find_floor = |sid: i32, _m: Mode, _d: Difficulty| match sid {
+        1 => 12.2,
+        2 => 15.0,
+        _ => 0.0,
+    };
+    let summary = rdb.get_top50_summary_with_fallback(Mode::B4, find_floor);
+
+    // V-Archive 공식 기록(Song 2)이 우선하므로 total_recorded_count는 1이고 Song 2가 Rank 1이어야 함!
+    assert_eq!(summary.total_recorded_count, 1);
+    assert_eq!(
+        summary.rank_map.get(&(2, Mode::B4, Difficulty::SC)),
+        Some(&1)
+    );
+    assert_eq!(summary.rank_map.get(&(1, Mode::B4, Difficulty::SC)), None);
+}
