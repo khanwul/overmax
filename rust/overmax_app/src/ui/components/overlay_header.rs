@@ -110,8 +110,8 @@ impl<'a> OverlayHeader<'a> {
                     if self.varchive_upload_needed {
                         btn_count += 1;
                     }
-                    let right_w = (btn_count as f32 * btn_size_val)
-                        + ((btn_count - 1) as f32 * btn_gap_val);
+                    let right_w =
+                        (btn_count as f32 * btn_size_val) + ((btn_count - 1) as f32 * btn_gap_val);
                     let spacing = ui.spacing().item_spacing.x;
                     let max_w =
                         ui.available_width() - right_w - spacing * 2.0 - 4.0 * self.px.scale;
