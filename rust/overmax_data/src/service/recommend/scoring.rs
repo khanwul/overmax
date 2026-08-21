@@ -364,6 +364,141 @@ pub(crate) fn session_flow_score(
     }
 }
 
+/// Microsoft TrueSkill / TrueMatch 기반의 단일 난이도 계열 실력 정규분포 N(μ, σ²).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GaussianSkill {
+    /// 실력 중심값 (평균 Floor, 예: 11.2)
+    pub mu: f64,
+    /// 실력 분산/표준편차 (Floor 스케일, 기본 0.8 ~ 2.5)
+    pub sigma: f64,
+    /// 표본 수
+    pub sample_count: usize,
+}
+
+impl GaussianSkill {
+    pub const DEFAULT_SC: Self = Self {
+        mu: 5.0,
+        sigma: 1.5,
+        sample_count: 0,
+    };
+
+    pub const DEFAULT_PAD: Self = Self {
+        mu: 8.0,
+        sigma: 2.0,
+        sample_count: 0,
+    };
+
+    pub fn new(mu: f64, sigma: f64, sample_count: usize) -> Self {
+        Self {
+            mu: if mu.is_finite() && mu > 0.0 { mu } else { 5.0 },
+            sigma: if sigma.is_finite() {
+                sigma.clamp(0.8, 2.5)
+            } else {
+                1.5
+            },
+            sample_count,
+        }
+    }
+
+    /// 주어진 난이도(Floor)가 회복/손풀기 안전 구간에 해당하는지 확인 (Floor <= mu - 0.8 * sigma)
+    pub fn is_recovery_zone(&self, floor: f64) -> bool {
+        floor <= (self.mu - 0.8 * self.sigma)
+    }
+
+    /// 주어진 난이도(Floor)가 상위 도전 구간에 해당하는지 확인 (mu <= Floor <= mu + 1.2 * sigma)
+    pub fn is_climbing_zone(&self, floor: f64) -> bool {
+        floor >= self.mu && floor <= (self.mu + 1.2 * self.sigma)
+    }
+
+    /// 주어진 난이도(Floor)가 주력 재도전 적정 범위에 해당하는지 확인 (|Floor - mu| <= 1.0 * sigma)
+    pub fn is_core_zone(&self, floor: f64) -> bool {
+        (floor - self.mu).abs() <= 1.0 * self.sigma
+    }
+}
+
+/// 버튼 모드별 SC 및 일반(Pad) 2-Track 실력 프로필
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SkillProfile {
+    pub sc: GaussianSkill,
+    pub pad: GaussianSkill,
+}
+
+impl SkillProfile {
+    pub fn for_diff(&self, diff: Difficulty) -> &GaussianSkill {
+        if diff.is_sc() {
+            &self.sc
+        } else {
+            &self.pad
+        }
+    }
+}
+
+/// Top 50 요약 정보로부터 SC 및 일반(Pad) 2-Track 실력 프로필을 산출한다.
+/// - 샘플이 부족할 경우 Cross-Track Fallback을 통해 상호 보완한다.
+pub(crate) fn derive_skill_profile<F>(
+    top50: &crate::store::record_db::VArchiveTop50Summary,
+    find_floor: &F,
+    button_mode: overmax_core::Mode,
+) -> SkillProfile
+where
+    F: Fn(i32, overmax_core::Mode, Difficulty) -> f64,
+{
+    let mut sc_floors: Vec<f64> = Vec::new();
+    let mut pad_floors: Vec<f64> = Vec::new();
+
+    for &(sid, m, d) in top50.rank_map.keys() {
+        if m == button_mode {
+            let f = find_floor(sid, m, d);
+            if f > 0.0 {
+                if d.is_sc() {
+                    sc_floors.push(f);
+                } else {
+                    pad_floors.push(f);
+                }
+            }
+        }
+    }
+
+    let compute_gaussian = |floors: &[f64], default_skill: GaussianSkill| -> GaussianSkill {
+        if floors.len() < 3 {
+            if floors.is_empty() {
+                return default_skill;
+            }
+            let mean = floors.iter().sum::<f64>() / floors.len() as f64;
+            return GaussianSkill::new(mean, default_skill.sigma, floors.len());
+        }
+
+        let mean = floors.iter().sum::<f64>() / floors.len() as f64;
+        let variance = floors
+            .iter()
+            .map(|&f| {
+                let diff = f - mean;
+                diff * diff
+            })
+            .sum::<f64>()
+            / floors.len() as f64;
+        let std_dev = variance.sqrt();
+        GaussianSkill::new(mean, std_dev, floors.len())
+    };
+
+    let mut sc_skill = compute_gaussian(&sc_floors, GaussianSkill::DEFAULT_SC);
+    let mut pad_skill = compute_gaussian(&pad_floors, GaussianSkill::DEFAULT_PAD);
+
+    // Cross-Track Fallback
+    if sc_skill.sample_count >= 3 && pad_skill.sample_count < 3 {
+        let pad_mu = (sc_skill.mu + 1.0).clamp(1.0, 15.0);
+        pad_skill = GaussianSkill::new(pad_mu, sc_skill.sigma, pad_floors.len());
+    } else if pad_skill.sample_count >= 3 && sc_skill.sample_count < 3 {
+        let sc_mu = (pad_skill.mu - 1.0).clamp(1.0, 15.0);
+        sc_skill = GaussianSkill::new(sc_mu, pad_skill.sigma, sc_floors.len());
+    }
+
+    SkillProfile {
+        sc: sc_skill,
+        pad: pad_skill,
+    }
+}
+
 /// V-Archive Top 50 곡들 중 현재 난이도 계열(SC vs 일반)에 해당하는 패턴들의 중앙값(Median Floor)을 기본 실력대 앵커로 산출한다.
 /// 최상위 한계곡(Peak)에 편향되지 않고 플레이어의 주력 난이도 허리를 가장 정직하게 대변한다.
 pub(crate) fn derive_top50_base_floor<F>(

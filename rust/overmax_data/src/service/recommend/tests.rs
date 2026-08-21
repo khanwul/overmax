@@ -6,8 +6,9 @@ use overmax_core::{Difficulty, Mode};
 use crate::community::client::VArchiveDB;
 use crate::service::recommend::scoring::{
     calculate_performance_rating, derive_recommend_reason, derive_recommended_level,
-    derive_top50_base_floor, retry_priority, session_flow_score, top50_boundary_score,
-    SessionPlayInfo, SessionTrend, SessionTrendState,
+    derive_skill_profile, derive_top50_base_floor, retry_priority, session_flow_score,
+    top50_boundary_score, GaussianSkill, SessionPlayInfo, SessionTrend, SessionTrendState,
+    SkillProfile,
 };
 use crate::service::recommend::{
     CompositeRecommender, LocalFloorRecommender, ProviderCacheReader, RecommendContext,
@@ -1040,4 +1041,69 @@ fn test_candidate_ranking_integration_multi_signal_hierarchy() {
 
     assert_eq!(entries[6].song_id, 5);
     assert_eq!(entries[6].reason, None);
+}
+
+#[test]
+fn test_gaussian_skill_zones() {
+    let skill = GaussianSkill::new(12.0, 1.0, 50);
+
+    // mu = 12.0, sigma = 1.0
+    // Recovery: Floor <= 12.0 - 0.8*1.0 = 11.2
+    assert!(skill.is_recovery_zone(11.2));
+    assert!(skill.is_recovery_zone(10.0));
+    assert!(!skill.is_recovery_zone(11.3));
+    assert!(!skill.is_recovery_zone(14.0)); // 고난도는 절대 recovery 아님!
+
+    // Climbing: 12.0 <= Floor <= 12.0 + 1.2*1.0 = 13.2
+    assert!(skill.is_climbing_zone(12.0));
+    assert!(skill.is_climbing_zone(12.5));
+    assert!(skill.is_climbing_zone(13.2));
+    assert!(!skill.is_climbing_zone(11.9));
+    assert!(!skill.is_climbing_zone(13.5));
+
+    // Core: |Floor - 12.0| <= 1.0 -> 11.0 ~ 13.0
+    assert!(skill.is_core_zone(11.0));
+    assert!(skill.is_core_zone(12.0));
+    assert!(skill.is_core_zone(13.0));
+    assert!(!skill.is_core_zone(10.9));
+    assert!(!skill.is_core_zone(13.1));
+}
+
+#[test]
+fn test_skill_profile_estimation_and_cross_track_fallback() {
+    use std::collections::HashMap;
+
+    let mut rank_map = HashMap::new();
+    // 4B SC 5곡 (Floor: 12.0, 12.2, 12.4, 12.6, 12.8) -> Mean = 12.4
+    for i in 1..=5 {
+        rank_map.insert((i, Mode::B4, Difficulty::SC), i as usize);
+    }
+
+    let top50 = crate::store::record_db::VArchiveTop50Summary {
+        total_recorded_count: 5,
+        cutoff_rating: 175.0,
+        rank_map,
+    };
+
+    let find_floor = |sid: i32, _m: Mode, _d: Difficulty| -> f64 {
+        match sid {
+            1 => 12.0,
+            2 => 12.2,
+            3 => 12.4,
+            4 => 12.6,
+            5 => 12.8,
+            _ => 0.0,
+        }
+    };
+
+    let profile = derive_skill_profile(&top50, &find_floor, Mode::B4);
+
+    // SC Profile
+    assert_eq!(profile.sc.sample_count, 5);
+    assert!((profile.sc.mu - 12.4).abs() < 0.001);
+    assert!(profile.sc.sigma >= 0.8 && profile.sc.sigma <= 2.5);
+
+    // Pad Profile (Cross-track fallback from SC mu 12.4 -> 13.4 clamped)
+    assert_eq!(profile.pad.sample_count, 0);
+    assert!((profile.pad.mu - 13.4).abs() < 0.001);
 }
