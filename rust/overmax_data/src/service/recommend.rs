@@ -40,6 +40,8 @@ impl RecommendReasonKind {
 pub struct RecommendReason {
     pub kind: RecommendReasonKind,
     pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rank: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -552,12 +554,14 @@ fn derive_recommend_reason(
                 return Some(RecommendReason {
                     kind: RecommendReasonKind::Top50Defend,
                     detail: format!("Top-50 수성 방어 타깃 (현재 {}위)", rank),
+                    rank: Some(rank),
                 });
             }
         }
         return Some(RecommendReason {
             kind: RecommendReasonKind::Top50Attack,
             detail: "Top-50 컷라인 돌파 추천 타깃".to_string(),
+            rank: None,
         });
     }
 
@@ -567,12 +571,14 @@ fn derive_recommend_reason(
                 return Some(RecommendReason {
                     kind: RecommendReasonKind::Climbing,
                     detail: "세션 상승 모멘텀 상위 난이도 도전".to_string(),
+                    rank: None,
                 });
             }
             Some(SessionTrend::Recovery) => {
                 return Some(RecommendReason {
                     kind: RecommendReasonKind::Recovery,
                     detail: "세션 회복/손풀기 적정 난이도".to_string(),
+                    rank: None,
                 });
             }
             _ => {}
@@ -583,6 +589,7 @@ fn derive_recommend_reason(
         return Some(RecommendReason {
             kind: RecommendReasonKind::Retry,
             detail: "방치된 기록 경신 재도전 추천".to_string(),
+            rank: None,
         });
     }
 
@@ -659,16 +666,18 @@ impl RecommendStrategy {
     {
         match self {
             Self::Classic => {
-                params.candidates.sort_by(|a, b| match (a.is_played(), b.is_played()) {
-                    (true, false) => Ordering::Less,
-                    (false, true) => Ordering::Greater,
-                    (true, true) => a
-                        .rate
-                        .partial_cmp(&b.rate)
-                        .unwrap_or(Ordering::Equal)
-                        .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal)),
-                    (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
-                });
+                params
+                    .candidates
+                    .sort_by(|a, b| match (a.is_played(), b.is_played()) {
+                        (true, false) => Ordering::Less,
+                        (false, true) => Ordering::Greater,
+                        (true, true) => a
+                            .rate
+                            .partial_cmp(&b.rate)
+                            .unwrap_or(Ordering::Equal)
+                            .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal)),
+                        (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
+                    });
                 params.candidates.truncate(params.max_results);
             }
             Self::Smart => {
@@ -692,44 +701,52 @@ impl RecommendStrategy {
                     SessionTrend::analyze_session(&session_play_infos, params.now_unix);
                 let session_trend = session_trend_state.as_ref().map(|s| s.trend);
 
-                params.candidates.sort_by(|a, b| match (a.is_played(), b.is_played()) {
-                    (true, false) => Ordering::Less,
-                    (false, true) => Ordering::Greater,
-                    (true, true) => {
-                        let a_rank = top50.rank_map.get(&(a.song_id, a.mode, a.diff)).copied();
-                        let b_rank = top50.rank_map.get(&(b.song_id, b.mode, b.diff)).copied();
-                        let pa = retry_priority(a.rate.unwrap_or(0.0), a.updated_at, params.now_unix)
-                            + top50_boundary_score(
+                params
+                    .candidates
+                    .sort_by(|a, b| match (a.is_played(), b.is_played()) {
+                        (true, false) => Ordering::Less,
+                        (false, true) => Ordering::Greater,
+                        (true, true) => {
+                            let a_rank = top50.rank_map.get(&(a.song_id, a.mode, a.diff)).copied();
+                            let b_rank = top50.rank_map.get(&(b.song_id, b.mode, b.diff)).copied();
+                            let pa = retry_priority(
+                                a.rate.unwrap_or(0.0),
+                                a.updated_at,
+                                params.now_unix,
+                            ) + top50_boundary_score(
                                 a.varchive_rating,
                                 a_rank,
                                 top50.cutoff_rating,
                                 top50.total_recorded_count,
-                            )
-                            + session_flow_score(
+                            ) + session_flow_score(
                                 a.floor,
                                 a.rate,
                                 params.ref_floor,
                                 session_trend_state.as_ref(),
                             );
-                        let pb = retry_priority(b.rate.unwrap_or(0.0), b.updated_at, params.now_unix)
-                            + top50_boundary_score(
+                            let pb = retry_priority(
+                                b.rate.unwrap_or(0.0),
+                                b.updated_at,
+                                params.now_unix,
+                            ) + top50_boundary_score(
                                 b.varchive_rating,
                                 b_rank,
                                 top50.cutoff_rating,
                                 top50.total_recorded_count,
-                            )
-                            + session_flow_score(
+                            ) + session_flow_score(
                                 b.floor,
                                 b.rate,
                                 params.ref_floor,
                                 session_trend_state.as_ref(),
                             );
-                        pb.partial_cmp(&pa)
-                            .unwrap_or(Ordering::Equal)
-                            .then_with(|| a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal))
-                    }
-                    (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
-                });
+                            pb.partial_cmp(&pa)
+                                .unwrap_or(Ordering::Equal)
+                                .then_with(|| {
+                                    a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal)
+                                })
+                        }
+                        (false, false) => a.floor.partial_cmp(&b.floor).unwrap_or(Ordering::Equal),
+                    });
 
                 params.candidates.truncate(params.max_results);
 
@@ -1889,6 +1906,7 @@ mod tests {
             Some(RecommendReason {
                 kind: RecommendReasonKind::Top50Defend,
                 detail: "Top-50 수성 방어 타깃 (현재 45위)".to_string(),
+                rank: Some(45),
             })
         );
 
@@ -1899,6 +1917,7 @@ mod tests {
             Some(RecommendReason {
                 kind: RecommendReasonKind::Top50Attack,
                 detail: "Top-50 컷라인 돌파 추천 타깃".to_string(),
+                rank: None,
             })
         );
 
@@ -1910,6 +1929,7 @@ mod tests {
             Some(RecommendReason {
                 kind: RecommendReasonKind::Climbing,
                 detail: "세션 상승 모멘텀 상위 난이도 도전".to_string(),
+                rank: None,
             })
         );
 
@@ -1920,6 +1940,7 @@ mod tests {
             Some(RecommendReason {
                 kind: RecommendReasonKind::Retry,
                 detail: "방치된 기록 경신 재도전 추천".to_string(),
+                rank: None,
             })
         );
 

@@ -181,7 +181,7 @@ fn draw_footer(ui: &mut egui::Ui, recommendations: &RecommendResult, px: &Px) {
             ui.horizontal(|ui| {
                 if let Some(target) = &recommendations.recommended_level {
                     ui.label(
-                        RichText::new(format!("🎯 권장 {target}"))
+                        RichText::new(crate::t!("overlay-recommended-target", target = target))
                             .color(Theme::TEXT_ACCENT)
                             .font(FontId::proportional(11.0 * px.scale))
                             .strong(),
@@ -207,7 +207,7 @@ fn draw_footer(ui: &mut egui::Ui, recommendations: &RecommendResult, px: &Px) {
                             .strong(),
                     );
                     ui.label(
-                        RichText::new("평균")
+                        RichText::new(crate::t!("overlay-avg-label"))
                             .color(Theme::TEXT_MUTED)
                             .font(FontId::proportional(10.5 * px.scale)),
                     );

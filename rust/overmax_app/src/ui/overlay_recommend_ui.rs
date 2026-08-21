@@ -194,7 +194,29 @@ fn draw_reason_badge(ui: &mut egui::Ui, reason: &overmax_data::RecommendReason, 
         FontId::proportional(7.5 * scale),
         Color32::WHITE,
     );
-    response.on_hover_text(&reason.detail);
+    response.on_hover_text(reason_tooltip(reason));
+}
+
+fn reason_tooltip(reason: &overmax_data::RecommendReason) -> String {
+    match reason.kind {
+        overmax_data::RecommendReasonKind::Top50Attack => {
+            crate::t!("reco-reason-top50-attack").to_string()
+        }
+        overmax_data::RecommendReasonKind::Top50Defend => {
+            if let Some(rank) = reason.rank {
+                crate::t!("reco-reason-top50-defend", rank = rank)
+            } else {
+                reason.detail.clone()
+            }
+        }
+        overmax_data::RecommendReasonKind::Climbing => {
+            crate::t!("reco-reason-climbing").to_string()
+        }
+        overmax_data::RecommendReasonKind::Recovery => {
+            crate::t!("reco-reason-recovery").to_string()
+        }
+        overmax_data::RecommendReasonKind::Retry => crate::t!("reco-reason-retry").to_string(),
+    }
 }
 
 fn draw_entry_badge(ui: &mut egui::Ui, entry: &RecommendEntry, scale: f32) {

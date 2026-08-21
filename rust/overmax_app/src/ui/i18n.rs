@@ -178,8 +178,50 @@ macro_rules! t {
             En => format!("{} ({})", $msg, $rank)
         )
     };
+    ("overlay-recommended-target", target = $target:expr) => {
+        $crate::t_select!(
+            Ko => format!("🎯 권장 {}", $target),
+            En => format!("🎯 Target {}", $target)
+        )
+    };
+    ("reco-reason-top50-defend", rank = $rank:expr) => {
+        $crate::t_select!(
+            Ko => format!("Top-50 수성 방어 타깃 (현재 {}위)", $rank),
+            En => format!("Top-50 defense target (Rank #{})", $rank)
+        )
+    };
 
     // 3) Static Keys Direct Matchers (Multi-line formatted per key for legibility & DX)
+    ("overlay-avg-label") => {
+        $crate::t_select!(
+            Ko => "평균",
+            En => "Avg"
+        )
+    };
+    ("reco-reason-top50-attack") => {
+        $crate::t_select!(
+            Ko => "Top-50 컷라인 돌파 추천 타깃",
+            En => "Top-50 cutoff breakthrough target"
+        )
+    };
+    ("reco-reason-climbing") => {
+        $crate::t_select!(
+            Ko => "세션 상승 모멘텀 상위 난이도 도전",
+            En => "Session upward momentum challenge"
+        )
+    };
+    ("reco-reason-recovery") => {
+        $crate::t_select!(
+            Ko => "세션 회복/손풀기 적정 난이도",
+            En => "Session warmup / recovery target"
+        )
+    };
+    ("reco-reason-retry") => {
+        $crate::t_select!(
+            Ko => "방치된 기록 경신 재도전 추천",
+            En => "Stale record improvement retry"
+        )
+    };
     ("status-account-path-missing") => {
         $crate::t_select!(
             Ko => "account.txt 경로 설정 필요",
