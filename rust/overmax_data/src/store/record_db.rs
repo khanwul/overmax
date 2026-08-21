@@ -1,4 +1,4 @@
-use overmax_core::{Difficulty, Mode, RecordKey, RecordValue};
+use overmax_core::{Difficulty, Mode, RecordKey, RecordValue, VerifiedPlayEvent};
 use rusqlite::{params, Connection, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -82,6 +82,7 @@ impl RecordDB {
         if let Ok(mut conn) = conn_result {
             if self.create_records_table(&conn).is_ok()
                 && self.create_varchive_records_table(&conn).is_ok()
+                && self.create_play_events_table(&conn).is_ok()
             {
                 self.ensure_schema(&mut conn);
                 self.is_ready = true;
@@ -178,6 +179,27 @@ impl RecordDB {
         Ok(())
     }
 
+    fn create_play_events_table(&self, conn: &Connection) -> Result<()> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS play_events (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                steam_id      TEXT NOT NULL,
+                song_id       TEXT NOT NULL,
+                button_mode   TEXT NOT NULL,
+                difficulty    TEXT NOT NULL,
+                rate          REAL NOT NULL,
+                is_max_combo  INTEGER NOT NULL DEFAULT 0,
+                played_at     INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_play_events_recent ON play_events (steam_id, button_mode, played_at DESC)",
+            [],
+        )?;
+        Ok(())
+    }
+
     fn table_has_column(
         &self,
         conn: &Connection,
@@ -202,12 +224,17 @@ impl RecordDB {
                 let _ = self.create_records_table(conn);
             }
         }
+        let _ = self.create_play_events_table(conn);
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_records_recent ON records (steam_id, button_mode, updated_at DESC)",
             [],
         );
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_varchive_top50 ON varchive_records (steam_id, button_mode, rating DESC)",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_play_events_recent ON play_events (steam_id, button_mode, played_at DESC)",
             [],
         );
     }
@@ -544,6 +571,61 @@ impl RecordDB {
         map
     }
 
+    /// 결과창에서 발생한 플레이 이벤트를 45초 디바운스 가드 하에 play_events 테이블에 누적 기록한다.
+    pub fn insert_play_event(&self, event: &VerifiedPlayEvent, now_unix: i64) -> bool {
+        if !self.is_ready || !event.is_result_screen || event.rate < 0.01 {
+            return false;
+        }
+
+        let steam_id = self.get_steam_id();
+        if steam_id.is_empty() || steam_id == Self::UNKNOWN_STEAM_ID {
+            return false;
+        }
+
+        let song_id_str = event.song_id.to_string();
+        let button_mode = event.mode.as_str();
+        let diff_str = event.diff.as_str();
+        let debounce_window = (now_unix - 45).max(0);
+
+        let result = self.with_retry(|conn| {
+            // 45초 이내 동일 패턴 디바운스 가드 (레벨업/언락 팝업 재진입 방지)
+            let mut check_stmt = conn.prepare_cached(
+                "SELECT 1 FROM play_events
+                 WHERE steam_id = ?1 AND song_id = ?2 AND button_mode = ?3 AND difficulty = ?4
+                   AND played_at >= ?5
+                 LIMIT 1",
+            )?;
+            let exists = check_stmt.exists(rusqlite::params![
+                steam_id,
+                song_id_str,
+                button_mode,
+                diff_str,
+                debounce_window
+            ])?;
+
+            if exists {
+                return Ok(false);
+            }
+
+            let mut insert_stmt = conn.prepare_cached(
+                "INSERT INTO play_events (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, played_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )?;
+            insert_stmt.execute(rusqlite::params![
+                steam_id,
+                song_id_str,
+                button_mode,
+                diff_str,
+                event.rate,
+                if event.is_max_combo { 1 } else { 0 },
+                now_unix,
+            ])?;
+            Ok(true)
+        });
+
+        result.unwrap_or(false)
+    }
+
     pub fn get_recent_records(
         &self,
         steam_id: &str,
@@ -556,15 +638,65 @@ impl RecordDB {
         }
 
         let button_mode = mode.as_str();
-        let query = "SELECT song_id, difficulty, rate, is_max_combo, updated_at
-                     FROM records
-                     WHERE steam_id = ?1 AND button_mode = ?2
-                     ORDER BY updated_at DESC
-                     LIMIT ?3";
-
         let mut results = Vec::new();
+
+        // 1. play_events 테이블(결과창 실제 플레이 이력)에서 우선 조회
+        let query_events = "SELECT song_id, difficulty, rate, is_max_combo, played_at
+                            FROM play_events
+                            WHERE steam_id = ?1 AND button_mode = ?2
+                            ORDER BY played_at DESC
+                            LIMIT ?3";
+
         let _ = self.with_rate_map_connection(|conn| {
-            if let Ok(mut stmt) = conn.prepare(query) {
+            if let Ok(mut stmt) = conn.prepare(query_events) {
+                if let Ok(mut rows) =
+                    stmt.query(rusqlite::params![steam_id, button_mode, limit as i64])
+                {
+                    while let Ok(Some(row)) = rows.next() {
+                        if let (
+                            Ok(song_id_str),
+                            Ok(diff_str),
+                            Ok(rate),
+                            Ok(mc_int),
+                            Ok(played_at),
+                        ) = (
+                            row.get::<_, String>(0),
+                            row.get::<_, String>(1),
+                            row.get::<_, f64>(2),
+                            row.get::<_, i32>(3),
+                            row.get::<_, i64>(4),
+                        ) {
+                            if let (Ok(sid), Some(diff)) =
+                                (song_id_str.parse::<i32>(), Difficulty::from_str(&diff_str))
+                            {
+                                results.push(RecentRecordEntry {
+                                    song_id: sid,
+                                    button_mode: mode,
+                                    difficulty: diff,
+                                    rate,
+                                    is_max_combo: mc_int != 0,
+                                    updated_at: played_at,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if !results.is_empty() {
+            return results;
+        }
+
+        // 2. play_events에 기록이 없는 경우(신규 DB/기존 기록 마이그레이션 전) records 테이블로 fallback
+        let query_records = "SELECT song_id, difficulty, rate, is_max_combo, updated_at
+                             FROM records
+                             WHERE steam_id = ?1 AND button_mode = ?2
+                             ORDER BY updated_at DESC
+                             LIMIT ?3";
+
+        let _ = self.with_rate_map_connection(|conn| {
+            if let Ok(mut stmt) = conn.prepare(query_records) {
                 if let Ok(mut rows) =
                     stmt.query(rusqlite::params![steam_id, button_mode, limit as i64])
                 {
@@ -599,6 +731,7 @@ impl RecordDB {
                 }
             }
         });
+
         results
     }
 
@@ -1128,5 +1261,66 @@ mod tests {
         assert_eq!(recent[0].updated_at, 1050);
         assert_eq!(recent[1].song_id, 4);
         assert_eq!(recent[2].song_id, 3);
+    }
+
+    #[test]
+    fn test_play_events_logging_and_deduplication() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("record_play_events.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let event1 = VerifiedPlayEvent {
+            song_id: 100,
+            mode: Mode::B4,
+            diff: Difficulty::SC,
+            rate: 98.5,
+            is_max_combo: true,
+            is_result_screen: true,
+        };
+
+        // 1. 정상 결과창 이벤트 로깅 성공
+        assert!(db.insert_play_event(&event1, 1000));
+
+        // 2. 45초 이내 동일 패턴 재진입 (레벨업 팝업 가림 후 복귀) -> 디바운스 차단 (false)
+        let dup_event = VerifiedPlayEvent {
+            song_id: 100,
+            mode: Mode::B4,
+            diff: Difficulty::SC,
+            rate: 98.5,
+            is_max_combo: true,
+            is_result_screen: true,
+        };
+        assert!(!db.insert_play_event(&dup_event, 1010)); // 10초 후 재진입 시도
+
+        // 3. 45초 초과 후 다음 판 플레이 -> 삽입 성공
+        let next_event = VerifiedPlayEvent {
+            song_id: 100,
+            mode: Mode::B4,
+            diff: Difficulty::SC,
+            rate: 99.0,
+            is_max_combo: true,
+            is_result_screen: true,
+        };
+        assert!(db.insert_play_event(&next_event, 1060)); // 60초 후 플레이
+
+        // 4. 선곡 화면 이벤트는 play_events 삽입 거부
+        let song_select_event = VerifiedPlayEvent {
+            song_id: 101,
+            mode: Mode::B4,
+            diff: Difficulty::NM,
+            rate: 99.9,
+            is_max_combo: true,
+            is_result_screen: false,
+        };
+        assert!(!db.insert_play_event(&song_select_event, 1100));
+
+        // 5. get_recent_records가 play_events에서 우선 조회하는지 검증
+        let recent = db.get_recent_records("76561198000000001", Mode::B4, 10);
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].updated_at, 1060);
+        assert_eq!(recent[0].rate, 99.0);
+        assert_eq!(recent[1].updated_at, 1000);
+        assert_eq!(recent[1].rate, 98.5);
     }
 }

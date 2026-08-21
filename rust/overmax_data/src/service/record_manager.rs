@@ -31,6 +31,14 @@ impl RecordManager {
     /// VerifiedPlayEvent를 수신하여 기록을 갱신하고, 신규/개선 여부를 반환합니다.
     pub fn handle_verified_play(&self, event: &VerifiedPlayEvent) -> bool {
         let key = event.record_key();
+        if event.is_result_screen {
+            let now_unix = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            self.record_db.insert_play_event(event, now_unix);
+        }
+
         if !event.is_result_screen && event.rate <= 0.0 {
             // 선곡 화면에서 미플레이(0.0%)로 확인된 경우: 과거 오기록이 있다면 삭제하여 미플레이로 교정
             self.delete(key.0, key.1, key.2)
@@ -508,6 +516,38 @@ mod tests {
             manager.get_local_record(77, overmax_core::Mode::B4, overmax_core::Difficulty::SC),
             None
         );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_handle_verified_play_logs_to_play_events_on_result_screen() {
+        let dir = test_dir("record-manager-play-events");
+        let db_path = dir.join("record.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let db = Arc::new(db);
+        let manager = RecordManager::new(db);
+
+        let event = VerifiedPlayEvent {
+            song_id: 88,
+            mode: overmax_core::Mode::B6,
+            diff: overmax_core::Difficulty::HD,
+            rate: 98.76,
+            is_max_combo: true,
+            is_result_screen: true,
+        };
+
+        // 결과창 이벤트 처리 시 records UPSERT + play_events INSERT 동시 진행
+        assert!(manager.handle_verified_play(&event));
+
+        // get_recent_records를 통해 play_events에서 정상 조회되는지 확인
+        let recent = manager.get_recent_records(overmax_core::Mode::B6, 5);
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].song_id, 88);
+        assert!((recent[0].rate - 98.76).abs() < 0.001);
+        assert!(recent[0].is_max_combo);
 
         let _ = std::fs::remove_dir_all(dir);
     }
