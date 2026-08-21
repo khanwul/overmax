@@ -476,10 +476,16 @@ fn derive_recommended_level(
     current_diff: Difficulty,
     current_floor: f64,
 ) -> Option<String> {
-    let base_floor = trend_state.map(|s| s.last_floor).unwrap_or(current_floor);
-    let is_sc = trend_state
-        .map(|s| s.last_diff == Difficulty::SC)
-        .unwrap_or(current_diff == Difficulty::SC);
+    let is_sc = current_diff == Difficulty::SC;
+    let base_floor = if let Some(state) = trend_state {
+        if (state.last_diff == Difficulty::SC) == is_sc {
+            state.last_floor
+        } else {
+            current_floor
+        }
+    } else {
+        current_floor
+    };
 
     let target_floor = match trend_state.map(|s| s.trend) {
         Some(SessionTrend::Climbing) => base_floor + 0.3,
