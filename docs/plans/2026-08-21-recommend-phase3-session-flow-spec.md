@@ -15,10 +15,10 @@
 **"플레이어가 방금 어떤 난이도에서 어떤 성과를 냈는지"**를 실시간으로 정확히 추적할 수 있다.
 
 리듬게임 플레이어의 실제 세션 흐름:
-1. **상승 모멘텀 (Climbing)**: 직전 판을 99.0% 이상으로 가볍게 클리어한 경우 $\rightarrow$ $+0.1 \sim +0.4$ 상위 난이도 도전곡을 추천하여 성장 동기 부여.
-2. **동급 안정화 (Consolidation)**: 97.0% ~ 99.0% 구간에서 적정 난이도를 유지 중인 경우 $\rightarrow$ 비슷한 Floor의 연습곡을 추천.
-3. **피로 회복/쿨다운 (Recovery)**: 97.0% 미만으로 고전하거나 폭사한 경우 $\rightarrow$ $-0.2 \sim -0.5$ 살짝 낮은 Floor의 손풀기/회복곡을 추천하여 좌절감 완화.
-4. **세션 시작/데이터 부재**: 최근 플레이 기록이 없으면 점수 `0.0`으로 자연스럽게 기존 레인(A, B, C)으로 폴백.
+1. **상승 모멘텀 (Climbing)**: 직전 판을 99.0% 이상으로 가볍게 클리어한 경우 $\rightarrow$ 현재 Floor 기준 $+0.1 \sim +0.4$ 상위 난이도 도전곡을 추천하여 성장 동기 부여.
+2. **동급 안정화 (Steady)**: 97.0% ~ 99.0% 구간에서 적정 난이도를 유지 중인 경우 $\rightarrow$ 현재 Floor 기준 $\pm 0.15$ 범위의 동급 연습곡을 추천.
+3. **피로 회복/쿨다운 (Recovery)**: 97.0% 미만으로 고전하거나 폭사한 경우 $\rightarrow$ 현재 Floor 기준 $-0.2 \sim -0.5$ 살짝 낮은 Floor의 손풀기/회복곡을 추천하여 좌절감 완화.
+4. **세션 만료/데이터 부재**: 직전 플레이 후 4시간 이상 경과(`SESSION_IDLE_TIMEOUT_HOURS`)했거나 플레이 기록이 없으면 점수 `0.0`으로 자연스럽게 기존 레인(A, B, C)으로 폴백.
 
 ---
 
@@ -26,9 +26,10 @@
 
 ### In-Scope (이번 작업)
 - `RecordDB`에 최근 플레이 쿼리 전용 복합 인덱스 `idx_records_recent` 추가
-- `RecordDB`에 최근 N판 플레이 기록 조회 메서드(`get_recent_records`) 추가
+- `RecordDB`에 `with_rate_map_connection` 스레드 로컬 커넥션을 사용하는 `get_recent_records` 추가
 - `RecordManager`에 pass-through 메서드 추가
-- `session_flow_score()` 모듈 레벨 순수 함수 추가 및 단위 테스트
+- `SESSION_IDLE_TIMEOUT_HOURS` 세션 유효 윈도우(4시간) 가드 적용
+- `SessionTrend`, `session_flow_score()` 모듈 레벨 순수 함수 추가 및 단위 테스트
 - `LocalFloorRecommender::recommend()`에서 세션 모멘텀 점수를 블렌딩 가중치로 합산하여 최종 정렬 반영
 - 단위 테스트 추가 및 전체 워크스페이스 검증
 
@@ -75,10 +76,6 @@ impl RecordDB {
             return Vec::new();
         }
 
-        let Ok(conn) = self.open_conn() else {
-            return Vec::new();
-        };
-
         let button_mode = mode.as_str();
         let query = "SELECT song_id, difficulty, rate, is_max_combo, updated_at
                      FROM records
@@ -87,33 +84,35 @@ impl RecordDB {
                      LIMIT ?3";
 
         let mut results = Vec::new();
-        if let Ok(mut stmt) = conn.prepare(query) {
-            if let Ok(mut rows) = stmt.query(rusqlite::params![steam_id, button_mode, limit as i64]) {
-                while let Ok(Some(row)) = rows.next() {
-                    if let (Ok(song_id_str), Ok(diff_str), Ok(rate), Ok(mc_int), Ok(updated_at)) = (
-                        row.get::<_, String>(0),
-                        row.get::<_, String>(1),
-                        row.get::<_, f64>(2),
-                        row.get::<_, i32>(3),
-                        row.get::<_, i64>(4),
-                    ) {
-                        if let (Ok(sid), Some(diff)) = (
-                            song_id_str.parse::<i32>(),
-                            Difficulty::from_str(&diff_str),
+        let _ = self.with_rate_map_connection(|conn| {
+            if let Ok(mut stmt) = conn.prepare(query) {
+                if let Ok(mut rows) = stmt.query(rusqlite::params![steam_id, button_mode, limit as i64]) {
+                    while let Ok(Some(row)) = rows.next() {
+                        if let (Ok(song_id_str), Ok(diff_str), Ok(rate), Ok(mc_int), Ok(updated_at)) = (
+                            row.get::<_, String>(0),
+                            row.get::<_, String>(1),
+                            row.get::<_, f64>(2),
+                            row.get::<_, i32>(3),
+                            row.get::<_, i64>(4),
                         ) {
-                            results.push(RecentRecordEntry {
-                                song_id: sid,
-                                button_mode: mode,
-                                difficulty: diff,
-                                rate,
-                                is_max_combo: mc_int != 0,
-                                updated_at,
-                            });
+                            if let (Ok(sid), Some(diff)) = (
+                                song_id_str.parse::<i32>(),
+                                Difficulty::from_str(&diff_str),
+                            ) {
+                                results.push(RecentRecordEntry {
+                                    song_id: sid,
+                                    button_mode: mode,
+                                    difficulty: diff,
+                                    rate,
+                                    is_max_combo: mc_int != 0,
+                                    updated_at,
+                                });
+                            }
                         }
                     }
                 }
             }
-        }
+        });
         results
     }
 }
@@ -140,22 +139,39 @@ impl RecordManager {
   - `MOMENTUM_HIGH_RATE_THRESHOLD: f64 = 99.0;` (상승 도전 기준치)
   - `MOMENTUM_LOW_RATE_THRESHOLD: f64 = 97.0;` (회복/안정화 기준치)
   - `MOMENTUM_MAX_BONUS: f64 = 4.0;` (모멘텀 추천 최대 보너스)
+  - `SESSION_IDLE_TIMEOUT_HOURS: f64 = 4.0;` (세션 만료 기준 시간)
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionTrend {
     /// 직전 성과 우수 (99.0% 이상) -> 상위 난이도(+0.1 ~ +0.4) 도전 권장
     Climbing,
-    /// 직전 성과 보통 (97.0% ~ 99.0%) -> 동급 난이도(±0.1) 안정화 권장
+    /// 직전 성과 보통 (97.0% ~ 99.0%) -> 동급 난이도(±0.15) 안정화 권장
     Steady,
     /// 직전 성과 저조 (97.0% 미만) -> 살짝 낮은 난이도(-0.2 ~ -0.5) 회복 권장
     Recovery,
 }
 
+impl SessionTrend {
+    pub fn from_recent_play(rate: f64, updated_at: i64, now_unix: i64) -> Option<Self> {
+        let elapsed_hours = ((now_unix - updated_at).max(0) as f64) / 3600.0;
+        if elapsed_hours > SESSION_IDLE_TIMEOUT_HOURS {
+            return None;
+        }
+
+        if rate >= MOMENTUM_HIGH_RATE_THRESHOLD {
+            Some(Self::Climbing)
+        } else if rate >= MOMENTUM_LOW_RATE_THRESHOLD {
+            Some(Self::Steady)
+        } else if rate > 0.0 {
+            Some(Self::Recovery)
+        } else {
+            None
+        }
+    }
+}
+
 /// 직전 플레이 성과와 후보 곡의 Floor 관계를 평가하여 세션 모멘텀 가중치를 반환한다.
-/// - `cand_floor`: 추천 후보 곡의 Floor
-/// - `ref_floor`: 현재 기준 곡(또는 직전 곡)의 Floor
-/// - `trend`: 최근 플레이 성과 추세
 fn session_flow_score(
     cand_floor: f64,
     ref_floor: f64,
@@ -179,7 +195,7 @@ fn session_flow_score(
             }
         }
         SessionTrend::Steady => {
-            // ±0.1 이내 동급 난이도에서 최고 점수
+            // ±0.15 이내 동급 난이도에서 최고 점수 (최대 3.0)
             if delta.abs() <= 0.15 {
                 (1.0 - (delta.abs() / 0.15)) * (MOMENTUM_MAX_BONUS * 0.75)
             } else {
@@ -187,7 +203,7 @@ fn session_flow_score(
             }
         }
         SessionTrend::Recovery => {
-            // -0.5 ~ -0.1 구간에서 최고 점수
+            // -0.5 ~ -0.1 구간에서 최고 점수 (최대 4.0)
             if delta < 0.0 && delta >= -0.5 {
                 let center = -0.3;
                 let dist = (delta - center).abs();
@@ -203,21 +219,18 @@ fn session_flow_score(
 ### 2.5 `LocalFloorRecommender` 정렬에 통합
 
 `LocalFloorRecommender::recommend()`에서:
-1. 시작 시 `let recent_plays = self.rdb.get_recent_records(ctx.button_mode, 1);` 조회 (직전 1판 또는 최근 3판 평균)
-2. 직전 판의 성과율에 따라 `SessionTrend` 결정:
-   - `rate >= 99.0` $\rightarrow$ `Some(SessionTrend::Climbing)`
-   - `rate >= 97.0` $\rightarrow$ `Some(SessionTrend::Steady)`
-   - `rate > 0.0` $\rightarrow$ `Some(SessionTrend::Recovery)`
-   - 최근 플레이 없음 / 12시간 이상 경과 $\rightarrow$ `None`
+1. `now_unix` 시점에 `let recent_plays = self.rdb.get_recent_records(ctx.button_mode, 1);` 조회
+2. 직전 판으로 `let trend = recent_plays.first().and_then(|r| SessionTrend::from_recent_play(r.rate, r.updated_at, now_unix));` 판별
 3. 후보 정렬 시 복합 우선순위 점수 계산:
-   $$\text{priority} = \text{retry\_priority} + \text{top50\_boundary\_score} + \text{session\_flow\_score}$$
+   $$\text{priority} = \text{retry\_priority} + \text{top50\_boundary\_score} + \text{session\_flow\_score}(\text{cand\_floor}, \text{final\_ref\_floor}, \text{trend})$$
    - 플레이된 곡 간 정렬: `priority` 내림차순 -> `floor` 오름차순
 
 ---
 
 ## 3. 테스트 계획
 
-1. **`session_flow_score` 순수 함수 단위 테스트**:
+1. **`SessionTrend` 및 `session_flow_score` 순수 함수 단위 테스트**:
+   - 4시간 초과 시 `SessionTrend::from_recent_play`가 `None`을 반환하는 세션 만료 검증
    - `Climbing` 추세일 때 $+0.25$ 위쪽 후보 곡에 최고 보너스(~4.0) 반환 검증
    - `Steady` 추세일 때 동급 난이도($\pm 0.0$)에 안정화 보너스(~3.0) 반환 검증
    - `Recovery` 추세일 때 $-0.3$ 아래쪽 후보 곡에 회복 보너스(~4.0) 반환 검증
