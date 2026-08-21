@@ -589,13 +589,15 @@ impl RecordDB {
 
         let result = self.with_retry(|conn| {
             // 45초 이내 동일 패턴 디바운스 가드 (레벨업/언락 팝업 재진입 방지)
+            // 단, 연출 지연으로 MAX COMBO가 뒤늦게 감지되었거나 Rate가 개선된 경우 기존 행을 즉시 UPDATE한다.
             let mut check_stmt = conn.prepare_cached(
-                "SELECT 1 FROM play_events
+                "SELECT id, rate, is_max_combo FROM play_events
                  WHERE steam_id = ?1 AND song_id = ?2 AND button_mode = ?3 AND difficulty = ?4
                    AND played_at >= ?5
+                 ORDER BY played_at DESC
                  LIMIT 1",
             )?;
-            let exists = check_stmt.exists(rusqlite::params![
+            let mut rows = check_stmt.query(rusqlite::params![
                 steam_id,
                 song_id_str,
                 button_mode,
@@ -603,7 +605,28 @@ impl RecordDB {
                 debounce_window
             ])?;
 
-            if exists {
+            if let Ok(Some(row)) = rows.next() {
+                let existing_id: i64 = row.get(0)?;
+                let existing_rate: f64 = row.get(1)?;
+                let existing_mc: i32 = row.get(2)?;
+                let new_mc = if event.is_max_combo { 1 } else { 0 };
+
+                let event_rate_f64 = event.rate as f64;
+                let mc_improved = existing_mc == 0 && new_mc == 1;
+                let rate_improved = event_rate_f64 > existing_rate + 0.001;
+
+                if mc_improved || rate_improved {
+                    let final_rate = existing_rate.max(event_rate_f64);
+                    let final_mc = existing_mc.max(new_mc);
+                    let mut update_stmt = conn.prepare_cached(
+                        "UPDATE play_events
+                         SET rate = ?1, is_max_combo = ?2
+                         WHERE id = ?3",
+                    )?;
+                    update_stmt.execute(rusqlite::params![final_rate, final_mc, existing_id])?;
+                    return Ok(true);
+                }
+
                 return Ok(false);
             }
 
@@ -1325,13 +1348,36 @@ mod tests {
         };
         assert!(!db.insert_play_event(&song_select_event, 1100));
 
-        // 5. get_recent_records가 play_events에서 우선 조회하는지 검증
+        // 5. MAX COMBO 연출 지연으로 45초 내에 뒤늦게 is_max_combo = true가 들어온 경우: In-place UPDATE 성공
+        // 처음 1200초에 MC false로 들어갔다고 가정할 때, 1201초에 MC true로 오면 update 성공
+        let pre_mc_event = VerifiedPlayEvent {
+            song_id: 200,
+            mode: Mode::B4,
+            diff: Difficulty::SC,
+            rate: 98.0,
+            is_max_combo: false,
+            is_result_screen: true,
+        };
+        assert!(db.insert_play_event(&pre_mc_event, 1200));
+        let post_mc_event = VerifiedPlayEvent {
+            song_id: 200,
+            mode: Mode::B4,
+            diff: Difficulty::SC,
+            rate: 98.0,
+            is_max_combo: true,
+            is_result_screen: true,
+        };
+        assert!(db.insert_play_event(&post_mc_event, 1201)); // In-place UPDATE로 true 반환
+
+        // 6. get_recent_records가 play_events에서 최신 상태를 조회하는지 검증 (MC가 1로 갱신됨)
         let recent = db.get_recent_records("76561198000000001", Mode::B4, 10);
-        assert_eq!(recent.len(), 2);
-        assert_eq!(recent[0].updated_at, 1060);
-        assert_eq!(recent[0].rate, 99.0);
-        assert_eq!(recent[1].updated_at, 1000);
-        assert_eq!(recent[1].rate, 98.5);
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent[0].song_id, 200);
+        assert!(recent[0].is_max_combo); // MC가 true로 갱신되었음
+        assert_eq!(recent[1].song_id, 100);
+        assert_eq!(recent[1].updated_at, 1060);
+        assert_eq!(recent[2].song_id, 100);
+        assert_eq!(recent[2].updated_at, 1000);
     }
 
     /// play_events가 limit 미만일 때 records로 보충하되 중복 제거하는 fallback 검증.
