@@ -364,8 +364,144 @@ pub(crate) fn session_flow_score(
     }
 }
 
+/// Microsoft TrueSkill / TrueMatch 기반의 단일 난이도 계열 실력 정규분포 N(μ, σ²).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GaussianSkill {
+    /// 실력 중심값 (평균 Floor, 예: 11.2)
+    pub mu: f64,
+    /// 실력 분산/표준편차 (Floor 스케일, 기본 0.8 ~ 2.5)
+    pub sigma: f64,
+    /// 표본 수
+    pub sample_count: usize,
+}
+
+impl GaussianSkill {
+    pub const DEFAULT_SC: Self = Self {
+        mu: 5.0,
+        sigma: 1.5,
+        sample_count: 0,
+    };
+
+    pub const DEFAULT_PAD: Self = Self {
+        mu: 8.0,
+        sigma: 2.0,
+        sample_count: 0,
+    };
+
+    pub fn new(mu: f64, sigma: f64, sample_count: usize) -> Self {
+        Self {
+            mu: if mu.is_finite() && mu > 0.0 { mu } else { 5.0 },
+            sigma: if sigma.is_finite() {
+                sigma.clamp(0.8, 2.5)
+            } else {
+                1.5
+            },
+            sample_count,
+        }
+    }
+
+    /// 주어진 난이도(Floor)가 회복/손풀기 안전 구간에 해당하는지 확인 (Floor <= mu - 0.8 * sigma)
+    pub fn is_recovery_zone(&self, floor: f64) -> bool {
+        floor <= (self.mu - 0.8 * self.sigma)
+    }
+
+    /// 주어진 난이도(Floor)가 상위 도전 구간에 해당하는지 확인 (mu <= Floor <= mu + 1.2 * sigma)
+    pub fn is_climbing_zone(&self, floor: f64) -> bool {
+        floor >= self.mu && floor <= (self.mu + 1.2 * self.sigma)
+    }
+
+    /// 주어진 난이도(Floor)가 주력 재도전 적정 범위에 해당하는지 확인 (|Floor - mu| <= 1.0 * sigma)
+    pub fn is_core_zone(&self, floor: f64) -> bool {
+        (floor - self.mu).abs() <= 1.0 * self.sigma
+    }
+}
+
+/// 버튼 모드별 SC 및 일반(Pad) 2-Track 실력 프로필
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SkillProfile {
+    pub sc: GaussianSkill,
+    pub pad: GaussianSkill,
+}
+
+impl SkillProfile {
+    pub fn for_diff(&self, diff: Difficulty) -> &GaussianSkill {
+        if diff.is_sc() {
+            &self.sc
+        } else {
+            &self.pad
+        }
+    }
+}
+
+/// Top 50 요약 정보로부터 SC 및 일반(Pad) 2-Track 실력 프로필을 산출한다.
+/// - 샘플이 부족할 경우 Cross-Track Fallback을 통해 상호 보완한다.
+pub(crate) fn derive_skill_profile<F>(
+    top50: &crate::store::record_db::VArchiveTop50Summary,
+    find_floor: &F,
+    button_mode: overmax_core::Mode,
+) -> SkillProfile
+where
+    F: Fn(i32, overmax_core::Mode, Difficulty) -> f64,
+{
+    let mut sc_floors: Vec<f64> = Vec::new();
+    let mut pad_floors: Vec<f64> = Vec::new();
+
+    for &(sid, m, d) in top50.rank_map.keys() {
+        if m == button_mode {
+            let f = find_floor(sid, m, d);
+            if f > 0.0 {
+                if d.is_sc() {
+                    sc_floors.push(f);
+                } else {
+                    pad_floors.push(f);
+                }
+            }
+        }
+    }
+
+    let compute_gaussian = |floors: &[f64], default_skill: GaussianSkill| -> GaussianSkill {
+        if floors.len() < 3 {
+            if floors.is_empty() {
+                return default_skill;
+            }
+            let mean = floors.iter().sum::<f64>() / floors.len() as f64;
+            return GaussianSkill::new(mean, default_skill.sigma, floors.len());
+        }
+
+        let mean = floors.iter().sum::<f64>() / floors.len() as f64;
+        let variance = floors
+            .iter()
+            .map(|&f| {
+                let diff = f - mean;
+                diff * diff
+            })
+            .sum::<f64>()
+            / floors.len() as f64;
+        let std_dev = variance.sqrt();
+        GaussianSkill::new(mean, std_dev, floors.len())
+    };
+
+    let mut sc_skill = compute_gaussian(&sc_floors, GaussianSkill::DEFAULT_SC);
+    let mut pad_skill = compute_gaussian(&pad_floors, GaussianSkill::DEFAULT_PAD);
+
+    // Cross-Track Fallback: 한쪽 트랙의 기록이 전무할 때 상대 트랙으로부터 유연하게 실력대 추정
+    if sc_skill.sample_count > 0 && pad_skill.sample_count == 0 {
+        let pad_mu = (sc_skill.mu + 1.0).clamp(1.0, 15.0);
+        pad_skill = GaussianSkill::new(pad_mu, sc_skill.sigma, sc_skill.sample_count);
+    } else if pad_skill.sample_count > 0 && sc_skill.sample_count == 0 {
+        let sc_mu = (pad_skill.mu - 1.0).clamp(1.0, 15.0);
+        sc_skill = GaussianSkill::new(sc_mu, pad_skill.sigma, pad_skill.sample_count);
+    }
+
+    SkillProfile {
+        sc: sc_skill,
+        pad: pad_skill,
+    }
+}
+
 /// V-Archive Top 50 곡들 중 현재 난이도 계열(SC vs 일반)에 해당하는 패턴들의 중앙값(Median Floor)을 기본 실력대 앵커로 산출한다.
 /// 최상위 한계곡(Peak)에 편향되지 않고 플레이어의 주력 난이도 허리를 가장 정직하게 대변한다.
+#[cfg(test)]
 pub(crate) fn derive_top50_base_floor<F>(
     top50: &crate::store::record_db::VArchiveTop50Summary,
     find_floor: &F,
@@ -399,17 +535,18 @@ where
     Some(median)
 }
 
-/// Top 50 기반 장기 실력대 및 최근 세션 모멘텀을 결합하여 인게임 공식 레벨 라벨(예: "SC 13", "12")을 도출한다.
+/// SkillProfile 기반 장기 실력대 및 최근 세션 모멘텀을 결합하여 인게임 공식 레벨 라벨(예: "SC 13", "12")을 도출한다.
 /// - 선곡창 커서(현재 곡)에 반응하지 않고 플레이어의 실력/세션 상태만으로 결정된다.
-/// - Top 50 실력대를 앵커로 유지하여, 손풀기 곡(SC 5 등)을 플레이하더라도 권장 레벨이 급락하지 않는다.
+/// - SC 및 일반(Pad) 2-Track 실력 프로필을 기반으로 하여, 패턴 변경 시에도 일관된 기준을 유지한다.
 /// - 세션 주력곡 플레이가 누적됨에 따라 세션 데이터를 점진적으로(스근하게) 블렌딩한다.
 pub(crate) fn derive_recommended_level(
     trend_state: Option<&SessionTrendState>,
     session_plays: &[SessionPlayInfo],
     current_diff: Difficulty,
-    top50_base_floor: Option<f64>,
+    skill_profile: &SkillProfile,
 ) -> Option<String> {
     let is_sc = current_diff.is_sc();
+    let skill = skill_profile.for_diff(current_diff);
 
     // 1. 현재 탭 난이도 계열(SC vs 일반)과 일치하는 유효 세션 플레이들
     let same_diff_plays: Vec<&SessionPlayInfo> = session_plays
@@ -423,16 +560,13 @@ pub(crate) fn derive_recommended_level(
         .map(|p| p.floor)
         .fold(0.0f64, |acc, f| acc.max(f));
 
-    // 3. 글로벌 앵커 난이도 (Top 50 주력 실력대 우선, 없으면 세션 최고 난이도)
-    let anchor_floor = match top50_base_floor {
-        Some(t_floor) => t_floor,
-        None => {
-            if session_peak > 0.0 {
-                session_peak
-            } else {
-                return None;
-            }
-        }
+    // 3. 글로벌 앵커 난이도 (스킬 프로필의 표본이 있으면 mu 우선, 없으면 세션 최고 난이도)
+    let anchor_floor = if skill.sample_count > 0 {
+        skill.mu
+    } else if session_peak > 0.0 {
+        session_peak
+    } else {
+        return None;
     };
 
     // 4. 세션 플레이 분석 및 손풀기 가드 & 점진적 블렌딩
@@ -446,7 +580,7 @@ pub(crate) fn derive_recommended_level(
 
     let base_floor = if core_session_plays.is_empty() {
         // 세션에 주력 플레이가 아직 없는 경우 (손풀기만 쳤거나 0판):
-        // Top 50 앵커를 그대로 유지하여 저난도로 곤두박질치는 것을 방어!
+        // 앵커를 그대로 유지하여 저난도로 곤두박질치는 것을 방어!
         anchor_floor
     } else {
         // 세션 주력곡들의 중앙값과 직전 주력곡의 조화로 세션 대표 난이도 산출
@@ -457,12 +591,11 @@ pub(crate) fn derive_recommended_level(
         let session_floor = (session_median + last_core_floor) / 2.0;
 
         let core_count = core_session_plays.len();
-
-        if let Some(t_floor) = top50_base_floor {
+        if skill.sample_count > 0 {
             // 주력 플레이 수에 따라 세션 데이터를 스근하게 블렌딩
             // 1판: 25% 세션, 2판: 50% 세션, 3판: 75% 세션, 4판 이상: 100% 세션
             let session_weight = (core_count as f64 / 4.0).min(1.0);
-            (1.0 - session_weight) * t_floor + session_weight * session_floor
+            (1.0 - session_weight) * anchor_floor + session_weight * session_floor
         } else {
             session_floor
         }
@@ -486,21 +619,20 @@ pub(crate) fn derive_recommended_level(
 }
 
 /// 후보 곡의 각 레인별 점수를 바탕으로 가장 지배적인 추천 사유를 도출한다.
+/// - 실력 분포(GaussianSkill)를 기반으로 도메인 가드를 적용하여 비정상적인 뱃지(고난도 REST 등) 부여를 원천 차단한다.
 pub(crate) fn derive_recommend_reason(
     retry_score: f64,
     top50_score: f64,
     flow_score: f64,
     varchive_rank: Option<usize>,
     trend: Option<SessionTrend>,
+    cand_floor: f64,
+    skill: Option<&GaussianSkill>,
 ) -> Option<RecommendReason> {
     const REASON_THRESHOLD: f64 = 1.5;
 
-    let max_score = retry_score.max(top50_score).max(flow_score);
-    if max_score < REASON_THRESHOLD {
-        return None;
-    }
-
-    if (top50_score - max_score).abs() < 0.001 && top50_score >= REASON_THRESHOLD {
+    // 1. Top-50 수성 / 돌파 (레인 A) - 절대적 1순위
+    if top50_score >= REASON_THRESHOLD && top50_score >= retry_score && top50_score >= flow_score {
         if let Some(rank) = varchive_rank {
             if (41..=50).contains(&rank) {
                 return Some(RecommendReason {
@@ -517,27 +649,40 @@ pub(crate) fn derive_recommend_reason(
         });
     }
 
-    if (flow_score - max_score).abs() < 0.001 && flow_score >= REASON_THRESHOLD {
+    // 2. 세션 모멘텀 플로우 (레인 D) - 실력 분포 도메인 가드 적용
+    if flow_score >= REASON_THRESHOLD && flow_score >= retry_score {
         match trend {
             Some(SessionTrend::Climbing) => {
-                return Some(RecommendReason {
-                    kind: RecommendReasonKind::Climbing,
-                    detail: "세션 상승 모멘텀 상위 난이도 도전".to_string(),
-                    rank: None,
-                });
+                // Climbing zone (mu <= Floor <= mu + 1.2*sigma) 가드
+                let is_valid =
+                    skill.is_none_or(|s| s.is_climbing_zone(cand_floor) || cand_floor >= s.mu);
+                if is_valid {
+                    return Some(RecommendReason {
+                        kind: RecommendReasonKind::Climbing,
+                        detail: "세션 상승 모멘텀 상위 난이도 도전".to_string(),
+                        rank: None,
+                    });
+                }
             }
             Some(SessionTrend::Recovery) => {
-                return Some(RecommendReason {
-                    kind: RecommendReasonKind::Recovery,
-                    detail: "세션 회복/손풀기 적정 난이도".to_string(),
-                    rank: None,
-                });
+                // Recovery zone (Floor <= mu - 0.8*sigma) 필수 가드!
+                // 고난도(Floor > mu - 0.8*sigma)에는 절대로 REST 뱃지를 달지 않는다!
+                let is_valid = skill.is_none_or(|s| s.is_recovery_zone(cand_floor));
+                if is_valid {
+                    return Some(RecommendReason {
+                        kind: RecommendReasonKind::Recovery,
+                        detail: "세션 회복/손풀기 적정 난이도".to_string(),
+                        rank: None,
+                    });
+                }
+                // 만약 저난도가 아니라면 Recovery 뱃지 대신 아래 Retry로 폴백 시도
             }
             _ => {}
         }
     }
 
-    if (retry_score - max_score).abs() < 0.001 && retry_score >= REASON_THRESHOLD {
+    // 3. 방치된 기록 재도전 (레인 B)
+    if retry_score >= REASON_THRESHOLD {
         return Some(RecommendReason {
             kind: RecommendReasonKind::Retry,
             detail: "방치된 기록 경신 재도전 추천".to_string(),

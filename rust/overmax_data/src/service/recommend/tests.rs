@@ -6,8 +6,9 @@ use overmax_core::{Difficulty, Mode};
 use crate::community::client::VArchiveDB;
 use crate::service::recommend::scoring::{
     calculate_performance_rating, derive_recommend_reason, derive_recommended_level,
-    derive_top50_base_floor, retry_priority, session_flow_score, top50_boundary_score,
-    SessionPlayInfo, SessionTrend, SessionTrendState,
+    derive_skill_profile, derive_top50_base_floor, retry_priority, session_flow_score,
+    top50_boundary_score, GaussianSkill, SessionPlayInfo, SessionTrend, SessionTrendState,
+    SkillProfile,
 };
 use crate::service::recommend::{
     CompositeRecommender, LocalFloorRecommender, ProviderCacheReader, RecommendContext,
@@ -258,10 +259,18 @@ fn test_smart_recommend_false_sorts_by_classic_rate_and_omits_reason() {
 #[test]
 fn test_derive_recommended_level() {
     let now = 100000;
+    let profile_15 = SkillProfile {
+        sc: GaussianSkill::new(14.8, 1.0, 50),
+        pad: GaussianSkill::new(15.0, 1.0, 0),
+    };
+    let empty_profile = SkillProfile {
+        sc: GaussianSkill::new(0.0, 1.5, 0),
+        pad: GaussianSkill::new(0.0, 2.0, 0),
+    };
 
     // 1. Top 50 기반 초기 권장 레벨 (세션 0판): SC 14.8 -> SC 15
     assert_eq!(
-        derive_recommended_level(None, &[], Difficulty::SC, Some(14.8)),
+        derive_recommended_level(None, &[], Difficulty::SC, &profile_15),
         Some("SC 15".to_string())
     );
 
@@ -285,7 +294,7 @@ fn test_derive_recommended_level() {
         Some(&warmup_single_state),
         &warmup_single_play,
         Difficulty::SC,
-        Some(14.8),
+        &profile_15,
     );
     assert_eq!(
         rec_level_warmup_guard,
@@ -319,7 +328,12 @@ fn test_derive_recommended_level() {
         last_diff: Difficulty::SC,
     };
     assert_eq!(
-        derive_recommended_level(Some(&mixed_state), &mixed_plays, Difficulty::SC, Some(14.8)),
+        derive_recommended_level(
+            Some(&mixed_state),
+            &mixed_plays,
+            Difficulty::SC,
+            &profile_15
+        ),
         Some("SC 15".to_string())
     );
 
@@ -369,14 +383,14 @@ fn test_derive_recommended_level() {
             Some(&climbing_state),
             &session_4_plays,
             Difficulty::SC,
-            Some(14.8)
+            &profile_15
         ),
         Some("SC 14".to_string()) // 13.8 + 0.3 = 14.1 -> SC 14
     );
 
     // 5. Top 50 기록이 없는 경우
     assert_eq!(
-        derive_recommended_level(None, &[], Difficulty::SC, None),
+        derive_recommended_level(None, &[], Difficulty::SC, &empty_profile),
         None
     );
 
@@ -389,7 +403,7 @@ fn test_derive_recommended_level() {
         updated_at: now - 100,
     }];
     assert_eq!(
-        derive_recommended_level(None, &normal_play, Difficulty::MX, None),
+        derive_recommended_level(None, &normal_play, Difficulty::MX, &empty_profile),
         Some("11".to_string())
     );
 }
@@ -567,70 +581,177 @@ fn test_session_flow_score_and_timeout() {
 
 #[test]
 fn test_recommend_reason_multi_signal_convergence() {
-    let r_attack = derive_recommend_reason(1.0, 5.5, 2.0, None, Some(SessionTrend::Climbing));
+    let skill = GaussianSkill::new(12.0, 1.0, 50);
+
+    let r_attack = derive_recommend_reason(
+        1.0,
+        5.5,
+        2.0,
+        None,
+        Some(SessionTrend::Climbing),
+        12.5,
+        Some(&skill),
+    );
     assert_eq!(
         r_attack.map(|r| r.kind),
         Some(RecommendReasonKind::Top50Attack)
     );
 
-    let r_defend = derive_recommend_reason(2.0, 4.5, 3.0, Some(45), Some(SessionTrend::Climbing));
+    let r_defend = derive_recommend_reason(
+        2.0,
+        4.5,
+        3.0,
+        Some(45),
+        Some(SessionTrend::Climbing),
+        12.5,
+        Some(&skill),
+    );
     assert_eq!(
         r_defend.map(|r| r.kind),
         Some(RecommendReasonKind::Top50Defend)
     );
 
-    let r_retry = derive_recommend_reason(8.5, 0.0, 2.0, None, Some(SessionTrend::Steady));
+    let r_retry = derive_recommend_reason(
+        8.5,
+        0.0,
+        2.0,
+        None,
+        Some(SessionTrend::Steady),
+        12.0,
+        Some(&skill),
+    );
     assert_eq!(r_retry.map(|r| r.kind), Some(RecommendReasonKind::Retry));
 
-    let r_climb = derive_recommend_reason(0.5, 0.0, 4.0, None, Some(SessionTrend::Climbing));
+    let r_climb = derive_recommend_reason(
+        0.5,
+        0.0,
+        4.0,
+        None,
+        Some(SessionTrend::Climbing),
+        12.5,
+        Some(&skill),
+    );
     assert_eq!(r_climb.map(|r| r.kind), Some(RecommendReasonKind::Climbing));
 
-    let r_recovery = derive_recommend_reason(0.5, 0.0, 4.0, None, Some(SessionTrend::Recovery));
+    // Recovery zone (10.0 <= 12.0 - 0.8*1.0 = 11.2)
+    let r_recovery = derive_recommend_reason(
+        0.5,
+        0.0,
+        4.0,
+        None,
+        Some(SessionTrend::Recovery),
+        10.0,
+        Some(&skill),
+    );
     assert_eq!(
         r_recovery.map(|r| r.kind),
         Some(RecommendReasonKind::Recovery)
     );
 
-    let r_none = derive_recommend_reason(0.2, 0.0, 0.5, None, Some(SessionTrend::Steady));
+    let r_none = derive_recommend_reason(
+        0.2,
+        0.0,
+        0.5,
+        None,
+        Some(SessionTrend::Steady),
+        12.0,
+        Some(&skill),
+    );
     assert_eq!(r_none, None);
 }
 
 #[test]
 fn test_derive_recommend_reason() {
-    let top_attack_reason = derive_recommend_reason(0.0, 5.0, 0.0, None, None);
+    let skill = GaussianSkill::new(12.0, 1.0, 50);
+
+    let top_attack_reason = derive_recommend_reason(0.0, 5.0, 0.0, None, None, 12.0, Some(&skill));
     assert_eq!(
         top_attack_reason.as_ref().map(|r| r.kind),
         Some(RecommendReasonKind::Top50Attack)
     );
 
-    let top_defend_reason = derive_recommend_reason(0.0, 4.0, 0.0, Some(45), None);
+    let top_defend_reason =
+        derive_recommend_reason(0.0, 4.0, 0.0, Some(45), None, 12.0, Some(&skill));
     assert_eq!(
         top_defend_reason.as_ref().map(|r| r.kind),
         Some(RecommendReasonKind::Top50Defend)
     );
 
-    let climbing_reason =
-        derive_recommend_reason(0.0, 0.0, 3.5, None, Some(SessionTrend::Climbing));
+    let climbing_reason = derive_recommend_reason(
+        0.0,
+        0.0,
+        3.5,
+        None,
+        Some(SessionTrend::Climbing),
+        12.5,
+        Some(&skill),
+    );
     assert_eq!(
         climbing_reason.as_ref().map(|r| r.kind),
         Some(RecommendReasonKind::Climbing)
     );
 
-    let recovery_reason =
-        derive_recommend_reason(0.0, 0.0, 3.5, None, Some(SessionTrend::Recovery));
+    // Recovery on low floor (10.0) -> Recovery reason
+    let recovery_reason = derive_recommend_reason(
+        0.0,
+        0.0,
+        3.5,
+        None,
+        Some(SessionTrend::Recovery),
+        10.0,
+        Some(&skill),
+    );
     assert_eq!(
         recovery_reason.as_ref().map(|r| r.kind),
         Some(RecommendReasonKind::Recovery)
     );
 
-    let retry_reason = derive_recommend_reason(5.0, 0.0, 0.0, None, None);
+    let retry_reason = derive_recommend_reason(5.0, 0.0, 0.0, None, None, 12.0, Some(&skill));
     assert_eq!(
         retry_reason.as_ref().map(|r| r.kind),
         Some(RecommendReasonKind::Retry)
     );
 
-    let low_score_reason = derive_recommend_reason(1.0, 1.2, 0.5, None, None);
+    let low_score_reason = derive_recommend_reason(1.0, 1.2, 0.5, None, None, 12.0, Some(&skill));
     assert_eq!(low_score_reason, None);
+}
+
+#[test]
+fn test_recovery_reason_gating_blocks_high_floor_rest_badge() {
+    // 플레이어 스킬: mu = 12.0, sigma = 1.0 (Recovery zone: Floor <= 11.2)
+    let skill = GaussianSkill::new(12.0, 1.0, 50);
+
+    // [버그 제보 시나리오]: 세션 트렌드가 Recovery일 때, 고난도 곡(Floor 14.0)을 조회하는 상황
+    // 14.0층은 고난도이므로 flow_score가 아무리 높아도 REST 뱃지가 발동되면 안 됨!
+    let high_floor_reason_no_retry = derive_recommend_reason(
+        0.0,                          // retry_score
+        0.0,                          // top50_score
+        4.0,                          // flow_score (높음)
+        None,                         // rank
+        Some(SessionTrend::Recovery), // trend = Recovery
+        14.0,                         // cand_floor (고난도!)
+        Some(&skill),
+    );
+    assert_eq!(
+        high_floor_reason_no_retry, None,
+        "High floor (14.0) MUST NOT receive REST badge even when session trend is Recovery!"
+    );
+
+    // 만약 고난도 곡에 과거 미흡 기록이 있어 retry_score가 높다면, REST 대신 TRY로 안전하게 전환되어야 함
+    let high_floor_reason_with_retry = derive_recommend_reason(
+        3.5,                          // retry_score (충분함)
+        0.0,                          // top50_score
+        4.0,                          // flow_score
+        None,                         // rank
+        Some(SessionTrend::Recovery), // trend = Recovery
+        14.0,                         // cand_floor
+        Some(&skill),
+    );
+    assert_eq!(
+        high_floor_reason_with_retry.map(|r| r.kind),
+        Some(RecommendReasonKind::Retry),
+        "High floor during Recovery should gracefully fallback to Retry reason if retry_score is eligible"
+    );
 }
 
 #[test]
@@ -1040,4 +1161,497 @@ fn test_candidate_ranking_integration_multi_signal_hierarchy() {
 
     assert_eq!(entries[6].song_id, 5);
     assert_eq!(entries[6].reason, None);
+}
+
+#[test]
+fn test_gaussian_skill_zones() {
+    let skill = GaussianSkill::new(12.0, 1.0, 50);
+
+    // mu = 12.0, sigma = 1.0
+    // Recovery: Floor <= 12.0 - 0.8*1.0 = 11.2
+    assert!(skill.is_recovery_zone(11.2));
+    assert!(skill.is_recovery_zone(10.0));
+    assert!(!skill.is_recovery_zone(11.3));
+    assert!(!skill.is_recovery_zone(14.0)); // 고난도는 절대 recovery 아님!
+
+    // Climbing: 12.0 <= Floor <= 12.0 + 1.2*1.0 = 13.2
+    assert!(skill.is_climbing_zone(12.0));
+    assert!(skill.is_climbing_zone(12.5));
+    assert!(skill.is_climbing_zone(13.2));
+    assert!(!skill.is_climbing_zone(11.9));
+    assert!(!skill.is_climbing_zone(13.5));
+
+    // Core: |Floor - 12.0| <= 1.0 -> 11.0 ~ 13.0
+    assert!(skill.is_core_zone(11.0));
+    assert!(skill.is_core_zone(12.0));
+    assert!(skill.is_core_zone(13.0));
+    assert!(!skill.is_core_zone(10.9));
+    assert!(!skill.is_core_zone(13.1));
+}
+
+#[test]
+fn test_skill_profile_estimation_and_cross_track_fallback() {
+    use std::collections::HashMap;
+
+    let mut rank_map = HashMap::new();
+    // 4B SC 5곡 (Floor: 12.0, 12.2, 12.4, 12.6, 12.8) -> Mean = 12.4
+    for i in 1..=5 {
+        rank_map.insert((i, Mode::B4, Difficulty::SC), i as usize);
+    }
+
+    let top50 = crate::store::record_db::VArchiveTop50Summary {
+        total_recorded_count: 5,
+        cutoff_rating: 175.0,
+        rank_map,
+    };
+
+    let find_floor = |sid: i32, _m: Mode, _d: Difficulty| -> f64 {
+        match sid {
+            1 => 12.0,
+            2 => 12.2,
+            3 => 12.4,
+            4 => 12.6,
+            5 => 12.8,
+            _ => 0.0,
+        }
+    };
+
+    let profile = derive_skill_profile(&top50, &find_floor, Mode::B4);
+
+    // SC Profile
+    assert_eq!(profile.sc.sample_count, 5);
+    assert!((profile.sc.mu - 12.4).abs() < 0.001);
+    assert!(profile.sc.sigma >= 0.8 && profile.sc.sigma <= 2.5);
+
+    // Pad Profile (Cross-track fallback from SC mu 12.4 -> 13.4 clamped, inheriting SC sample strength)
+    assert_eq!(profile.pad.sample_count, 5);
+    assert!((profile.pad.mu - 13.4).abs() < 0.001);
+}
+
+#[test]
+fn test_8b_end_of_moonlight_scenario_gating_and_footer() {
+    let steam_id = "test_user_8b";
+    let now = 1787325000i64;
+
+    let mut vdb = VArchiveDB::new();
+    let make_8b_song = |id: i32, name: &str, floor_str: &str, level: i32| {
+        serde_json::json!({
+            "name": name,
+            "title": id.to_string(),
+            "composer": "Artist",
+            "dlcCode": "RV",
+            "patterns": {
+                "8B": {
+                    "SC": {
+                        "level": level,
+                        "floorName": floor_str
+                    }
+                }
+            }
+        })
+    };
+
+    vdb.songs = vec![
+        serde_json::from_value(make_8b_song(115, "End of the Moonlight", "9.3", 9)).unwrap(),
+        serde_json::from_value(make_8b_song(118, "Extreme Z4", "11.2", 11)).unwrap(),
+        serde_json::from_value(make_8b_song(119, "FEAR", "11.1", 11)).unwrap(),
+        serde_json::from_value(make_8b_song(156, "Ya! Party!", "12.2", 12)).unwrap(),
+        serde_json::from_value(make_8b_song(136, "NB RANGER", "12.1", 12)).unwrap(),
+        serde_json::from_value(make_8b_song(10, "Easy Warmup", "5.0", 5)).unwrap(),
+    ];
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("rec_8b_scenario.db");
+    let mut db = crate::store::record_db::RecordDB::new(&db_path, Some(steam_id));
+    assert!(db.initialize());
+
+    let conn = db.open_conn().unwrap();
+
+    // Top 50에 118(11.2), 119(11.1), 156(12.2), 136(12.1) 등이 등록됨 -> 실력 mu ~ 11.6
+    let top_records = [(118, 172.0), (119, 174.0), (156, 178.0), (136, 176.0)];
+    for (sid, rating) in top_records {
+        let json = serde_json::json!({
+            "score": 990000,
+            "maxCombo": true,
+            "updatedAt": "2026-08-01T00:00:00.000Z",
+            "rating": rating,
+        });
+        conn.execute(
+            "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![steam_id, sid.to_string(), "8B", "SC", json.to_string()],
+        )
+        .unwrap();
+    }
+
+    // 최근 플레이 세션:
+    // 1. FEAR (11.1층) 99.73% MC (Rating ~147.0)
+    // 2. End of Moonlight (9.3층) 99.57% No MC (Rating ~121.3) -> 상대 성과 급락으로 Recovery 트렌드 유발!
+    let session_events = [
+        (119, "8B", "SC", 99.73, 1, now - 300),
+        (115, "8B", "SC", 99.57, 0, now - 100),
+    ];
+    for (sid, mode, diff, rate, mc, ts) in session_events {
+        conn.execute(
+            "INSERT INTO play_events (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, played_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![steam_id, sid.to_string(), mode, diff, rate, mc, ts],
+        ).unwrap();
+    }
+
+    // 과거 고난도 곡 기록들 (Ya! Party 99.01%)
+    conn.execute(
+        "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+         VALUES (?1, '156', '8B', 'SC', 99.01, 0, ?2)",
+        rusqlite::params![steam_id, now - 50],
+    ).unwrap();
+
+    drop(conn);
+
+    let rdb = Arc::new(RecordManager::new(Arc::new(db)));
+    rdb.refresh();
+    let recommender = LocalFloorRecommender::new(Arc::new(vdb), rdb);
+
+    // [검증 1]: 사용자가 고난도 곡 (Ya! Party! 8B SC 12.2) 위에 커서를 두고 추천을 조회할 때
+    let ctx_high = RecommendContext {
+        song_id: 156,
+        button_mode: Mode::B8,
+        difficulty: Difficulty::SC,
+        floor_range: 0.5,
+        max_results: 10,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let bundle_high = recommender.recommend(&ctx_high);
+    for entry in &bundle_high.entries {
+        if let Some(reason) = &entry.reason {
+            assert_ne!(
+                reason.kind,
+                RecommendReasonKind::Recovery,
+                "Song {} (Floor {:?}) MUST NOT have Recovery(REST) badge on high level screen!",
+                entry.song_id,
+                entry.floor_name
+            );
+        }
+    }
+
+    // [검증 2]: Footer 추천 레벨은 커서 위치에 무관하게 SC 11 또는 SC 12로 일관되게 표시
+    let footer_high = recommender.floor_summary(&ctx_high);
+    assert_eq!(
+        footer_high.recommended_level,
+        Some("SC 11".to_string()).or(Some("SC 12".to_string()))
+    );
+
+    // [검증 3]: 저난도 손풀기 곡 (Floor 5.0)을 볼 때도 Footer 추천 레벨은 동일하게 유지
+    let ctx_low = RecommendContext {
+        song_id: 10,
+        button_mode: Mode::B8,
+        difficulty: Difficulty::SC,
+        floor_range: 0.5,
+        max_results: 10,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer_low = recommender.floor_summary(&ctx_low);
+    assert_eq!(
+        footer_low.recommended_level, footer_high.recommended_level,
+        "Footer level MUST NOT change between low and high cursor selections!"
+    );
+}
+
+#[test]
+fn test_pad_patterns_maintain_consistent_footer_level_across_nm_hd_mx() {
+    let steam_id = "test_user_pad";
+    let _now = 1787325000i64;
+
+    let mut vdb = VArchiveDB::new();
+    // Song 1: NM 4 (공식만), HD 8 (공식만), MX 12 (공식만), SC 12 (12.2)
+    // Song 2: NM 5 (공식만), HD 9 (비공식 3.2), MX 13 (비공식 5.1), SC 11 (11.1)
+    let make_full_song = |id: i32, name: &str| {
+        serde_json::json!({
+            "name": name,
+            "title": id.to_string(),
+            "composer": "Artist",
+            "dlcCode": "RV",
+            "patterns": {
+                "4B": {
+                    "NM": { "level": 4 },
+                    "HD": { "level": if id == 1 { 8 } else { 9 }, "floorName": if id == 2 { Some("3.2") } else { None } },
+                    "MX": { "level": if id == 1 { 12 } else { 13 }, "floorName": if id == 2 { Some("5.1") } else { None } },
+                    "SC": { "level": if id == 1 { 12 } else { 11 }, "floorName": if id == 1 { "12.2" } else { "11.1" } }
+                }
+            }
+        })
+    };
+
+    vdb.songs = vec![
+        serde_json::from_value(make_full_song(1, "Song 1")).unwrap(),
+        serde_json::from_value(make_full_song(2, "Song 2")).unwrap(),
+    ];
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("rec_pad_consistency.db");
+    let mut db = crate::store::record_db::RecordDB::new(&db_path, Some(steam_id));
+    assert!(db.initialize());
+
+    let conn = db.open_conn().unwrap();
+    // Top 50에 SC 12.2 기록 (Rating 175.0) -> SC 실력 mu ~ 12.2, Pad 실력 mu ~ 13.2
+    let json = serde_json::json!({
+        "score": 995000,
+        "maxCombo": true,
+        "updatedAt": "2026-08-01T00:00:00.000Z",
+        "rating": 175.0,
+    });
+    conn.execute(
+        "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+         VALUES (?1, '1', '4B', 'SC', ?2)",
+        rusqlite::params![steam_id, json.to_string()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let rdb = Arc::new(RecordManager::new(Arc::new(db)));
+    rdb.refresh();
+    let recommender = LocalFloorRecommender::new(Arc::new(vdb), rdb);
+
+    // 1. SC 커서 조회 -> "SC 12"
+    let ctx_sc1 = RecommendContext {
+        song_id: 1,
+        button_mode: Mode::B4,
+        difficulty: Difficulty::SC,
+        floor_range: 0.5,
+        max_results: 6,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer_sc1 = recommender.floor_summary(&ctx_sc1);
+    assert_eq!(footer_sc1.recommended_level, Some("SC 12".to_string()));
+
+    // 2. 패드 패턴 NM 조회 (Song 1 NM - 공식 레벨 4) -> Pad 추천 "13"
+    let ctx_nm = RecommendContext {
+        song_id: 1,
+        button_mode: Mode::B4,
+        difficulty: Difficulty::NM,
+        floor_range: 0.5,
+        max_results: 6,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer_nm = recommender.floor_summary(&ctx_nm);
+
+    // 3. 패드 패턴 HD 조회 (Song 2 HD - 비공식 floor 3.2 존재) -> Pad 추천 동일하게 "13" 유지!
+    let ctx_hd = RecommendContext {
+        song_id: 2,
+        button_mode: Mode::B4,
+        difficulty: Difficulty::HD,
+        floor_range: 0.5,
+        max_results: 6,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer_hd = recommender.floor_summary(&ctx_hd);
+
+    // 4. 패드 패턴 MX 조회 (Song 2 MX - 비공식 floor 5.1 존재) -> Pad 추천 동일하게 "13" 유지!
+    let ctx_mx = RecommendContext {
+        song_id: 2,
+        button_mode: Mode::B4,
+        difficulty: Difficulty::MX,
+        floor_range: 0.5,
+        max_results: 6,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer_mx = recommender.floor_summary(&ctx_mx);
+
+    // [핵심 검증]: NM, HD, MX 어느 패턴을 가리키든 Pad 추천 레벨은 100% 동일하게 일관성 유지!
+    assert_eq!(
+        footer_nm.recommended_level,
+        Some("13".to_string()),
+        "NM cursor recommendation"
+    );
+    assert_eq!(
+        footer_hd.recommended_level, footer_nm.recommended_level,
+        "HD cursor MUST match NM recommendation"
+    );
+    assert_eq!(
+        footer_mx.recommended_level, footer_nm.recommended_level,
+        "MX cursor MUST match NM recommendation"
+    );
+}
+
+#[test]
+fn test_local_top50_fallback_when_varchive_unconnected() {
+    let steam_id = "test_user_offline";
+    let now = 1787325000i64;
+
+    let mut vdb = VArchiveDB::new();
+    let make_song = |id: i32, name: &str, floor_str: &str, level: i32| {
+        serde_json::json!({
+            "name": name,
+            "title": id.to_string(),
+            "composer": "Artist",
+            "dlcCode": "RV",
+            "patterns": {
+                "4B": {
+                    "SC": {
+                        "level": level,
+                        "floorName": floor_str
+                    }
+                }
+            }
+        })
+    };
+
+    vdb.songs = vec![
+        serde_json::from_value(make_song(1, "Song 1 (SC 12.2)", "12.2", 12)).unwrap(),
+        serde_json::from_value(make_song(2, "Song 2 (SC 12.0)", "12.0", 12)).unwrap(),
+        serde_json::from_value(make_song(3, "Song 3 (SC 11.5)", "11.5", 11)).unwrap(),
+    ];
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("rec_local_top50_fallback.db");
+    let mut db = crate::store::record_db::RecordDB::new(&db_path, Some(steam_id));
+    assert!(db.initialize());
+
+    let conn = db.open_conn().unwrap();
+    // V-Archive 기록은 0건인 상태에서 로컬 `records` 테이블에만 플레이 기록 저장
+    let records = [
+        (1, "4B", "SC", 99.60, now - 5000), // Rating ~ 176.4
+        (2, "4B", "SC", 99.40, now - 4000), // Rating ~ 172.0
+        (3, "4B", "SC", 99.10, now - 3000), // Rating ~ 164.5
+    ];
+    for (sid, mode, diff, rate, ts) in records {
+        conn.execute(
+            "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)",
+            rusqlite::params![steam_id, sid.to_string(), mode, diff, rate, ts],
+        ).unwrap();
+    }
+    drop(conn);
+
+    let rdb = Arc::new(RecordManager::new(Arc::new(db)));
+    rdb.refresh();
+
+    // 1. RecordManager의 get_top50_summary_with_fallback 검증
+    let find_floor = |sid: i32, _m: Mode, _d: Difficulty| match sid {
+        1 => 12.2,
+        2 => 12.0,
+        3 => 11.5,
+        _ => 0.0,
+    };
+    let summary = rdb.get_top50_summary_with_fallback(Mode::B4, find_floor);
+    assert_eq!(summary.total_recorded_count, 3);
+    assert_eq!(
+        summary.rank_map.get(&(1, Mode::B4, Difficulty::SC)),
+        Some(&1)
+    );
+    assert_eq!(
+        summary.rank_map.get(&(2, Mode::B4, Difficulty::SC)),
+        Some(&2)
+    );
+    assert_eq!(
+        summary.rank_map.get(&(3, Mode::B4, Difficulty::SC)),
+        Some(&3)
+    );
+    assert!(summary.cutoff_rating > 110.0);
+
+    // 2. LocalFloorRecommender: V-Archive 연동 및 당일 세션 플레이(play_events)가 0건이어도 즉시 추천 레벨 산출!
+    let recommender = LocalFloorRecommender::new(Arc::new(vdb), rdb);
+    let ctx = RecommendContext {
+        song_id: 1,
+        button_mode: Mode::B4,
+        difficulty: Difficulty::SC,
+        floor_range: 0.5,
+        max_results: 6,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer = recommender.floor_summary(&ctx);
+    assert_eq!(
+        footer.recommended_level,
+        Some("SC 12".to_string()),
+        "Offline/Unlinked user MUST immediately get recommended level from local records Top-50!"
+    );
+}
+
+#[test]
+fn test_varchive_records_take_precedence_over_local_records_in_top50() {
+    let steam_id = "test_user_precedence";
+    let now = 1787325000i64;
+
+    let mut vdb = VArchiveDB::new();
+    let make_song = |id: i32, name: &str, floor_str: &str, level: i32| {
+        serde_json::json!({
+            "name": name,
+            "title": id.to_string(),
+            "composer": "Artist",
+            "dlcCode": "RV",
+            "patterns": {
+                "4B": {
+                    "SC": {
+                        "level": level,
+                        "floorName": floor_str
+                    }
+                }
+            }
+        })
+    };
+
+    vdb.songs = vec![
+        serde_json::from_value(make_song(1, "Song 1", "12.2", 12)).unwrap(),
+        serde_json::from_value(make_song(2, "Song 2", "15.0", 15)).unwrap(),
+    ];
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("rec_top50_precedence.db");
+    let mut db = crate::store::record_db::RecordDB::new(&db_path, Some(steam_id));
+    assert!(db.initialize());
+
+    let conn = db.open_conn().unwrap();
+    // 로컬 records에는 Song 1 (Rating 176.4) 저장
+    conn.execute(
+        "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+         VALUES (?1, '1', '4B', 'SC', 99.60, 1, ?2)",
+        rusqlite::params![steam_id, now - 5000],
+    ).unwrap();
+
+    // V-Archive records에는 Song 2 (Rating 195.0) 저장
+    let varchive_json = serde_json::json!({
+        "score": 998000,
+        "maxCombo": true,
+        "updatedAt": "2026-08-01T00:00:00.000Z",
+        "rating": 195.0,
+    });
+    conn.execute(
+        "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+         VALUES (?1, '2', '4B', 'SC', ?2)",
+        rusqlite::params![steam_id, varchive_json.to_string()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let rdb = Arc::new(RecordManager::new(Arc::new(db)));
+    rdb.refresh();
+
+    let find_floor = |sid: i32, _m: Mode, _d: Difficulty| match sid {
+        1 => 12.2,
+        2 => 15.0,
+        _ => 0.0,
+    };
+    let summary = rdb.get_top50_summary_with_fallback(Mode::B4, find_floor);
+
+    // V-Archive 공식 기록(Song 2)이 우선하므로 total_recorded_count는 1이고 Song 2가 Rank 1이어야 함!
+    assert_eq!(summary.total_recorded_count, 1);
+    assert_eq!(
+        summary.rank_map.get(&(2, Mode::B4, Difficulty::SC)),
+        Some(&1)
+    );
+    assert_eq!(summary.rank_map.get(&(1, Mode::B4, Difficulty::SC)), None);
 }

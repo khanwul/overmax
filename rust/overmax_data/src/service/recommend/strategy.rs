@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 
 use super::scoring::{
     calculate_performance_rating, derive_recommend_reason, derive_recommended_level,
-    derive_top50_base_floor, retry_priority, session_flow_score, top50_boundary_score,
+    derive_skill_profile, retry_priority, session_flow_score, top50_boundary_score,
     unplayed_challenge_score, SessionPlayInfo, SessionTrend,
 };
 use super::types::{
@@ -33,7 +33,9 @@ impl RecommendStrategy {
                 params.candidates.truncate(params.max_results);
             }
             Self::Smart => {
-                let top50 = params.rdb.get_varchive_top50_summary(params.button_mode);
+                let top50 = params
+                    .rdb
+                    .get_top50_summary_with_fallback(params.button_mode, &params.find_floor);
                 let recent_plays = params.rdb.get_recent_records(params.button_mode, 10);
                 let session_play_infos: Vec<SessionPlayInfo> = recent_plays
                     .iter()
@@ -108,6 +110,9 @@ impl RecommendStrategy {
 
                 params.candidates.truncate(params.max_results);
 
+                let skill_profile =
+                    derive_skill_profile(&top50, &params.find_floor, params.button_mode);
+
                 for c in params.candidates.iter_mut() {
                     if c.is_played() {
                         let rank = top50.rank_map.get(&(c.song_id, c.mode, c.diff)).copied();
@@ -125,12 +130,15 @@ impl RecommendStrategy {
                             params.ref_floor,
                             session_trend_state.as_ref(),
                         );
+                        let skill = skill_profile.for_diff(c.diff);
                         c.reason = derive_recommend_reason(
                             retry_score,
                             top50_score,
                             flow_score,
                             rank,
                             session_trend,
+                            c.floor,
+                            Some(skill),
                         );
                     } else {
                         let unplayed_score = unplayed_challenge_score(
@@ -161,7 +169,9 @@ impl RecommendStrategy {
         match self {
             Self::Classic => None,
             Self::Smart => {
-                let top50 = params.rdb.get_varchive_top50_summary(params.button_mode);
+                let top50 = params
+                    .rdb
+                    .get_top50_summary_with_fallback(params.button_mode, &params.find_floor);
                 let recent_plays = params.rdb.get_recent_records(params.button_mode, 10);
                 let session_play_infos: Vec<SessionPlayInfo> = recent_plays
                     .iter()
@@ -181,15 +191,14 @@ impl RecommendStrategy {
                 let session_trend_state =
                     SessionTrend::analyze_session(&session_play_infos, params.now_unix);
 
-                let is_sc = params.current_diff.is_sc();
-                let top50_base_floor =
-                    derive_top50_base_floor(&top50, &params.find_floor, params.button_mode, is_sc);
+                let skill_profile =
+                    derive_skill_profile(&top50, &params.find_floor, params.button_mode);
 
                 derive_recommended_level(
                     session_trend_state.as_ref(),
                     &session_play_infos,
                     params.current_diff,
-                    top50_base_floor,
+                    &skill_profile,
                 )
             }
         }

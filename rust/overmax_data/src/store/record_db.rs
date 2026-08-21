@@ -768,6 +768,58 @@ impl RecordDB {
         results
     }
 
+    /// 특정 버튼 모드의 모든 유효 로컬 기록(`records` 테이블, rate > 0)을 조회한다.
+    /// V-Archive 연동이 없을 때 로컬 Top-50 fallback을 산출하기 위해 사용된다.
+    pub fn get_local_records_by_mode(&self, steam_id: &str, mode: Mode) -> Vec<RecentRecordEntry> {
+        if !self.is_ready || steam_id.is_empty() || steam_id == Self::UNKNOWN_STEAM_ID {
+            return Vec::new();
+        }
+
+        let button_mode = mode.as_str();
+        let mut results = Vec::new();
+
+        let query = "SELECT song_id, difficulty, rate, is_max_combo, updated_at
+                     FROM records
+                     WHERE steam_id = ?1 AND button_mode = ?2 AND rate > 0";
+
+        let _ = self.with_rate_map_connection(|conn| {
+            if let Ok(mut stmt) = conn.prepare(query) {
+                if let Ok(mut rows) = stmt.query(rusqlite::params![steam_id, button_mode]) {
+                    while let Ok(Some(row)) = rows.next() {
+                        if let (
+                            Ok(song_id_str),
+                            Ok(diff_str),
+                            Ok(rate),
+                            Ok(mc_int),
+                            Ok(updated_at),
+                        ) = (
+                            row.get::<_, String>(0),
+                            row.get::<_, String>(1),
+                            row.get::<_, f64>(2),
+                            row.get::<_, i32>(3),
+                            row.get::<_, i64>(4),
+                        ) {
+                            if let (Ok(sid), Some(diff)) =
+                                (song_id_str.parse::<i32>(), Difficulty::from_str(&diff_str))
+                            {
+                                results.push(RecentRecordEntry {
+                                    song_id: sid,
+                                    button_mode: mode,
+                                    difficulty: diff,
+                                    rate,
+                                    is_max_combo: mc_int != 0,
+                                    updated_at,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        results
+    }
+
     /// All local rows for a Steam id (for sync). Ignores internal `steam_id` mutex.
     pub fn all_records_for_steam(
         &self,
