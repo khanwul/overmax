@@ -1227,3 +1227,136 @@ fn test_skill_profile_estimation_and_cross_track_fallback() {
     assert_eq!(profile.pad.sample_count, 0);
     assert!((profile.pad.mu - 13.4).abs() < 0.001);
 }
+
+#[test]
+fn test_8b_end_of_moonlight_scenario_gating_and_footer() {
+    let steam_id = "test_user_8b";
+    let now = 1787325000i64;
+
+    let mut vdb = VArchiveDB::new();
+    let make_8b_song = |id: i32, name: &str, floor_str: &str, level: i32| {
+        serde_json::json!({
+            "name": name,
+            "title": id.to_string(),
+            "composer": "Artist",
+            "dlcCode": "RV",
+            "patterns": {
+                "8B": {
+                    "SC": {
+                        "level": level,
+                        "floorName": floor_str
+                    }
+                }
+            }
+        })
+    };
+
+    vdb.songs = vec![
+        serde_json::from_value(make_8b_song(115, "End of the Moonlight", "9.3", 9)).unwrap(),
+        serde_json::from_value(make_8b_song(118, "Extreme Z4", "11.2", 11)).unwrap(),
+        serde_json::from_value(make_8b_song(119, "FEAR", "11.1", 11)).unwrap(),
+        serde_json::from_value(make_8b_song(156, "Ya! Party!", "12.2", 12)).unwrap(),
+        serde_json::from_value(make_8b_song(136, "NB RANGER", "12.1", 12)).unwrap(),
+        serde_json::from_value(make_8b_song(10, "Easy Warmup", "5.0", 5)).unwrap(),
+    ];
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("rec_8b_scenario.db");
+    let mut db = crate::store::record_db::RecordDB::new(&db_path, Some(steam_id));
+    assert!(db.initialize());
+
+    let conn = db.open_conn().unwrap();
+
+    // Top 50에 118(11.2), 119(11.1), 156(12.2), 136(12.1) 등이 등록됨 -> 실력 mu ~ 11.6
+    let top_records = [(118, 172.0), (119, 174.0), (156, 178.0), (136, 176.0)];
+    for (sid, rating) in top_records {
+        let json = serde_json::json!({
+            "score": 990000,
+            "maxCombo": true,
+            "updatedAt": "2026-08-01T00:00:00.000Z",
+            "rating": rating,
+        });
+        conn.execute(
+            "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![steam_id, sid.to_string(), "8B", "SC", json.to_string()],
+        )
+        .unwrap();
+    }
+
+    // 최근 플레이 세션:
+    // 1. FEAR (11.1층) 99.73% MC (Rating ~147.0)
+    // 2. End of Moonlight (9.3층) 99.57% No MC (Rating ~121.3) -> 상대 성과 급락으로 Recovery 트렌드 유발!
+    let session_events = [
+        (119, "8B", "SC", 99.73, 1, now - 300),
+        (115, "8B", "SC", 99.57, 0, now - 100),
+    ];
+    for (sid, mode, diff, rate, mc, ts) in session_events {
+        conn.execute(
+            "INSERT INTO play_events (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, played_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![steam_id, sid.to_string(), mode, diff, rate, mc, ts],
+        ).unwrap();
+    }
+
+    // 과거 고난도 곡 기록들 (Ya! Party 99.01%)
+    conn.execute(
+        "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+         VALUES (?1, '156', '8B', 'SC', 99.01, 0, ?2)",
+        rusqlite::params![steam_id, now - 50],
+    ).unwrap();
+
+    drop(conn);
+
+    let rdb = Arc::new(RecordManager::new(Arc::new(db)));
+    rdb.refresh();
+    let recommender = LocalFloorRecommender::new(Arc::new(vdb), rdb);
+
+    // [검증 1]: 사용자가 고난도 곡 (Ya! Party! 8B SC 12.2) 위에 커서를 두고 추천을 조회할 때
+    let ctx_high = RecommendContext {
+        song_id: 156,
+        button_mode: Mode::B8,
+        difficulty: Difficulty::SC,
+        floor_range: 0.5,
+        max_results: 10,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let bundle_high = recommender.recommend(&ctx_high);
+    for entry in &bundle_high.entries {
+        if let Some(reason) = &entry.reason {
+            assert_ne!(
+                reason.kind,
+                RecommendReasonKind::Recovery,
+                "Song {} (Floor {:?}) MUST NOT have Recovery(REST) badge on high level screen!",
+                entry.song_id,
+                entry.floor_name
+            );
+        }
+    }
+
+    // [검증 2]: Footer 추천 레벨은 커서 위치에 무관하게 SC 11 또는 SC 12로 일관되게 표시
+    let footer_high = recommender.floor_summary(&ctx_high);
+    assert_eq!(
+        footer_high.recommended_level,
+        Some("SC 11".to_string()).or(Some("SC 12".to_string()))
+    );
+
+    // [검증 3]: 저난도 손풀기 곡 (Floor 5.0)을 볼 때도 Footer 추천 레벨은 동일하게 유지
+    let ctx_low = RecommendContext {
+        song_id: 10,
+        button_mode: Mode::B8,
+        difficulty: Difficulty::SC,
+        floor_range: 0.5,
+        max_results: 10,
+        same_mode_only: true,
+        v_id: None,
+        strategy: RecommendStrategy::Smart,
+    };
+    let footer_low = recommender.floor_summary(&ctx_low);
+    assert_eq!(
+        footer_low.recommended_level, footer_high.recommended_level,
+        "Footer level MUST NOT change between low and high cursor selections!"
+    );
+}

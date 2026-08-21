@@ -654,9 +654,8 @@ pub(crate) fn derive_recommend_reason(
         match trend {
             Some(SessionTrend::Climbing) => {
                 // Climbing zone (mu <= Floor <= mu + 1.2*sigma) 가드
-                let is_valid = skill.map_or(true, |s| {
-                    s.is_climbing_zone(cand_floor) || cand_floor >= s.mu
-                });
+                let is_valid =
+                    skill.is_none_or(|s| s.is_climbing_zone(cand_floor) || cand_floor >= s.mu);
                 if is_valid {
                     return Some(RecommendReason {
                         kind: RecommendReasonKind::Climbing,
@@ -668,7 +667,7 @@ pub(crate) fn derive_recommend_reason(
             Some(SessionTrend::Recovery) => {
                 // Recovery zone (Floor <= mu - 0.8*sigma) 필수 가드!
                 // 고난도(Floor > mu - 0.8*sigma)에는 절대로 REST 뱃지를 달지 않는다!
-                let is_valid = skill.map_or(true, |s| s.is_recovery_zone(cand_floor));
+                let is_valid = skill.is_none_or(|s| s.is_recovery_zone(cand_floor));
                 if is_valid {
                     return Some(RecommendReason {
                         kind: RecommendReasonKind::Recovery,
