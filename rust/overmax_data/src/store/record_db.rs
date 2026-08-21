@@ -272,29 +272,29 @@ impl RecordDB {
         let is_max_combo_int = if is_max_combo { 1 } else { 0 };
 
         let res = self.with_retry(|conn| {
+            let mut existing_rate: Option<f64> = None;
+            let mut existing_max_combo: Option<i32> = None;
+
+            let query_res = conn.query_row(
+                "SELECT rate, is_max_combo FROM records 
+                 WHERE steam_id = ?1 AND song_id = ?2 AND button_mode = ?3 AND difficulty = ?4",
+                params![steam_id, sid, button_mode, difficulty],
+                |row| {
+                    let r: Option<f64> = row.get(0).ok();
+                    let mc: Option<i32> = row.get(1).ok();
+                    Ok((r, mc))
+                },
+            );
+
+            if let Ok((r, mc)) = query_res {
+                existing_rate = r;
+                existing_max_combo = mc;
+            }
+
             let mut final_rate = rate;
             let mut final_max_combo = is_max_combo_int;
 
             if only_if_improved {
-                let mut existing_rate: Option<f64> = None;
-                let mut existing_max_combo: Option<i32> = None;
-
-                let query_res = conn.query_row(
-                    "SELECT rate, is_max_combo FROM records 
-                     WHERE steam_id = ?1 AND song_id = ?2 AND button_mode = ?3 AND difficulty = ?4",
-                    params![steam_id, sid, button_mode, difficulty],
-                    |row| {
-                        let r: Option<f64> = row.get(0).ok();
-                        let mc: Option<i32> = row.get(1).ok();
-                        Ok((r, mc))
-                    },
-                );
-
-                if let Ok((r, mc)) = query_res {
-                    existing_rate = r;
-                    existing_max_combo = mc;
-                }
-
                 let should_update_rate = existing_rate.is_none_or(|ext_r| rate > ext_r);
                 let should_update_combo =
                     existing_max_combo.is_none_or(|ext_mc| is_max_combo_int > ext_mc);
@@ -306,6 +306,14 @@ impl RecordDB {
                 final_rate = existing_rate.map_or(rate, |ext_r| rate.max(ext_r));
                 final_max_combo = existing_max_combo
                     .map_or(is_max_combo_int, |ext_mc| is_max_combo_int.max(ext_mc));
+            } else {
+                // 선곡창(only_if_improved = false) 탐색 시:
+                // 기존 기록과 rate 및 is_max_combo가 완전히 동일하다면 updated_at을 오염시키지 않고 즉시 반환
+                if let (Some(ext_r), Some(ext_mc)) = (existing_rate, existing_max_combo) {
+                    if (ext_r - rate).abs() < 0.001 && ext_mc == is_max_combo_int {
+                        return Ok(false);
+                    }
+                }
             }
 
             conn.execute(
@@ -1507,5 +1515,67 @@ mod tests {
         // play_events가 없는 모드는 0건 반환 (records 테이블의 허위 레코드를 끌어오지 않음)
         let recent_6b = db.get_recent_records("76561198000000001", Mode::B6, 5);
         assert_eq!(recent_6b.len(), 0);
+    }
+
+    #[test]
+    fn test_song_select_browsing_preserves_records_updated_at() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("record_updated_at.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let conn = db.open_conn().unwrap();
+        let old_timestamp = 1700000000i64; // 과거 시각
+
+        // 1. 과거 기록 삽입 (rate: 98.5%, is_max_combo: 0, updated_at: 1700000000)
+        conn.execute(
+            "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate, is_max_combo, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                "76561198000000001",
+                "100",
+                "4B",
+                "SC",
+                98.5,
+                0,
+                old_timestamp,
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        // 2. 선곡창(only_if_improved = false)에서 동일한 값으로 upsert 호출
+        let updated = db.upsert(100, Mode::B4, Difficulty::SC, 98.5, false, false);
+        assert!(!updated, "동일한 기록 재방문 시 쓰기를 스킵해야 함");
+
+        // 3. updated_at이 과거 시각 그대로 보존되었는지 검증
+        let conn = db.open_conn().unwrap();
+        let current_ts: i64 = conn
+            .query_row(
+                "SELECT updated_at FROM records WHERE steam_id = '76561198000000001' AND song_id = '100'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            current_ts, old_timestamp,
+            "선곡창 탐색으로 기존 updated_at이 오염되지 않아야 함"
+        );
+
+        // 4. 점수가 개선된 경우(98.5 -> 99.0)에는 updated_at이 현재로 갱신됨을 검증
+        let improved = db.upsert(100, Mode::B4, Difficulty::SC, 99.0, false, false);
+        assert!(improved);
+
+        let new_ts: i64 = conn
+            .query_row(
+                "SELECT updated_at FROM records WHERE steam_id = '76561198000000001' AND song_id = '100'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            new_ts > old_timestamp,
+            "실제 점수 개선 시에는 updated_at이 갱신되어야 함"
+        );
     }
 }

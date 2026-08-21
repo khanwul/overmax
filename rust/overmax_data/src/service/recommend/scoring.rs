@@ -21,6 +21,8 @@ pub fn is_base_bundle_dlc(dlc_code: &str) -> bool {
 
 /// 미플레이 신규 도전 추천 기본 최대 보너스
 pub(crate) const UNPLAYED_MAX_BONUS: f64 = 5.5;
+/// 추천 사유 뱃지 부여를 위한 최소 점수 임계값
+pub(crate) const REASON_THRESHOLD: f64 = 1.5;
 
 /// 미플레이 곡의 난이도 적합도와 세션 모멘텀을 기반으로 추천 점수를 산출한다.
 pub(crate) fn unplayed_challenge_score(
@@ -59,7 +61,8 @@ pub(crate) fn unplayed_challenge_score(
             }
         }
         SessionTrend::Recovery => {
-            // 컨디션 저조: 살짝 낮은 층(-0.2)의 부담 없는 미플레이 곡에 4.5점
+            // 컨디션 저조: 첫 도전인 미플레이 곡 특성을 감안하여 과도하게 낮추지 않고
+            // 살짝 부담 없는 난이도(-0.2 층 부근)에 4.5점 부여 (기성곡 손풀기 -0.3층보다 완만하게 적용)
             if (-0.4..=0.0).contains(&delta) {
                 let center = -0.2;
                 let dist = (delta - center).abs();
@@ -485,6 +488,8 @@ where
     let mut pad_skill = compute_gaussian(&pad_floors, GaussianSkill::DEFAULT_PAD);
 
     // Cross-Track Fallback: 한쪽 트랙의 기록이 전무할 때 상대 트랙으로부터 유연하게 실력대 추정
+    // sample_count는 derive_recommended_level에서 글로벌 앵커 유효성 게이트(sample_count > 0)를
+    // 활성화하기 위한 가상 표본 수로 상속된다.
     if sc_skill.sample_count > 0 && pad_skill.sample_count == 0 {
         let pad_mu = (sc_skill.mu + 1.0).clamp(1.0, 15.0);
         pad_skill = GaussianSkill::new(pad_mu, sc_skill.sigma, sc_skill.sample_count);
@@ -629,8 +634,6 @@ pub(crate) fn derive_recommend_reason(
     cand_floor: f64,
     skill: Option<&GaussianSkill>,
 ) -> Option<RecommendReason> {
-    const REASON_THRESHOLD: f64 = 1.5;
-
     // 1. Top-50 수성 / 돌파 (레인 A) - 절대적 1순위
     if top50_score >= REASON_THRESHOLD && top50_score >= retry_score && top50_score >= flow_score {
         if let Some(rank) = varchive_rank {
@@ -654,8 +657,10 @@ pub(crate) fn derive_recommend_reason(
         match trend {
             Some(SessionTrend::Climbing) => {
                 // Climbing zone (mu <= Floor <= mu + 1.2*sigma) 가드
-                let is_valid =
-                    skill.is_none_or(|s| s.is_climbing_zone(cand_floor) || cand_floor >= s.mu);
+                // 실력 프로필이 아직 없는 경우 기본 기준(DEFAULT_SC.mu = 5.0) 이상의 상위 층에만 부여
+                let is_valid = skill.map_or(cand_floor >= GaussianSkill::DEFAULT_SC.mu, |s| {
+                    s.is_climbing_zone(cand_floor) || cand_floor >= s.mu
+                });
                 if is_valid {
                     return Some(RecommendReason {
                         kind: RecommendReasonKind::Climbing,
@@ -667,7 +672,11 @@ pub(crate) fn derive_recommend_reason(
             Some(SessionTrend::Recovery) => {
                 // Recovery zone (Floor <= mu - 0.8*sigma) 필수 가드!
                 // 고난도(Floor > mu - 0.8*sigma)에는 절대로 REST 뱃지를 달지 않는다!
-                let is_valid = skill.is_none_or(|s| s.is_recovery_zone(cand_floor));
+                // 실력 프로필이 아직 없는 경우 기본 기준(DEFAULT_SC.mu = 5.0) 이하의 저난도에만 부여
+                let is_valid = skill
+                    .map_or(cand_floor <= GaussianSkill::DEFAULT_SC.mu, |s| {
+                        s.is_recovery_zone(cand_floor)
+                    });
                 if is_valid {
                     return Some(RecommendReason {
                         kind: RecommendReasonKind::Recovery,

@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use super::scoring::{
     calculate_performance_rating, derive_recommend_reason, derive_recommended_level,
     derive_skill_profile, retry_priority, session_flow_score, top50_boundary_score,
-    unplayed_challenge_score, SessionPlayInfo, SessionTrend,
+    unplayed_challenge_score, SessionPlayInfo, SessionTrend, REASON_THRESHOLD,
 };
 use super::types::{
     RecommendReason, RecommendReasonKind, RecommendStrategy, StrategyFooterParams,
@@ -146,7 +146,7 @@ impl RecommendStrategy {
                             params.ref_floor,
                             session_trend_state.as_ref(),
                         );
-                        if unplayed_score >= 1.5 {
+                        if unplayed_score >= REASON_THRESHOLD {
                             c.reason = Some(RecommendReason {
                                 kind: RecommendReasonKind::Unplayed,
                                 detail: "미플레이 첫 클리어 도전 추천".to_string(),

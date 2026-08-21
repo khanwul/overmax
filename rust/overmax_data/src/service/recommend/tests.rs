@@ -1655,3 +1655,35 @@ fn test_varchive_records_take_precedence_over_local_records_in_top50() {
     );
     assert_eq!(summary.rank_map.get(&(1, Mode::B4, Difficulty::SC)), None);
 }
+
+#[test]
+fn test_derive_recommend_reason_when_skill_is_none_blocks_high_floor_rest() {
+    // 1. skill이 None이고 Recovery 추세일 때
+    // 고난도 곡(Floor = 14.0)은 REST 뱃지가 차단되어야 함
+    let reason_high = derive_recommend_reason(
+        0.0,
+        0.0,
+        3.5, // flow_score >= REASON_THRESHOLD
+        None,
+        Some(SessionTrend::Recovery),
+        14.0,
+        None, // skill profile 없음
+    );
+    assert_eq!(
+        reason_high, None,
+        "skill이 None일 때 고난도 곡에 REST 뱃지가 붙지 않아야 함"
+    );
+
+    // 2. 저난도 곡(Floor = 4.0 <= DEFAULT_SC.mu)은 REST 뱃지가 안전하게 허용됨
+    let reason_low = derive_recommend_reason(
+        0.0,
+        0.0,
+        3.5,
+        None,
+        Some(SessionTrend::Recovery),
+        4.0,
+        None, // skill profile 없음
+    );
+    assert!(reason_low.is_some());
+    assert_eq!(reason_low.unwrap().kind, RecommendReasonKind::Recovery);
+}
