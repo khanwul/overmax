@@ -410,6 +410,36 @@ macro_rules! t {
             En => "No Steam account found."
         )
     };
+    ("settings-varchive-connect") => {
+        $crate::t_select!(
+            Ko => "계정 연결",
+            En => "Account Connection"
+        )
+    };
+    ("settings-varchive-upload") => {
+        $crate::t_select!(
+            Ko => "자동 업로드 연동",
+            En => "Auto Upload Integration"
+        )
+    };
+    ("settings-varchive-upload-desc") => {
+        $crate::t_select!(
+            Ko => "게임 플레이 후 V-Archive로 기록을 전송하기 위해 필요한 연동 설정입니다.",
+            En => "Settings required to upload play records to V-Archive."
+        )
+    };
+    ("sync-refresh") => {
+        $crate::t_select!(
+            Ko => "새로고침",
+            En => "Refresh"
+        )
+    };
+    ("settings-account-path-required") => {
+        $crate::t_select!(
+            Ko => "자동 업로드를 사용하려면 account.txt 파일 경로를 설정해야 합니다.",
+            En => "You must configure the account.txt file path to use auto-upload."
+        )
+    };
     ("settings-general") => {
         $crate::t_select!(
             Ko => "일반",

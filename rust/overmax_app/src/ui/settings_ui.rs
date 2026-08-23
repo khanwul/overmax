@@ -324,7 +324,7 @@ fn overlay_section(ui: &mut egui::Ui, draft: &mut Value) {
 }
 
 fn varchive_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
-    section_frame(ui, crate::t!("settings-varchive-account"), |ui| {
+    section_frame(ui, crate::t!("settings-varchive-connect"), |ui| {
         form_row(ui, crate::t!("settings-link-status"), |ui| {
             ui.label(
                 RichText::new(current_steam_label(ctx))
@@ -332,8 +332,6 @@ fn varchive_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
                     .size(Theme::FONT_SMALL),
             );
         });
-
-        ui.add_space(Theme::ROW_SPACING);
 
         if ctx.current_steam_id.is_empty() {
             ui.add_space(8.0);
@@ -345,8 +343,25 @@ fn varchive_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
             return;
         }
 
-        ui.add_space(16.0);
-        steam_account_rows(ui, draft, ctx);
+        ui.add_space(Theme::ROW_SPACING);
+        v_archive_id_row(ui, draft, ctx);
+    });
+
+    if ctx.current_steam_id.is_empty() {
+        return;
+    }
+    ui.add_space(16.0);
+
+    section_frame(ui, crate::t!("settings-varchive-upload"), |ui| {
+        ui.label(
+            RichText::new(crate::t!("settings-varchive-upload-desc"))
+                .color(Theme::TEXT_MUTED)
+                .size(Theme::FONT_SMALL),
+        );
+        ui.add_space(Theme::ROW_SPACING);
+        account_path_row(ui, draft, ctx);
+        ui.add_space(20.0);
+        scan_candidates_row(ui, draft, ctx);
     });
 }
 
@@ -370,74 +385,60 @@ fn current_steam_label(ctx: &SettingsUiContext) -> String {
     }
 }
 
-fn steam_account_rows(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
+fn v_archive_id_row(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
     let entry = user_entry_mut(draft, &ctx.current_steam_id);
+    let mut text = entry
+        .get("v_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
 
     form_row(ui, "V-Archive ID", |ui| {
-        let mut text = entry
-            .get("v_id")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        if ui
-            .add(
+        ui.horizontal(|ui| {
+            let text_res = ui.add(
                 TextEdit::singleline(&mut text)
                     .font(egui::FontId::proportional(Theme::FONT_BODY))
                     .vertical_align(egui::Align::Center)
                     .margin(egui::Margin::symmetric(8, 0))
-                    .desired_width(ui.available_width())
+                    .desired_width(ui.available_width() - 84.0)
                     .min_size(egui::vec2(0.0, Theme::CONTROL_HEIGHT)),
-            )
-            .changed()
-        {
-            entry.insert("v_id".into(), json!(text.trim()));
-        }
-    });
-
-    ui.add_space(Theme::ROW_SPACING);
-
-    form_row(ui, crate::t!("settings-data-sync"), |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.style_mut().spacing.item_spacing.x = 4.0;
-            ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
-            for b in [4, 5, 6, 8] {
-                let btn = egui::Button::new(RichText::new(format!("{b}B")).size(Theme::FONT_SMALL))
-                    .fill(Theme::TAB_DIM_BG)
-                    .stroke(Stroke::new(1.0_f32, Theme::STROKE))
-                    .corner_radius(egui::CornerRadius::same(Theme::R_SM))
-                    .wrap();
-                if ui
-                    .add_sized(egui::vec2(40.0, Theme::CONTROL_HEIGHT), btn)
-                    .clicked()
-                {
-                    let v_id = entry.get("v_id").and_then(|v| v.as_str()).unwrap_or("");
-                    if !v_id.is_empty() {
-                        let _ =
-                            ctx.fetch_tx
-                                .send((ctx.current_steam_id.clone(), v_id.to_string(), b));
-                    }
-                }
+            );
+            if text_res.changed() {
+                entry.insert("v_id".into(), json!(text.trim()));
             }
-            let all_btn = egui::Button::new(RichText::new("All").size(Theme::FONT_SMALL).strong())
-                .fill(Theme::TAB_ACTIVE_BG)
+
+            ui.add_space(4.0);
+
+            let has_id = !text.trim().is_empty();
+            ui.add_enabled_ui(has_id, |ui| {
+                let refresh_btn = egui::Button::new(
+                    RichText::new(crate::t!("sync-refresh")).size(Theme::FONT_SMALL),
+                )
+                .fill(if has_id {
+                    Theme::TAB_ACTIVE_BG
+                } else {
+                    Theme::TAB_DIM_BG
+                })
                 .corner_radius(egui::CornerRadius::same(Theme::R_SM))
                 .wrap();
-            if ui
-                .add_sized(egui::vec2(40.0, Theme::CONTROL_HEIGHT), all_btn)
-                .clicked()
-            {
-                let v_id = entry.get("v_id").and_then(|v| v.as_str()).unwrap_or("");
-                if !v_id.is_empty() {
-                    let _ = ctx
-                        .fetch_tx
-                        .send((ctx.current_steam_id.clone(), v_id.to_string(), 0));
+
+                if ui
+                    .add_sized(egui::vec2(80.0, Theme::CONTROL_HEIGHT), refresh_btn)
+                    .clicked()
+                {
+                    let _ = ctx.fetch_tx.send((
+                        ctx.current_steam_id.clone(),
+                        text.trim().to_string(),
+                        0,
+                    ));
                 }
-            }
+            });
         });
     });
+}
 
-    ui.add_space(Theme::ROW_SPACING);
-
+fn account_path_row(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
+    let entry = user_entry_mut(draft, &ctx.current_steam_id);
     form_row(ui, "account.txt", |ui| {
         let mut path_str = entry
             .get("account_path")
@@ -478,26 +479,52 @@ fn steam_account_rows(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiCont
             );
         });
     });
+}
 
-    ui.add_space(20.0);
+fn scan_candidates_row(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
+    let entry = user_entry_mut(draft, &ctx.current_steam_id);
+    let account_path = entry
+        .get("account_path")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let has_account = !account_path.is_empty();
+
     ui.horizontal(|ui| {
         ui.add_space(Theme::LABEL_WIDTH + 8.0);
-        let scan_btn = egui::Button::new(
-            RichText::new(crate::t!("settings-find-sync-candidates-btn"))
-                .size(Theme::FONT_BODY)
-                .strong(),
-        )
-        .min_size(egui::vec2(180.0, 40.0))
-        .fill(Theme::TEXT_ACCENT)
-        .corner_radius(egui::CornerRadius::same(Theme::R_SM));
+        ui.vertical(|ui| {
+            ui.add_enabled_ui(has_account, |ui| {
+                let scan_btn = egui::Button::new(
+                    RichText::new(crate::t!("settings-find-sync-candidates-btn"))
+                        .size(Theme::FONT_BODY)
+                        .strong(),
+                )
+                .min_size(egui::vec2(180.0, 40.0))
+                .fill(if has_account {
+                    Theme::TEXT_ACCENT
+                } else {
+                    Theme::TAB_DIM_BG
+                })
+                .corner_radius(egui::CornerRadius::same(Theme::R_SM));
 
-        if ui.add(scan_btn).clicked() {
-            if let Ok(mut sid) = ctx.sync_steam_id.lock() {
-                *sid = ctx.current_steam_id.clone();
+                if ui.add(scan_btn).clicked() {
+                    if let Ok(mut sid) = ctx.sync_steam_id.lock() {
+                        *sid = ctx.current_steam_id.clone();
+                    }
+                    ctx.sync_open.store(true, Ordering::Relaxed);
+                    ctx.scan_pending.store(true, Ordering::Relaxed);
+                }
+            });
+
+            if !has_account {
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(crate::t!("settings-account-path-required"))
+                        .color(Theme::TEXT_MUTED)
+                        .size(Theme::FONT_TINY),
+                );
             }
-            ctx.sync_open.store(true, Ordering::Relaxed);
-            ctx.scan_pending.store(true, Ordering::Relaxed);
-        }
+        });
     });
 }
 

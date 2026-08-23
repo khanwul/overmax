@@ -291,6 +291,10 @@ impl NativeApp {
                                         let base_g = overmax_core::lock_clone_or_default(&base);
                                         let mut merged_g =
                                             overmax_core::lock_clone_or_default(&merged);
+                                        let prev_v_id = varchive_v_id(
+                                            &merged_g,
+                                            &settings_ctx.current_steam_id,
+                                        );
                                         let _ = settings_ui::save_settings_to_disk(
                                             root.as_ref(),
                                             defaults.as_ref(),
@@ -299,6 +303,17 @@ impl NativeApp {
                                             &mut merged_g,
                                         );
                                         crate::ui::i18n::set_locale_from_settings(&merged_g);
+                                        let new_v_id = varchive_v_id(
+                                            &merged_g,
+                                            &settings_ctx.current_steam_id,
+                                        );
+                                        if !new_v_id.is_empty() && new_v_id != prev_v_id {
+                                            let _ = settings_ctx.fetch_tx.send((
+                                                settings_ctx.current_steam_id.clone(),
+                                                new_v_id,
+                                                0,
+                                            ));
+                                        }
                                         if let Ok(mut m) = merged.lock() {
                                             *m = merged_g;
                                         }
@@ -1009,6 +1024,18 @@ impl NativeApp {
         }
         g_hwnd
     }
+}
+
+fn varchive_v_id(settings: &serde_json::Value, steam_id: &str) -> String {
+    settings
+        .get("varchive")
+        .and_then(|v| v.get("user_map"))
+        .and_then(|m| m.get(steam_id))
+        .and_then(|e| e.get("v_id"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]
