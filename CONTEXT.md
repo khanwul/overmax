@@ -11,6 +11,8 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 - **현재 Windows 인식 방식**: 화면 캡처 + Rust 네이티브 CV 이미지 매칭 (`overmax_cv`) + OCR (Windows OCR)
   - _Windows 캡처 엔진_: GDI 캡처 엔진 및 DXGI Desktop Duplication 캡처 엔진을 감싸는 `AdaptiveCaptureEngine` Facade 구성. GDI 백엔드가 안정성 기본값으로 작동하며 설정창에서 DXGI로 런타임 스위칭 가능. DXGI 캡처 시 multi-monitor Output 자동 탐색 및 가상 스크린 좌표 오프셋 변환을 통해 서브 모니터 구동을 완벽 지원함.
 - **현재 Windows UI**: egui / winit (하드웨어 가속 활용 멀티 뷰포트 네이티브 UI)
+  - _ODDS 다이얼로그 디자인 시스템 분리_: 240x160 인게임 HUD 전용 컴팩트 테마(`overlay_theme.rs`)와 독립된 데스크톱 다이얼로그 시스템(`dialog_theme.rs` - Overmax Desktop Dialog System)을 구축하여 14px/12px 타이포그래피, 32px 표준 컨트롤 높이, 카드 배경 및 2행 전폭 입력 폼(`field_row`), RTL 슬라이더(`rtl_slider`)를 표준화함.
+  - _4대 탭 IA 구조화_: 설정창을 일반/추천/V-Archive/고급 4개 탭으로 분리하고, V-Archive 연결/업로드 섹션 분리, 세그먼트 버튼 1열 선택 등 깔끔한 데스크톱 사용자 경험을 제공함.
   - 전체화면 포커스 차단 및 DWM 비클라이언트 테두리/캡션 제거: 게임 윈도우 최소화 방지를 위해 `WS_EX_NOACTIVATE` 및 `WS_EX_TOOLWINDOW`, `WS_EX_LAYERED`, `WS_POPUP` 스타일을 적용하고, `SetWindowSubclass`로 `WM_NCCALCSIZE`를 가로채 비클라이언트 영역을 0으로 강제함으로써 Windows 11 DWM의 상단 1px 테두리 선 및 우상단 네이티브 캡션 버튼("- ㅁ X") 합성을 원천 차단함. 비활성 시 topmost 해제로 인한 깜빡임을 막기 위해 `is_active` 상태 검증 캐싱을 정밀화하고, `cached_game_hwnd`를 이용해 매 프레임 `FindWindowW` 오버헤드를 차단함.
   - 오버레이 스냅과 스크린 앵커 드래그 제어: 마우스 드래그 시 Win32 비클라이언트 메시지(`WM_NCLBUTTONDOWN`)나 비동기 뷰포트 델타를 쓰지 않고, 드래그 시작 시점의 스크린 절대 좌표와 창 위치를 앵커로 잡는 픽셀 완벽 스크린 앵커 드래그(`PlatformState::handle_screen_drag`)를 적용하여 1픽셀의 오차 없이 커서를 100% 추종하며 타이틀바 헤더 노출을 방지함. 구석 고정(Snap) 시에는 `try_lock()`으로 백그라운드 스레드와의 락 경합을 방지하고, 기하 구조 캐시(`prev_snap_geometry`)를 적용하여 좌표 변화가 없을 때는 `SetWindowPos` 호출을 생략(0회)함.
 - **데이터**: V-Archive DB (JSON) 및 로컬 기록 DB (SQLite)
