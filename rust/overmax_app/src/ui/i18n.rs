@@ -464,6 +464,54 @@ macro_rules! t {
             En => "Advanced"
         )
     };
+    ("settings-overlay-hint") => {
+        $crate::t_select!(
+            Ko => "오버레이 크기와 투명도, 위치는 변경 즉시 화면에 실시간 반영됩니다.",
+            En => "Overlay size, opacity, and position changes are previewed immediately."
+        )
+    };
+    ("settings-smart-recommend-hint") => {
+        $crate::t_select!(
+            Ko => "Top-50 수성/돌파, 모멘텀 가중치 적용",
+            En => "Applies Top-50 cutlines, retry gap & momentum"
+        )
+    };
+    ("settings-target-rate-hint") => {
+        $crate::t_select!(
+            Ko => "권장 레벨 산출 기준 정확도",
+            En => "Target accuracy for recommended levels"
+        )
+    };
+    ("settings-recommend-provider-desc") => {
+        $crate::t_select!(
+            Ko => "외부 추천 알고리즘 HTTP 서버와 연동합니다.",
+            En => "Integrate with an external recommendation HTTP server."
+        )
+    };
+    ("settings-debug-window-hint") => {
+        $crate::t_select!(
+            Ko => "실시간 탐지 수치 및 진단 로그 모니터링",
+            En => "Monitor real-time detection metrics and diagnostic logs"
+        )
+    };
+    ("settings-capture-engine-hint") => {
+        $crate::t_select!(
+            Ko => "DXGI: 고성능 / GDI: 호환성",
+            En => "DXGI: High Perf / GDI: Compatibility"
+        )
+    };
+    ("settings-protect-overlay-hint") => {
+        $crate::t_select!(
+            Ko => "화면 캡처 대상에서 오버레이 제외",
+            En => "Exclude overlay from screen capture"
+        )
+    };
+    ("settings-auto-update-hint") => {
+        $crate::t_select!(
+            Ko => "기동 시 새 버전 감지 및 알림",
+            En => "Check for new versions on startup"
+        )
+    };
     ("settings-general") => {
         $crate::t_select!(
             Ko => "일반",

@@ -92,76 +92,94 @@ fn recommend_tab(ui: &mut egui::Ui, draft: &mut Value) {
 }
 
 fn recommend_section(ui: &mut egui::Ui, draft: &mut Value) {
-    form_row(ui, crate::t!("settings-smart-recommend"), |ui| {
-        let mut smart_reco = draft
-            .get("recommend")
-            .and_then(|r| r.get("smart_recommend"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+    form_row_with_hint(
+        ui,
+        crate::t!("settings-smart-recommend"),
+        crate::t!("settings-smart-recommend-hint"),
+        |ui| {
+            let mut smart_reco = draft
+                .get("recommend")
+                .and_then(|r| r.get("smart_recommend"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
 
-        let response = ui
-            .checkbox(&mut smart_reco, crate::t!("settings-enable"))
-            .on_hover_text(crate::t!("settings-smart-recommend-desc"));
+            let response = ui
+                .checkbox(&mut smart_reco, crate::t!("settings-enable"))
+                .on_hover_text(crate::t!("settings-smart-recommend-desc"));
 
-        if response.changed() {
-            if !draft.get("recommend").is_some_and(|v| v.is_object()) {
-                draft["recommend"] = serde_json::json!({});
+            if response.changed() {
+                if !draft.get("recommend").is_some_and(|v| v.is_object()) {
+                    draft["recommend"] = serde_json::json!({});
+                }
+                draft["recommend"]["smart_recommend"] = serde_json::json!(smart_reco);
+                ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
             }
-            draft["recommend"]["smart_recommend"] = serde_json::json!(smart_reco);
-            ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
-        }
-    });
+        },
+    );
 
     ui.add_space(Theme::ROW_SPACING);
 
-    form_row(ui, crate::t!("settings-target-rate"), |ui| {
-        let current_target = draft
-            .get("recommend")
-            .and_then(|r| r.get("target_rate"))
-            .and_then(|v| v.as_f64())
-            .unwrap_or(99.0);
+    form_row_with_hint(
+        ui,
+        crate::t!("settings-target-rate"),
+        crate::t!("settings-target-rate-hint"),
+        |ui| {
+            let current_target = draft
+                .get("recommend")
+                .and_then(|r| r.get("target_rate"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(99.0);
 
-        ui.horizontal(|ui| {
-            ui.style_mut().spacing.item_spacing.x = 4.0;
-            ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
+            ui.horizontal(|ui| {
+                ui.style_mut().spacing.item_spacing.x = 4.0;
+                ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
 
-            for (label, val) in [
-                ("97%", 97.0),
-                ("99%", 99.0),
-                ("99.5%", 99.5),
-                ("100%", 100.0),
-            ] {
-                let is_active = (current_target - val).abs() < 0.001;
-                let btn = egui::Button::new(RichText::new(label).size(Theme::FONT_SMALL).strong())
-                    .fill(if is_active {
-                        Theme::TAB_ACTIVE_BG
-                    } else {
-                        Theme::TAB_DIM_BG
-                    })
-                    .stroke(Stroke::new(1.0_f32, Theme::STROKE))
-                    .corner_radius(egui::CornerRadius::same(Theme::R_SM))
-                    .wrap();
+                for (label, val) in [
+                    ("97%", 97.0),
+                    ("99%", 99.0),
+                    ("99.5%", 99.5),
+                    ("100%", 100.0),
+                ] {
+                    let is_active = (current_target - val).abs() < 0.001;
+                    let btn =
+                        egui::Button::new(RichText::new(label).size(Theme::FONT_SMALL).strong())
+                            .fill(if is_active {
+                                Theme::TAB_ACTIVE_BG
+                            } else {
+                                Theme::TAB_DIM_BG
+                            })
+                            .stroke(Stroke::new(1.0_f32, Theme::STROKE))
+                            .corner_radius(egui::CornerRadius::same(Theme::R_SM))
+                            .wrap();
 
-                if ui
-                    .add_sized(egui::vec2(58.0, Theme::CONTROL_HEIGHT), btn)
-                    .on_hover_text(crate::t!("settings-target-rate-desc"))
-                    .clicked()
-                {
-                    if !draft.get("recommend").is_some_and(|v| v.is_object()) {
-                        draft["recommend"] = serde_json::json!({});
+                    if ui
+                        .add_sized(egui::vec2(58.0, Theme::CONTROL_HEIGHT), btn)
+                        .on_hover_text(crate::t!("settings-target-rate-desc"))
+                        .clicked()
+                    {
+                        if !draft.get("recommend").is_some_and(|v| v.is_object()) {
+                            draft["recommend"] = serde_json::json!({});
+                        }
+                        draft["recommend"]["target_rate"] = serde_json::json!(val);
+                        ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
                     }
-                    draft["recommend"]["target_rate"] = serde_json::json!(val);
-                    ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
                 }
-            }
-        });
-    });
+            });
+        },
+    );
 }
 
 fn overlay_section(ui: &mut egui::Ui, draft: &mut Value) {
     let Some(Value::Object(overlay)) = draft.get_mut("overlay") else {
         return;
     };
+
+    ui.label(
+        RichText::new(crate::t!("settings-overlay-hint"))
+            .color(Theme::TEXT_MUTED)
+            .size(Theme::FONT_SMALL),
+    );
+    ui.add_space(Theme::ROW_SPACING);
 
     form_row(ui, crate::t!("settings-size"), |ui| {
         let current_scale = overlay.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
@@ -590,18 +608,23 @@ fn advanced_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
 fn debug_section(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
     let mut is_open = ctx.debug_open.load(Ordering::Relaxed);
 
-    form_row(ui, crate::t!("settings-debug-window"), |ui| {
-        if ui
-            .checkbox(&mut is_open, crate::t!("settings-show-debug-window"))
-            .on_hover_text(crate::t!("settings-debug-window-desc"))
-            .changed()
-        {
-            let debug_obj = object_section_mut(draft, "debug");
-            debug_obj.insert("enabled".to_string(), Value::Bool(is_open));
-            ctx.debug_open.store(is_open, Ordering::Relaxed);
-            ui.ctx().request_repaint();
-        }
-    });
+    form_row_with_hint(
+        ui,
+        crate::t!("settings-debug-window"),
+        crate::t!("settings-debug-window-hint"),
+        |ui| {
+            if ui
+                .checkbox(&mut is_open, crate::t!("settings-show-debug-window"))
+                .on_hover_text(crate::t!("settings-debug-window-desc"))
+                .changed()
+            {
+                let debug_obj = object_section_mut(draft, "debug");
+                debug_obj.insert("enabled".to_string(), Value::Bool(is_open));
+                ctx.debug_open.store(is_open, Ordering::Relaxed);
+                ui.ctx().request_repaint();
+            }
+        },
+    );
 }
 
 fn capture_section(ui: &mut egui::Ui, draft: &mut Value) {
@@ -615,51 +638,56 @@ fn capture_section(ui: &mut egui::Ui, draft: &mut Value) {
             .unwrap_or("auto")
             .to_string();
 
-        form_row(ui, crate::t!("settings-capture-method-win"), |ui| {
-            let mut changed = false;
-            egui::ComboBox::from_id_salt("capture_engine_combo")
-                .selected_text(match engine.as_str() {
-                    "dxgi" => crate::t!("settings-capture-mode-dxgi"),
-                    "gdi" => crate::t!("settings-capture-mode-gdi"),
-                    _ => crate::t!("settings-capture-mode-auto"),
-                })
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_value(
-                            &mut engine,
-                            "auto".to_string(),
-                            crate::t!("settings-capture-mode-auto"),
-                        )
-                        .clicked()
-                    {
-                        changed = true;
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut engine,
-                            "gdi".to_string(),
-                            crate::t!("settings-capture-mode-gdi"),
-                        )
-                        .clicked()
-                    {
-                        changed = true;
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut engine,
-                            "dxgi".to_string(),
-                            crate::t!("settings-capture-mode-dxgi"),
-                        )
-                        .clicked()
-                    {
-                        changed = true;
-                    }
-                });
+        form_row_with_hint(
+            ui,
+            crate::t!("settings-capture-method-win"),
+            crate::t!("settings-capture-engine-hint"),
+            |ui| {
+                let mut changed = false;
+                egui::ComboBox::from_id_salt("capture_engine_combo")
+                    .selected_text(match engine.as_str() {
+                        "dxgi" => crate::t!("settings-capture-mode-dxgi"),
+                        "gdi" => crate::t!("settings-capture-mode-gdi"),
+                        _ => crate::t!("settings-capture-mode-auto"),
+                    })
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_value(
+                                &mut engine,
+                                "auto".to_string(),
+                                crate::t!("settings-capture-mode-auto"),
+                            )
+                            .clicked()
+                        {
+                            changed = true;
+                        }
+                        if ui
+                            .selectable_value(
+                                &mut engine,
+                                "gdi".to_string(),
+                                crate::t!("settings-capture-mode-gdi"),
+                            )
+                            .clicked()
+                        {
+                            changed = true;
+                        }
+                        if ui
+                            .selectable_value(
+                                &mut engine,
+                                "dxgi".to_string(),
+                                crate::t!("settings-capture-mode-dxgi"),
+                            )
+                            .clicked()
+                        {
+                            changed = true;
+                        }
+                    });
 
-            if changed {
-                screen_capture.insert("engine".into(), json!(engine));
-            }
-        });
+                if changed {
+                    screen_capture.insert("engine".into(), json!(engine));
+                }
+            },
+        );
 
         ui.add_space(Theme::ROW_SPACING);
     }
@@ -669,18 +697,23 @@ fn capture_section(ui: &mut egui::Ui, draft: &mut Value) {
         .and_then(Value::as_bool)
         .unwrap_or(true);
 
-    form_row(ui, crate::t!("settings-protect-overlay"), |ui| {
-        let response = ui
-            .checkbox(
-                &mut content_protected,
-                crate::t!("settings-prevent-screen-capture"),
-            )
-            .on_hover_text(crate::t!("settings-protect-overlay-desc"));
+    form_row_with_hint(
+        ui,
+        crate::t!("settings-protect-overlay"),
+        crate::t!("settings-protect-overlay-hint"),
+        |ui| {
+            let response = ui
+                .checkbox(
+                    &mut content_protected,
+                    crate::t!("settings-prevent-screen-capture"),
+                )
+                .on_hover_text(crate::t!("settings-protect-overlay-desc"));
 
-        if response.changed() {
-            screen_capture.insert("content_protected".into(), json!(content_protected));
-        }
-    });
+            if response.changed() {
+                screen_capture.insert("content_protected".into(), json!(content_protected));
+            }
+        },
+    );
 }
 
 fn general_section(ui: &mut egui::Ui, draft: &mut Value) {
@@ -718,21 +751,26 @@ fn general_section(ui: &mut egui::Ui, draft: &mut Value) {
 
 fn update_section(ui: &mut egui::Ui, draft: &mut Value) {
     let app_update = object_section_mut(draft, "app_update");
-    form_row(ui, crate::t!("settings-auto-update"), |ui| {
-        let mut enabled = app_update
-            .get("enabled")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        if ui
-            .checkbox(
-                &mut enabled,
-                RichText::new(crate::t!("settings-use")).size(Theme::FONT_BODY),
-            )
-            .changed()
-        {
-            app_update.insert("enabled".into(), json!(enabled));
-        }
-    });
+    form_row_with_hint(
+        ui,
+        crate::t!("settings-auto-update"),
+        crate::t!("settings-auto-update-hint"),
+        |ui| {
+            let mut enabled = app_update
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            if ui
+                .checkbox(
+                    &mut enabled,
+                    RichText::new(crate::t!("settings-use")).size(Theme::FONT_BODY),
+                )
+                .changed()
+            {
+                app_update.insert("enabled".into(), json!(enabled));
+            }
+        },
+    );
     ui.add_space(Theme::ROW_SPACING);
     form_row(ui, crate::t!("settings-version-info"), |ui| {
         ui.label(
@@ -745,6 +783,13 @@ fn update_section(ui: &mut egui::Ui, draft: &mut Value) {
 
 fn recommend_provider_section(ui: &mut egui::Ui, draft: &mut Value) {
     let rec_provider = object_section_mut(draft, "recommend_provider");
+
+    ui.label(
+        RichText::new(crate::t!("settings-recommend-provider-desc"))
+            .color(Theme::TEXT_MUTED)
+            .size(Theme::FONT_SMALL),
+    );
+    ui.add_space(Theme::ROW_SPACING);
 
     let mut enabled = rec_provider
         .get("enabled")
@@ -884,6 +929,37 @@ fn form_row(ui: &mut egui::Ui, label: &str, add_contents: impl FnOnce(&mut egui:
                     .color(Theme::TEXT_SECONDARY)
                     .size(Theme::FONT_BODY),
             ),
+        );
+        ui.add_space(8.0);
+        add_contents(ui);
+    });
+}
+
+fn form_row_with_hint(
+    ui: &mut egui::Ui,
+    label: &str,
+    hint: &str,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    ui.horizontal(|ui| {
+        ui.set_min_width(ui.available_width());
+        ui.allocate_ui_with_layout(
+            egui::vec2(Theme::LABEL_WIDTH, Theme::CONTROL_HEIGHT),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.label(
+                    RichText::new(label)
+                        .color(Theme::TEXT_SECONDARY)
+                        .size(Theme::FONT_BODY),
+                );
+                if !hint.is_empty() {
+                    ui.label(
+                        RichText::new(hint)
+                            .color(Theme::TEXT_MUTED)
+                            .size(Theme::FONT_TINY),
+                    );
+                }
+            },
         );
         ui.add_space(8.0);
         add_contents(ui);
