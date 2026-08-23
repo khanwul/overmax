@@ -410,6 +410,120 @@ macro_rules! t {
             En => "No Steam account found."
         )
     };
+    ("settings-varchive-connect") => {
+        $crate::t_select!(
+            Ko => "계정 연결",
+            En => "Account Connection"
+        )
+    };
+    ("settings-varchive-upload") => {
+        $crate::t_select!(
+            Ko => "자동 업로드 연동",
+            En => "Auto Upload Integration"
+        )
+    };
+    ("settings-varchive-upload-desc") => {
+        $crate::t_select!(
+            Ko => "게임 플레이 후 V-Archive로 기록을 전송하기 위해 필요한 연동 설정입니다.",
+            En => "Settings required to upload play records to V-Archive."
+        )
+    };
+    ("sync-refresh") => {
+        $crate::t_select!(
+            Ko => "새로고침",
+            En => "Refresh"
+        )
+    };
+    ("settings-account-path-required") => {
+        $crate::t_select!(
+            Ko => "자동 업로드를 사용하려면 account.txt 파일 경로를 설정해야 합니다.",
+            En => "You must configure the account.txt file path to use auto-upload."
+        )
+    };
+    ("settings-tab-general") => {
+        $crate::t_select!(
+            Ko => "일반",
+            En => "General"
+        )
+    };
+    ("settings-tab-recommend") => {
+        $crate::t_select!(
+            Ko => "추천",
+            En => "Recommendation"
+        )
+    };
+    ("settings-tab-varchive") => {
+        $crate::t_select!(
+            Ko => "V-Archive",
+            En => "V-Archive"
+        )
+    };
+    ("settings-tab-advanced") => {
+        $crate::t_select!(
+            Ko => "고급",
+            En => "Advanced"
+        )
+    };
+    ("settings-overlay-hint") => {
+        $crate::t_select!(
+            Ko => "오버레이 크기와 투명도, 위치는 변경 즉시 화면에 실시간 반영됩니다.",
+            En => "Overlay size, opacity, and position changes are previewed immediately."
+        )
+    };
+    ("settings-smart-recommend-hint") => {
+        $crate::t_select!(
+            Ko => "Top-50 수성/돌파, 모멘텀 가중치 적용",
+            En => "Applies Top-50 cutlines, retry gap & momentum"
+        )
+    };
+    ("settings-reco-mode-smart") => {
+        $crate::t_select!(
+            Ko => "스마트",
+            En => "Smart"
+        )
+    };
+    ("settings-reco-mode-classic") => {
+        $crate::t_select!(
+            Ko => "클래식",
+            En => "Classic"
+        )
+    };
+    ("settings-target-rate-hint") => {
+        $crate::t_select!(
+            Ko => "권장 레벨 산출 기준 정확도",
+            En => "Target accuracy for recommended levels"
+        )
+    };
+    ("settings-recommend-provider-desc") => {
+        $crate::t_select!(
+            Ko => "외부 추천 알고리즘 HTTP 서버와 연동합니다.",
+            En => "Integrate with an external recommendation HTTP server."
+        )
+    };
+    ("settings-debug-window-hint") => {
+        $crate::t_select!(
+            Ko => "실시간 탐지 수치 및 진단 로그 모니터링",
+            En => "Monitor real-time detection metrics and diagnostic logs"
+        )
+    };
+    ("settings-capture-engine-hint") => {
+        $crate::t_select!(
+            Ko => "DXGI: 고성능 / GDI: 호환성",
+            En => "DXGI: High Perf / GDI: Compatibility"
+        )
+    };
+    ("settings-protect-overlay-hint") => {
+        $crate::t_select!(
+            Ko => "화면 캡처 대상에서 오버레이 제외",
+            En => "Exclude overlay from screen capture"
+        )
+    };
+    ("settings-auto-update-hint") => {
+        $crate::t_select!(
+            Ko => "기동 시 새 버전 감지 및 알림",
+            En => "Check for new versions on startup"
+        )
+    };
     ("settings-general") => {
         $crate::t_select!(
             Ko => "일반",

@@ -7,8 +7,8 @@ use std::sync::atomic::Ordering;
 
 use crate::system::native_helpers;
 use crate::ui::debug_ui;
+use crate::ui::dialog_theme::DialogTheme;
 use crate::ui::native_app::NativeApp;
-use crate::ui::overlay_theme::Theme;
 #[cfg(target_os = "windows")]
 use crate::ui::overlay_ui;
 use crate::ui::settings_ui;
@@ -23,8 +23,6 @@ fn game_window_title(settings: &overmax_data::Settings) -> &str {
         .unwrap_or("DJMAX RESPECT V")
 }
 
-static CLOSE_REQUEST_TIMESTAMP: std::sync::Mutex<Option<std::time::Instant>> =
-    std::sync::Mutex::new(None);
 static GLOBAL_LOG_TX: std::sync::Mutex<Option<std::sync::mpsc::Sender<String>>> =
     std::sync::Mutex::new(None);
 
@@ -43,33 +41,6 @@ pub fn send_debug_log(msg: impl Into<String>) {
         }
     }
     eprintln!("{s}");
-}
-
-pub fn log_close_request(source: &str) {
-    if let Ok(mut lock) = CLOSE_REQUEST_TIMESTAMP.lock() {
-        let now = std::time::Instant::now();
-        *lock = Some(now);
-        send_debug_log(format!("[CLOSE_DIAG] Close requested from '{}'", source));
-    }
-}
-
-pub fn check_close_diag(stage: &str, settings_open: bool, overlay_on: bool) {
-    if let Ok(mut lock) = CLOSE_REQUEST_TIMESTAMP.lock() {
-        if let Some(req_time) = *lock {
-            let elapsed = req_time.elapsed();
-            send_debug_log(format!(
-                "[CLOSE_DIAG] Stage '{}': elapsed={:?}, settings_open={}, overlay_on={}",
-                stage, elapsed, settings_open, overlay_on
-            ));
-            if !settings_open {
-                send_debug_log(format!(
-                    "[CLOSE_DIAG] Viewport unrendered in ROOT ui() after {:?}",
-                    elapsed
-                ));
-                *lock = None;
-            }
-        }
-    }
 }
 
 impl NativeApp {
@@ -98,7 +69,7 @@ impl NativeApp {
 
         ctx.show_viewport_deferred(
             native_helpers::vp_debug(),
-            Self::auxiliary_viewport(&title, [720.0, 480.0]),
+            Self::auxiliary_viewport(&title, [760.0, 480.0]),
             move |ui, class| {
                 // 디버그 창이 비활성(Inactive) 상태라도 게임 플레이 중 탐지 결과 및 로그가 실시간 모니터링되도록 갱신 요청
                 ui.ctx()
@@ -241,7 +212,7 @@ impl NativeApp {
         };
         ctx.show_viewport_deferred(
             native_helpers::vp_settings(),
-            Self::auxiliary_viewport(crate::t!("app-settings-window"), [520.0, 560.0]),
+            Self::auxiliary_viewport(crate::t!("app-settings-window"), [580.0, 600.0]),
             move |ui, class| {
                 ui.ctx().set_pixels_per_point(1.0);
                 #[cfg(debug_assertions)]
@@ -256,8 +227,11 @@ impl NativeApp {
                 egui::Panel::bottom("sett_actions")
                     .frame(
                         egui::Frame::new()
-                            .fill(Theme::PANEL_BG)
-                            .inner_margin(egui::Margin::symmetric(24, 16)),
+                            .fill(DialogTheme::BG_WINDOW)
+                            .inner_margin(egui::Margin::symmetric(
+                                DialogTheme::PANEL_PADDING as i8,
+                                14,
+                            )),
                     )
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -266,31 +240,34 @@ impl NativeApp {
                                 |ui| {
                                     let close_btn = egui::Button::new(
                                         RichText::new(crate::t!("app-close"))
-                                            .size(Theme::FONT_BODY),
+                                            .size(DialogTheme::FONT_BODY),
                                     )
-                                    .min_size(egui::vec2(80.0, Theme::CONTROL_HEIGHT))
-                                    .fill(Theme::SECONDARY)
-                                    .corner_radius(egui::CornerRadius::same(Theme::R_SM));
+                                    .min_size(egui::vec2(84.0, DialogTheme::CONTROL_HEIGHT))
+                                    .fill(DialogTheme::SECONDARY)
+                                    .corner_radius(egui::CornerRadius::same(DialogTheme::R_SM));
                                     if ui.add(close_btn).clicked() {
-                                        log_close_request("settings_close_button");
                                         open.store(false, Ordering::Relaxed);
                                         ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
                                     }
 
-                                    ui.add_space(8.0);
+                                    ui.add_space(DialogTheme::GAP_SM);
 
                                     let save_btn = egui::Button::new(
                                         RichText::new(crate::t!("app-save"))
-                                            .size(Theme::FONT_BODY)
+                                            .size(DialogTheme::FONT_BODY)
                                             .strong(),
                                     )
-                                    .min_size(egui::vec2(100.0, Theme::CONTROL_HEIGHT))
-                                    .fill(Theme::PRIMARY)
-                                    .corner_radius(egui::CornerRadius::same(Theme::R_SM));
+                                    .min_size(egui::vec2(100.0, DialogTheme::CONTROL_HEIGHT))
+                                    .fill(DialogTheme::PRIMARY)
+                                    .corner_radius(egui::CornerRadius::same(DialogTheme::R_SM));
                                     if ui.add(save_btn).clicked() {
                                         let base_g = overmax_core::lock_clone_or_default(&base);
                                         let mut merged_g =
                                             overmax_core::lock_clone_or_default(&merged);
+                                        let prev_v_id = varchive_v_id(
+                                            &merged_g,
+                                            &settings_ctx.current_steam_id,
+                                        );
                                         let _ = settings_ui::save_settings_to_disk(
                                             root.as_ref(),
                                             defaults.as_ref(),
@@ -299,6 +276,17 @@ impl NativeApp {
                                             &mut merged_g,
                                         );
                                         crate::ui::i18n::set_locale_from_settings(&merged_g);
+                                        let new_v_id = varchive_v_id(
+                                            &merged_g,
+                                            &settings_ctx.current_steam_id,
+                                        );
+                                        if !new_v_id.is_empty() && new_v_id != prev_v_id {
+                                            let _ = settings_ctx.fetch_tx.send((
+                                                settings_ctx.current_steam_id.clone(),
+                                                new_v_id,
+                                                0,
+                                            ));
+                                        }
                                         if let Ok(mut m) = merged.lock() {
                                             *m = merged_g;
                                         }
@@ -338,7 +326,7 @@ impl NativeApp {
 
         ctx.show_viewport_deferred(
             native_helpers::vp_sync(),
-            Self::auxiliary_viewport(crate::t!("sync-varchive-sync"), [560.0, 720.0]),
+            Self::auxiliary_viewport(crate::t!("sync-varchive-sync"), [600.0, 720.0]),
             move |ui, class| {
                 ui.ctx().set_pixels_per_point(1.0);
                 #[cfg(debug_assertions)]
@@ -441,9 +429,6 @@ fn read_overlay_settings(
 impl eframe::App for NativeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        let settings_open = self.ui_state.settings_open.load(Ordering::Relaxed);
-        let overlay_on = self.session.scene != overmax_core::SceneType::Unknown;
-        check_close_diag("ROOT_ui_start", settings_open, overlay_on);
 
         if let Ok(mut holder) = self.ctx_holder.lock() {
             if holder.is_none() {
@@ -1009,6 +994,18 @@ impl NativeApp {
         }
         g_hwnd
     }
+}
+
+fn varchive_v_id(settings: &serde_json::Value, steam_id: &str) -> String {
+    settings
+        .get("varchive")
+        .and_then(|v| v.get("user_map"))
+        .and_then(|m| m.get(steam_id))
+        .and_then(|e| e.get("v_id"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]
