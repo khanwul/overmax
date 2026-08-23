@@ -137,13 +137,9 @@ pub(crate) fn top50_boundary_score(
     0.0
 }
 
-/// 난이도(Floor, 0.0 ~ 15.0)와 정확도(Rate, %)를 기반으로 0 ~ 200점 만점 스케일의 Performance Rating을 계산한다.
-pub fn calculate_performance_rating(floor: f64, rate: f64) -> f64 {
-    if floor <= 0.0 || rate <= 0.0 {
-        return 0.0;
-    }
-    let max_rating = floor * (200.0 / 15.0);
-    let rate_ratio = if rate >= 100.0 {
+/// 정확도(Rate, %)를 기반으로 V-Archive 스케일의 레이팅 비율(RateRatio, 0.0 ~ 1.0)을 계산한다.
+pub fn rate_to_rate_ratio(rate: f64) -> f64 {
+    if rate >= 100.0 {
         1.0
     } else if rate >= 99.0 {
         0.95 + ((rate - 99.0) / 1.0) * 0.05
@@ -153,21 +149,33 @@ pub fn calculate_performance_rating(floor: f64, rate: f64) -> f64 {
         0.40 + ((rate - 90.0) / 7.0) * 0.35
     } else {
         (rate / 90.0).max(0.0) * 0.40
-    };
-    max_rating * rate_ratio
+    }
 }
 
-/// Performance Rating(또는 V-Archive Rating)을 기준 적정 달성률(99.0%, RateRatio=0.95) 기준의 환산 난이도(Effective Floor)로 역산한다.
-/// - SC 12 100.0% (160점) -> 12.63층 (상위 실력 상향 인정)
-/// - SC 15 95.0%  (130점) -> 10.26층 (판정 붕괴 하향 환산)
-/// - SC 11 99.5%  (143점) -> 11.29층 (안정적 주력 실력 인정)
-pub fn rating_to_effective_floor(rating: f64) -> f64 {
+/// 난이도(Floor, 0.0 ~ 15.0)와 정확도(Rate, %)를 기반으로 0 ~ 200점 만점 스케일의 Performance Rating을 계산한다.
+pub fn calculate_performance_rating(floor: f64, rate: f64) -> f64 {
+    if floor <= 0.0 || rate <= 0.0 {
+        return 0.0;
+    }
+    let max_rating = floor * (200.0 / 15.0);
+    max_rating * rate_to_rate_ratio(rate)
+}
+
+/// Performance Rating(또는 V-Archive Rating)을 기준 적정 달성률(target_rate, 기본 99.0%) 기준의 환산 난이도(Effective Floor)로 역산한다.
+/// - SC 12 100.0% (160점) @ 99.0% -> 12.63층 (상위 실력 상향 인정)
+/// - SC 15 95.0%  (130점) @ 99.0% -> 10.26층 (판정 붕괴 하향 환산)
+/// - SC 11 99.5%  (143점) @ 99.0% -> 11.29층 (안정적 주력 실력 인정)
+pub fn rating_to_effective_floor(rating: f64, target_rate: f64) -> f64 {
     if rating <= 0.0 {
         return 0.0;
     }
-    // rating / (0.95 * (200.0 / 15.0)) = rating * (15.0 / 190.0)
+    let ratio = rate_to_rate_ratio(target_rate);
+    if ratio <= 0.0 {
+        return 0.0;
+    }
+    // rating / (ratio * (200.0 / 15.0))
     // 16.1 / 16.2층 보스곡(Rating 최대 ~206) 수용을 위해 상한을 17.0으로 설정
-    (rating * (15.0 / 190.0)).clamp(1.0, 17.0)
+    (rating / (ratio * (200.0 / 15.0))).clamp(1.0, 17.0)
 }
 
 /// 상대 상승 모멘텀 판별 레이팅 편차 기준치 (개인 세션 평균 대비 +3.0점 이상)
@@ -467,6 +475,7 @@ pub(crate) fn derive_skill_profile<F>(
     top50: &crate::store::record_db::VArchiveTop50Summary,
     find_floor: &F,
     button_mode: overmax_core::Mode,
+    target_rate: f64,
 ) -> SkillProfile
 where
     F: Fn(i32, overmax_core::Mode, Difficulty) -> f64,
@@ -478,7 +487,7 @@ where
         if m == button_mode {
             let eff_floor = if let Some(&rating) = top50.rating_map.get(&(sid, m, d)) {
                 if rating > 0.0 {
-                    rating_to_effective_floor(rating)
+                    rating_to_effective_floor(rating, target_rate)
                 } else {
                     find_floor(sid, m, d)
                 }
@@ -583,6 +592,7 @@ pub(crate) fn derive_recommended_level(
     session_plays: &[SessionPlayInfo],
     current_diff: Difficulty,
     skill_profile: &SkillProfile,
+    target_rate: f64,
 ) -> Option<String> {
     let is_sc = current_diff.is_sc();
     let skill = skill_profile.for_diff(current_diff);
@@ -595,7 +605,7 @@ pub(crate) fn derive_recommended_level(
 
     let get_eff_floor = |p: &SessionPlayInfo| {
         if p.rating > 0.0 {
-            rating_to_effective_floor(p.rating)
+            rating_to_effective_floor(p.rating, target_rate)
         } else {
             p.floor
         }

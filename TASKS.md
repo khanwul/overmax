@@ -60,6 +60,7 @@ Overmax v0.4.0 마일스톤 활성 작업 목록 및 백로그입니다.
 - [x] **4.2 TrueSkill 기반 통계적 실력 분포 모델 (`SkillProfile`) 및 도메인 게이팅**
   - [x] 버튼별 SC 및 일반(Pad) 실력 분포 $\mathcal{N}(\mu, \sigma^2)$ 모델링 및 Cross-Track Fallback 구축
   - [x] 커서 위치와 무관한 일관된 권장 난이도 라벨(`derive_footer_level`) 고정
+  - [x] 추천 레벨(권장 레벨) 기준 정확도(Target Rate) 4단계 설정화 (97%, 99%(기본), 99.5%, 100%) 및 환산 난이도(Effective Floor) 동적 역산
   - [x] 물리적 안전 난이도($\text{Floor} \le \mu - 0.8\sigma$) 가드를 통한 고난도 곡 REST 뱃지 오발동 원천 차단
 - [x] **4.3 V-Archive 미연동 환경을 위한 로컬 기록 기반 Top-50 Fallback**
   - [x] `varchive_records` 부재 시 로컬 `records` 테이블과 자체 Performance Rating을 결합하여 실시간 Top-50 요약(`get_top50_summary_with_fallback`) 산출

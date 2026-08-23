@@ -52,6 +52,7 @@
     "name": null
   },
   "recommend": {
-    "smart_recommend": true
+    "smart_recommend": true,
+    "target_rate": 99.0
   }
 }

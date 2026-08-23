@@ -37,6 +37,7 @@ fn test_provider_cache_reader_fallback_when_file_missing() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
 
     let bundle = reader.recommend(&ctx);
@@ -76,6 +77,7 @@ fn test_provider_cache_reader_valid_json() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
 
     let bundle = reader.recommend(&ctx);
@@ -160,6 +162,7 @@ fn test_composite_recommender_with_varchive_db_preserves_provider() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
 
     let panel = updated_composite.recommend_panel(&ctx);
@@ -242,6 +245,7 @@ fn test_smart_recommend_false_sorts_by_classic_rate_and_omits_reason() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Classic,
+        target_rate: 99.0,
     };
 
     let bundle = recommender.recommend(&ctx);
@@ -271,7 +275,7 @@ fn test_derive_recommended_level() {
 
     // 1. Top 50 기반 초기 권장 레벨 (세션 0판): SC 14.8 -> SC 15
     assert_eq!(
-        derive_recommended_level(None, &[], Difficulty::SC, &profile_15),
+        derive_recommended_level(None, &[], Difficulty::SC, &profile_15, 99.0),
         Some("SC 15".to_string())
     );
 
@@ -296,6 +300,7 @@ fn test_derive_recommended_level() {
         &warmup_single_play,
         Difficulty::SC,
         &profile_15,
+        99.0,
     );
     assert_eq!(
         rec_level_warmup_guard,
@@ -333,7 +338,8 @@ fn test_derive_recommended_level() {
             Some(&mixed_state),
             &mixed_plays,
             Difficulty::SC,
-            &profile_15
+            &profile_15,
+            99.0,
         ),
         Some("SC 15".to_string())
     );
@@ -384,14 +390,15 @@ fn test_derive_recommended_level() {
             Some(&climbing_state),
             &session_4_plays,
             Difficulty::SC,
-            &profile_15
+            &profile_15,
+            99.0,
         ),
         Some("SC 14".to_string()) // 13.8 + 0.3 = 14.1 -> SC 14
     );
 
     // 5. Top 50 기록이 없는 경우
     assert_eq!(
-        derive_recommended_level(None, &[], Difficulty::SC, &empty_profile),
+        derive_recommended_level(None, &[], Difficulty::SC, &empty_profile, 99.0),
         None
     );
 
@@ -406,7 +413,7 @@ fn test_derive_recommended_level() {
         updated_at: now - 100,
     }];
     assert_eq!(
-        derive_recommended_level(None, &normal_play_11, Difficulty::MX, &empty_profile),
+        derive_recommended_level(None, &normal_play_11, Difficulty::MX, &empty_profile, 99.0),
         Some("11 (SC 2)".to_string())
     );
 
@@ -420,7 +427,7 @@ fn test_derive_recommended_level() {
         updated_at: now - 100,
     }];
     assert_eq!(
-        derive_recommended_level(None, &normal_play_8, Difficulty::HD, &empty_profile),
+        derive_recommended_level(None, &normal_play_8, Difficulty::HD, &empty_profile, 99.0),
         Some("8".to_string())
     );
 }
@@ -1132,6 +1139,7 @@ fn test_candidate_ranking_integration_multi_signal_hierarchy() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
 
     let bundle = recommender.recommend(&ctx);
@@ -1236,7 +1244,7 @@ fn test_skill_profile_estimation_and_cross_track_fallback() {
         }
     };
 
-    let profile = derive_skill_profile(&top50, &find_floor, Mode::B4);
+    let profile = derive_skill_profile(&top50, &find_floor, Mode::B4, 99.0);
 
     // SC Profile
     assert_eq!(profile.sc.sample_count, 5);
@@ -1342,6 +1350,7 @@ fn test_8b_end_of_moonlight_scenario_gating_and_footer() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
     let bundle_high = recommender.recommend(&ctx_high);
     for entry in &bundle_high.entries {
@@ -1373,6 +1382,7 @@ fn test_8b_end_of_moonlight_scenario_gating_and_footer() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
     let footer_low = recommender.floor_summary(&ctx_low);
     assert_eq!(
@@ -1446,6 +1456,7 @@ fn test_pad_patterns_maintain_consistent_footer_level_across_nm_hd_mx() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
     let footer_sc1 = recommender.floor_summary(&ctx_sc1);
     assert_eq!(footer_sc1.recommended_level, Some("SC 12".to_string()));
@@ -1460,6 +1471,7 @@ fn test_pad_patterns_maintain_consistent_footer_level_across_nm_hd_mx() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
     let footer_nm = recommender.floor_summary(&ctx_nm);
 
@@ -1473,6 +1485,7 @@ fn test_pad_patterns_maintain_consistent_footer_level_across_nm_hd_mx() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
     let footer_hd = recommender.floor_summary(&ctx_hd);
 
@@ -1486,6 +1499,7 @@ fn test_pad_patterns_maintain_consistent_footer_level_across_nm_hd_mx() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
     let footer_mx = recommender.floor_summary(&ctx_mx);
 
@@ -1592,6 +1606,7 @@ fn test_local_top50_fallback_when_varchive_unconnected() {
         same_mode_only: true,
         v_id: None,
         strategy: RecommendStrategy::Smart,
+        target_rate: 99.0,
     };
     let footer = recommender.floor_summary(&ctx);
     assert_eq!(
@@ -1710,18 +1725,20 @@ fn test_derive_recommend_reason_when_skill_is_none_blocks_high_floor_rest() {
 
 #[test]
 fn test_skill_profile_estimation_uses_effective_floor_from_performance_rating() {
+    use std::collections::HashMap;
+
     let mut rank_map = HashMap::new();
     let mut rating_map = HashMap::new();
 
-    // 곡 1: SC 12 (100.0%) -> Performance Rating = 160.0 -> Effective Floor = 12.63 (상향 인정)
+    // 1. SC 12 (12.0층) 100.0% 달성 -> Rating = 160.0 -> Effective Floor = 12.63
     rank_map.insert((1, Mode::B4, Difficulty::SC), 1);
     rating_map.insert((1, Mode::B4, Difficulty::SC), 160.0);
 
-    // 곡 2: SC 15 (95.0%) -> Performance Rating = 130.0 -> Effective Floor = 10.26 (판정 붕괴 하향 환산)
+    // 2. SC 15 (15.0층) 95.0% 달성 -> Rating = 130.0 -> Effective Floor = 10.26 (판정 붕괴곡 하향 환산)
     rank_map.insert((2, Mode::B4, Difficulty::SC), 2);
     rating_map.insert((2, Mode::B4, Difficulty::SC), 130.0);
 
-    // 곡 3: SC 11 (99.5%) -> Performance Rating = 143.0 -> Effective Floor = 11.29 (안정적 실력 인정)
+    // 3. SC 11 (11.0층) 99.5% 달성 -> Rating = 143.0 -> Effective Floor = 11.29 (주력 성과 인정)
     rank_map.insert((3, Mode::B4, Difficulty::SC), 3);
     rating_map.insert((3, Mode::B4, Difficulty::SC), 143.0);
 
@@ -1739,7 +1756,7 @@ fn test_skill_profile_estimation_uses_effective_floor_from_performance_rating() 
         _ => 0.0,
     };
 
-    let profile = derive_skill_profile(&top50, &find_floor, Mode::B4);
+    let profile = derive_skill_profile(&top50, &find_floor, Mode::B4, 99.0);
 
     // 1. 단순 Floor 산술 평균: (12.0 + 15.0 + 11.0) / 3 = 12.67
     // 2. Rating 기반 Effective Floor 평균: (12.63 + 10.26 + 11.29) / 3 = 11.39
@@ -1748,7 +1765,7 @@ fn test_skill_profile_estimation_uses_effective_floor_from_performance_rating() 
     assert!((profile.sc.mu - 11.39).abs() < 0.05);
 
     // 하단 푸터 권장 레벨 도출 시에도 "SC 11"로 안정적으로 도출됨 (액면 13으로 뻥튀기 방지)
-    let footer_level = derive_recommended_level(None, &[], Difficulty::SC, &profile);
+    let footer_level = derive_recommended_level(None, &[], Difficulty::SC, &profile, 99.0);
     assert_eq!(footer_level, Some("SC 11".to_string()));
 }
 
@@ -1799,7 +1816,7 @@ fn test_varchive_unofficial_floor_offsets_and_pad_integration() {
         updated_at: 1000,
     }];
     assert_eq!(
-        derive_recommended_level(None, &play_14, Difficulty::MX, &empty_profile),
+        derive_recommended_level(None, &play_14, Difficulty::MX, &empty_profile, 99.0),
         Some("14 (SC 7)".to_string())
     );
 
@@ -1813,8 +1830,9 @@ fn test_varchive_unofficial_floor_offsets_and_pad_integration() {
         (LocalFloorRecommender::parse_floor_value(Some(&str_16_2)).unwrap() - 16.0).abs() < 1e-6
     );
 
-    // DIE IN 만점(Rating = 206.0) 달성 시 Effective Floor 16.26층으로 온전히 인정됨
-    let die_in_eff_floor = crate::service::recommend::scoring::rating_to_effective_floor(206.0);
+    // DIE IN 만점(Rating = 206.0) 달성 시 Effective Floor 16.26층으로 온전히 인정됨 (99.0% 기준)
+    let die_in_eff_floor =
+        crate::service::recommend::scoring::rating_to_effective_floor(206.0, 99.0);
     assert!((die_in_eff_floor - 16.26).abs() < 0.05);
 
     // 인게임 권장 레벨은 인게임 공식 표기 레벨에 맞춰 "SC 15"로 안전하게 클램프됨
@@ -1827,7 +1845,80 @@ fn test_varchive_unofficial_floor_offsets_and_pad_integration() {
         updated_at: 1000,
     }];
     assert_eq!(
-        derive_recommended_level(None, &play_16, Difficulty::SC, &empty_profile),
+        derive_recommended_level(None, &play_16, Difficulty::SC, &empty_profile, 99.0),
         Some("SC 15".to_string())
+    );
+}
+
+#[test]
+fn test_recommended_level_with_different_target_rates() {
+    use crate::service::recommend::scoring::{
+        calculate_performance_rating, derive_recommended_level, derive_skill_profile,
+        rating_to_effective_floor,
+    };
+    use std::collections::HashMap;
+
+    // SC 13 (13.0층) 99.0% 달성 시 Rating = 13.0 * (200 / 15) * 0.95 = 164.6667
+    let rating = calculate_performance_rating(13.0, 99.0);
+    assert!((rating - 164.6667).abs() < 0.01);
+
+    // 4단계 target_rate에 따른 환산 난이도(Effective Floor) 변화 검증:
+    // 97.0%: 164.6667 / (0.75 * 200/15) = 16.467 -> 상위 도전 레벨 (16.467 -> SC 15 clamp)
+    let eff_97 = rating_to_effective_floor(rating, 97.0);
+    assert!((eff_97 - 16.467).abs() < 0.05);
+
+    // 99.0%: 164.6667 / (0.95 * 200/15) = 13.000 -> 기준 레벨 (SC 13)
+    let eff_99 = rating_to_effective_floor(rating, 99.0);
+    assert!((eff_99 - 13.0).abs() < 0.01);
+
+    // 99.5%: 164.6667 / (0.975 * 200/15) = 12.667 -> SC 13
+    let eff_99_5 = rating_to_effective_floor(rating, 99.5);
+    assert!((eff_99_5 - 12.667).abs() < 0.05);
+
+    // 100.0%: 164.6667 / (1.000 * 200/15) = 12.350 -> SC 12
+    let eff_100 = rating_to_effective_floor(rating, 100.0);
+    assert!((eff_100 - 12.350).abs() < 0.05);
+
+    // Top 50 기반 SkillProfile 생성 및 derive_recommended_level 전체 흐름 검증
+    let mut rank_map = HashMap::new();
+    let mut rating_map = HashMap::new();
+    for i in 1..=5 {
+        rank_map.insert((i, Mode::B4, Difficulty::SC), i as usize);
+        rating_map.insert((i, Mode::B4, Difficulty::SC), rating);
+    }
+    let top50 = crate::store::record_db::VArchiveTop50Summary {
+        total_recorded_count: 5,
+        cutoff_rating: rating,
+        rank_map,
+        rating_map,
+    };
+    let find_floor = |_: i32, _: Mode, _: Difficulty| 13.0;
+
+    // 97.0% 타깃: 실력 프로필 mu ~ 16.47 -> 권장 "SC 15"
+    let profile_97 = derive_skill_profile(&top50, &find_floor, Mode::B4, 97.0);
+    assert_eq!(
+        derive_recommended_level(None, &[], Difficulty::SC, &profile_97, 97.0),
+        Some("SC 15".to_string())
+    );
+
+    // 99.0% 타깃 (기본값): 실력 프로필 mu ~ 13.00 -> 권장 "SC 13"
+    let profile_99 = derive_skill_profile(&top50, &find_floor, Mode::B4, 99.0);
+    assert_eq!(
+        derive_recommended_level(None, &[], Difficulty::SC, &profile_99, 99.0),
+        Some("SC 13".to_string())
+    );
+
+    // 99.5% 타깃: 실력 프로필 mu ~ 12.67 -> 권장 "SC 13"
+    let profile_99_5 = derive_skill_profile(&top50, &find_floor, Mode::B4, 99.5);
+    assert_eq!(
+        derive_recommended_level(None, &[], Difficulty::SC, &profile_99_5, 99.5),
+        Some("SC 13".to_string())
+    );
+
+    // 100.0% 타깃: 실력 프로필 mu ~ 12.35 -> 권장 "SC 12"
+    let profile_100 = derive_skill_profile(&top50, &find_floor, Mode::B4, 100.0);
+    assert_eq!(
+        derive_recommended_level(None, &[], Difficulty::SC, &profile_100, 100.0),
+        Some("SC 12".to_string())
     );
 }

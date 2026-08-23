@@ -314,6 +314,7 @@ impl CompositeRecommender {
             same_mode_only,
             v_id: None,
             strategy: RecommendStrategy::Smart,
+            target_rate: 99.0,
         };
         self.recommend_panel(&ctx).as_legacy_result()
     }

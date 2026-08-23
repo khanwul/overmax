@@ -118,6 +118,7 @@ impl LocalFloorRecommender {
             find_floor: |sid, m, d| self.find_pattern_floor(sid, m, d, false),
             button_mode: ctx.button_mode,
             current_diff: ctx.difficulty,
+            target_rate: ctx.target_rate,
             now_unix: Self::now_unix(),
         });
 
@@ -555,6 +556,7 @@ impl RecommendationSource for LocalFloorRecommender {
             button_mode: ctx.button_mode,
             ref_floor: final_ref_floor,
             max_results: ctx.max_results,
+            target_rate: ctx.target_rate,
             now_unix,
         });
 

@@ -446,6 +446,18 @@ macro_rules! t {
             En => "Weighted sorting by Top-50 boundaries, retry gap, and session momentum with reason badges.\nWhen disabled, sorts by classic achievement rate only."
         )
     };
+    ("settings-target-rate") => {
+        $crate::t_select!(
+            Ko => "권장 기준 레이팅",
+            En => "Target Rate"
+        )
+    };
+    ("settings-target-rate-desc") => {
+        $crate::t_select!(
+            Ko => "오버레이 하단 권장 레벨을 산출할 때 기준이 되는 목표 달성률(정확도)을 설정합니다.\n높게 설정할수록 완벽한 판정을 요구하여 권장 난이도가 낮아지고, 낮게 설정할수록 상위 난이도에 도전하도록 유도합니다.",
+            En => "Set target accuracy rate used to derive recommended level on the overlay footer.\nHigher values demand better precision for lower recommended levels; lower values encourage climbing higher difficulties."
+        )
+    };
     ("settings-use-external-provider") => {
         $crate::t_select!(
             Ko => "외부 Provider 사용",

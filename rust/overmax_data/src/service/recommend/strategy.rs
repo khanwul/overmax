@@ -110,8 +110,12 @@ impl RecommendStrategy {
 
                 params.candidates.truncate(params.max_results);
 
-                let skill_profile =
-                    derive_skill_profile(&top50, &params.find_floor, params.button_mode);
+                let skill_profile = derive_skill_profile(
+                    &top50,
+                    &params.find_floor,
+                    params.button_mode,
+                    params.target_rate,
+                );
 
                 for c in params.candidates.iter_mut() {
                     if c.is_played() {
@@ -191,14 +195,19 @@ impl RecommendStrategy {
                 let session_trend_state =
                     SessionTrend::analyze_session(&session_play_infos, params.now_unix);
 
-                let skill_profile =
-                    derive_skill_profile(&top50, &params.find_floor, params.button_mode);
+                let skill_profile = derive_skill_profile(
+                    &top50,
+                    &params.find_floor,
+                    params.button_mode,
+                    params.target_rate,
+                );
 
                 derive_recommended_level(
                     session_trend_state.as_ref(),
                     &session_play_infos,
                     params.current_diff,
                     &skill_profile,
+                    params.target_rate,
                 )
             }
         }

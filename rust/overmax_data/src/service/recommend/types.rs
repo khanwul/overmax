@@ -118,6 +118,7 @@ pub struct RecommendContext {
     pub same_mode_only: bool,
     pub v_id: Option<String>,
     pub strategy: RecommendStrategy,
+    pub target_rate: f64,
 }
 
 impl RecommendContext {
@@ -279,6 +280,7 @@ where
     pub button_mode: Mode,
     pub ref_floor: f64,
     pub max_results: usize,
+    pub target_rate: f64,
     pub now_unix: i64,
 }
 
@@ -290,5 +292,6 @@ where
     pub find_floor: F,
     pub button_mode: Mode,
     pub current_diff: Difficulty,
+    pub target_rate: f64,
     pub now_unix: i64,
 }

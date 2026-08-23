@@ -95,6 +95,51 @@ fn recommend_section(ui: &mut egui::Ui, draft: &mut Value) {
             ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
         }
     });
+
+    ui.add_space(Theme::ROW_SPACING);
+
+    form_row(ui, crate::t!("settings-target-rate"), |ui| {
+        let current_target = draft
+            .get("recommend")
+            .and_then(|r| r.get("target_rate"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(99.0);
+
+        ui.horizontal(|ui| {
+            ui.style_mut().spacing.item_spacing.x = 4.0;
+            ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
+
+            for (label, val) in [
+                ("97%", 97.0),
+                ("99%", 99.0),
+                ("99.5%", 99.5),
+                ("100%", 100.0),
+            ] {
+                let is_active = (current_target - val).abs() < 0.001;
+                let btn = egui::Button::new(RichText::new(label).size(Theme::FONT_SMALL).strong())
+                    .fill(if is_active {
+                        Theme::TAB_ACTIVE_BG
+                    } else {
+                        Theme::TAB_DIM_BG
+                    })
+                    .stroke(Stroke::new(1.0_f32, Theme::STROKE))
+                    .corner_radius(egui::CornerRadius::same(Theme::R_SM))
+                    .wrap();
+
+                if ui
+                    .add_sized(egui::vec2(58.0, Theme::CONTROL_HEIGHT), btn)
+                    .on_hover_text(crate::t!("settings-target-rate-desc"))
+                    .clicked()
+                {
+                    if !draft.get("recommend").is_some_and(|v| v.is_object()) {
+                        draft["recommend"] = serde_json::json!({});
+                    }
+                    draft["recommend"]["target_rate"] = serde_json::json!(val);
+                    ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
+                }
+            }
+        });
+    });
 }
 
 fn overlay_section(ui: &mut egui::Ui, draft: &mut Value) {

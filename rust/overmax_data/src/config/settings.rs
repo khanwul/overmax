@@ -90,6 +90,7 @@ fn empty_object() -> Value {
 }
 
 const ALLOWED_SCALES: &[f64] = &[0.75, 1.0, 1.25, 1.5];
+pub const ALLOWED_TARGET_RATES: &[f64] = &[97.0, 99.0, 99.5, 100.0];
 
 pub fn normalize_settings(settings: &mut Value) {
     let Value::Object(map) = settings else { return };
@@ -173,6 +174,23 @@ pub fn normalize_settings(settings: &mut Value) {
         }
         if let Some(max_r) = sf.get("max_rate").and_then(|v| v.as_f64()) {
             sf.insert("max_rate".to_string(), json!(max_r.clamp(0.0, 100.0)));
+        }
+    }
+
+    if let Some(Value::Object(recommend)) = map.get_mut("recommend") {
+        if let Some(rate) = recommend.get("target_rate").and_then(|v| v.as_f64()) {
+            let mut closest = 99.0;
+            let mut min_diff = f64::MAX;
+            for &r in ALLOWED_TARGET_RATES {
+                let diff = (r - rate).abs();
+                if diff < min_diff {
+                    min_diff = diff;
+                    closest = r;
+                }
+            }
+            recommend.insert("target_rate".to_string(), json!(closest));
+        } else if recommend.contains_key("target_rate") {
+            recommend.insert("target_rate".to_string(), json!(99.0));
         }
     }
 }
@@ -359,6 +377,9 @@ mod tests {
                 "user_map": {
                     "some_id": "some_v_id"
                 }
+            },
+            "recommend": {
+                "target_rate": 99.6 // should snap to 99.5 or 99.7 => (99.6-99.5)=0.1 vs (99.7-99.6)=0.1 => 99.5
             }
         });
 
@@ -372,6 +393,7 @@ mod tests {
             settings["varchive"]["user_map"]["some_id"],
             json!({"v_id": "some_v_id", "account_path": ""})
         );
+        assert_eq!(settings["recommend"]["target_rate"], json!(99.5));
     }
 
     #[test]
@@ -735,12 +757,19 @@ pub struct RecommendProviderSettings {
 pub struct RecommendSettings {
     #[serde(default = "default_true")]
     pub smart_recommend: bool,
+    #[serde(default = "default_target_rate")]
+    pub target_rate: f64,
+}
+
+fn default_target_rate() -> f64 {
+    99.0
 }
 
 impl Default for RecommendSettings {
     fn default() -> Self {
         Self {
             smart_recommend: default_true(),
+            target_rate: default_target_rate(),
         }
     }
 }
