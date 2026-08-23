@@ -94,23 +94,26 @@ pub fn render_sync<F1, F2, F3, F4>(
                                 .size(Theme::FONT_BODY)
                                 .strong(),
                         )
-                        .min_size(egui::vec2(80.0, Theme::CONTROL_HEIGHT))
                         .fill(Theme::PRIMARY)
                         .corner_radius(egui::CornerRadius::same(Theme::R_SM));
 
-                        if ui.add(scan_btn).clicked() {
+                        if ui
+                            .add_sized(egui::vec2(80.0, Theme::CONTROL_HEIGHT), scan_btn)
+                            .clicked()
+                        {
                             (props.on_scan)();
                         }
 
                         ui.add_space(8.0);
 
-                        ui.add(
-                            egui::TextEdit::singleline(props.steam_id)
-                                .font(egui::FontId::proportional(Theme::FONT_BODY))
-                                .vertical_align(egui::Align::Center)
-                                .margin(egui::Margin::symmetric(8, 0))
-                                .desired_width(ui.available_width())
-                                .min_size(egui::vec2(0.0, Theme::CONTROL_HEIGHT)),
+                        let text_edit = egui::TextEdit::singleline(props.steam_id)
+                            .font(egui::FontId::proportional(Theme::FONT_BODY))
+                            .vertical_align(egui::Align::Center)
+                            .margin(egui::Margin::symmetric(8, 6));
+
+                        ui.add_sized(
+                            egui::vec2(ui.available_width(), Theme::CONTROL_HEIGHT),
+                            text_edit,
                         );
                     });
                 });
