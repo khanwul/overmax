@@ -19,6 +19,10 @@ pub fn install_cjk_fonts(_ctx: &egui::Context) -> bool {
     false
 }
 
+pub fn init_overlay_window_immediate() -> Option<isize> {
+    None
+}
+
 pub fn native_options(_settings: &overmax_data::Settings) -> eframe::NativeOptions {
     eframe::NativeOptions::default()
 }
@@ -30,6 +34,7 @@ impl PlatformState {
         _ctx_holder: &Arc<Mutex<Option<egui::Context>>>,
         _settings: &Arc<Mutex<Value>>,
         _command_tx: &Sender<UiCommand>,
+        _initial_hwnd: Option<isize>,
     ) -> Result<Self, String> {
         Ok(Self)
     }

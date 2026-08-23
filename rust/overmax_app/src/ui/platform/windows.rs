@@ -131,28 +131,35 @@ pub fn is_position_on_screen(x: f32, y: f32) -> bool {
     }
 }
 
+pub fn init_overlay_window_immediate() -> Option<isize> {
+    if let Some(hwnd) = find_overlay_window() {
+        setup_overlay_window(hwnd);
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
+                hwnd,
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE,
+            );
+        }
+        Some(hwnd as isize)
+    } else {
+        None
+    }
+}
+
 pub fn native_options(settings: &overmax_data::Settings) -> eframe::NativeOptions {
     let overlay = settings.overlay();
-    let is_lite = overlay.lite_mode;
-
-    let init_w = crate::ui::overlay_ui::BASE_WIDTH;
-    let init_h = if is_lite {
-        crate::ui::overlay_ui::LITE_BASE_HEIGHT
-    } else {
-        crate::ui::overlay_ui::BASE_HEIGHT
-    };
 
     let mut vp = ViewportBuilder::default()
         .with_title("Overmax")
-        .with_inner_size([init_w, init_h])
-        .with_min_inner_size([120.0, 40.0])
+        .with_inner_size([1.0, 1.0])
+        .with_min_inner_size([1.0, 1.0])
         .with_resizable(false)
         .with_decorations(false)
         .with_transparent(true)
         .with_has_shadow(false)
         .with_taskbar(false)
         .with_always_on_top()
-        .with_visible(!is_lite);
+        .with_visible(false);
 
     let pos = &overlay.position;
     if let (Some(x), Some(y)) = (pos.x, pos.y) {
@@ -369,6 +376,7 @@ impl PlatformState {
         ctx_holder: &Arc<Mutex<Option<egui::Context>>>,
         settings: &Arc<Mutex<Value>>,
         command_tx: &Sender<UiCommand>,
+        initial_hwnd: Option<isize>,
     ) -> Result<Self, String> {
         let tray = if settings
             .lock()
@@ -385,7 +393,10 @@ impl PlatformState {
             is_dragging: false,
             drag_anchor: None,
             _tray: tray,
-            win_cache: WindowsWindowCache::default(),
+            win_cache: WindowsWindowCache {
+                cached_hwnd: initial_hwnd,
+                ..Default::default()
+            },
             last_painted_rect: None,
         })
     }

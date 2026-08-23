@@ -89,6 +89,7 @@ pub fn run_native_app() -> eframe::Result<()> {
         "Overmax",
         options,
         Box::new(|cc| {
+            let initial_hwnd = platform::init_overlay_window_immediate();
             let mut visuals = eframe::egui::Visuals::dark();
             visuals.panel_fill = eframe::egui::Color32::TRANSPARENT;
             visuals.window_fill = eframe::egui::Color32::TRANSPARENT;
@@ -97,7 +98,7 @@ pub fn run_native_app() -> eframe::Result<()> {
             visuals.widgets.noninteractive.bg_stroke = eframe::egui::Stroke::NONE;
             cc.egui_ctx.set_visuals(visuals);
             let _ = overlay_ui::install_cjk_fonts(&cc.egui_ctx);
-            NativeApp::new(cc.egui_ctx.clone())
+            NativeApp::new(cc.egui_ctx.clone(), initial_hwnd)
                 .map(|app| Box::new(app) as Box<dyn eframe::App>)
                 .map_err(|e| {
                     eprintln!("native app init: {e}");
@@ -265,7 +266,7 @@ pub struct NativeApp {
 }
 
 impl NativeApp {
-    fn new(initial_ctx: egui::Context) -> Result<Self, String> {
+    fn new(initial_ctx: egui::Context, initial_hwnd: Option<isize>) -> Result<Self, String> {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
         let root = Arc::new(root);
         let defaults: Value = serde_json::from_str(include_str!(concat!(
@@ -357,7 +358,8 @@ impl NativeApp {
 
         let ctx_holder: Arc<Mutex<Option<egui::Context>>> = Arc::new(Mutex::new(Some(initial_ctx)));
 
-        let platform = platform::PlatformState::new(&ctx_holder, &merged_settings, &ui_cmd_tx)?;
+        let platform =
+            platform::PlatformState::new(&ctx_holder, &merged_settings, &ui_cmd_tx, initial_hwnd)?;
 
         let ctx_holder_clone = ctx_holder.clone();
 

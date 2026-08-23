@@ -67,6 +67,10 @@ pub(crate) fn parse_fontconfig_match(output: &str) -> Option<(&str, u32)> {
     (!file.is_empty()).then_some((file, index))
 }
 
+pub fn init_overlay_window_immediate() -> Option<isize> {
+    None
+}
+
 pub fn native_options(settings: &overmax_data::Settings) -> eframe::NativeOptions {
     let _ = settings;
     eframe::NativeOptions {
@@ -94,6 +98,7 @@ impl PlatformState {
         ctx_holder: &Arc<Mutex<Option<egui::Context>>>,
         _settings: &Arc<Mutex<Value>>,
         command_tx: &Sender<UiCommand>,
+        _initial_hwnd: Option<isize>,
     ) -> Result<Self, String> {
         let ctx_holder_clone = ctx_holder.clone();
         let repaint = Arc::new(move || {

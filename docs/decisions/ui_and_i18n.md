@@ -30,5 +30,7 @@
 | 2026-08-21 | 스마트 추천 vs 클래식 추천(단순 Rate 정렬) On/Off 설정 토글 도입 | 기존의 단순 달성률 정렬 방식을 선호하는 플레이어를 위해 UI 설정에 `smart_recommend` 토글을 제공하여, 비활성화 시 사유 뱃지/권장 난이도 생략 및 100% 클래식 달성률 오름차순으로 완전 폴백 지원 | [settings.rs](../../rust/overmax_data/src/config/settings.rs) / [settings_ui.rs](../../rust/overmax_app/src/ui/settings_ui.rs) / [recommend.rs](../../rust/overmax_data/src/service/recommend.rs) |
 | 2026-08-21 | 푸터 라벨 및 추천 사유(Reason) 호버 툴팁 i18n 완전 다국어화 | 푸터의 `"🎯 권장 {}"`, `"평균"` 및 추천 사유 뱃지의 5종 툴팁(Top-50 수성/돌파, 상승 모멘텀, 회복, 방치 재도전)에 `t!` 매크로를 전면 적용하여 영어/한국어 100% 완전 다국어화 완성 | [i18n.rs](../../rust/overmax_app/src/ui/i18n.rs) / [overlay_ui.rs](../../rust/overmax_app/src/ui/overlay_ui.rs) / [overlay_recommend_ui.rs](../../rust/overmax_app/src/ui/overlay_recommend_ui.rs) |
 | 2026-08-24 | 추천 레벨(권장 레벨) 기준 레이팅 정확도(Target Rate) 4단계 설정화 | 플레이어 성향(클리어/순회 지향 vs 판정/퍼펙트 지향)에 따라 맞춤형 권장 레벨을 도출할 수 있도록 97%, 99%(기본), 99.5%, 100% 4단계 1열 선택 버튼 UI 및 Effective Floor 역산 로직 반영 | [settings.rs](../../rust/overmax_data/src/config/settings.rs) / [settings_ui.rs](../../rust/overmax_app/src/ui/settings_ui.rs) / [scoring.rs](../../rust/overmax_data/src/service/recommend/scoring.rs) |
+| 2026-08-24 | 기동 시 오버레이 뷰포트 흰색 깜빡임(Flashing) 소거 및 0ms 즉각 은닉/투명화 | eframe 클로저 진입 즉시 Win32 핸들을 획득하여 `setup_overlay_window` 및 `SW_HIDE`를 실행하고, 초기 뷰포트 크기를 1x1 마이크로 크기로 설정하여 앱 기동 시 불투명 흰색 프레임이 노출되던 결함을 100% 소거 | [windows.rs](../../rust/overmax_app/src/ui/platform/windows.rs) / [native_app.rs](../../rust/overmax_app/src/ui/native_app.rs) |
+
 
 
