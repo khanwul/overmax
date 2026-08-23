@@ -632,7 +632,7 @@ fn capture_section(ui: &mut egui::Ui, draft: &mut Value) {
 
     #[cfg(target_os = "windows")]
     {
-        let mut engine = screen_capture
+        let engine = screen_capture
             .get("engine")
             .and_then(Value::as_str)
             .unwrap_or("auto")
@@ -643,49 +643,36 @@ fn capture_section(ui: &mut egui::Ui, draft: &mut Value) {
             crate::t!("settings-capture-method-win"),
             crate::t!("settings-capture-engine-hint"),
             |ui| {
-                let mut changed = false;
-                egui::ComboBox::from_id_salt("capture_engine_combo")
-                    .selected_text(match engine.as_str() {
-                        "dxgi" => crate::t!("settings-capture-mode-dxgi"),
-                        "gdi" => crate::t!("settings-capture-mode-gdi"),
-                        _ => crate::t!("settings-capture-mode-auto"),
-                    })
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_value(
-                                &mut engine,
-                                "auto".to_string(),
-                                crate::t!("settings-capture-mode-auto"),
-                            )
-                            .clicked()
-                        {
-                            changed = true;
-                        }
-                        if ui
-                            .selectable_value(
-                                &mut engine,
-                                "gdi".to_string(),
-                                crate::t!("settings-capture-mode-gdi"),
-                            )
-                            .clicked()
-                        {
-                            changed = true;
-                        }
-                        if ui
-                            .selectable_value(
-                                &mut engine,
-                                "dxgi".to_string(),
-                                crate::t!("settings-capture-mode-dxgi"),
-                            )
-                            .clicked()
-                        {
-                            changed = true;
-                        }
-                    });
+                ui.horizontal(|ui| {
+                    ui.style_mut().spacing.item_spacing.x = 4.0;
+                    ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
 
-                if changed {
-                    screen_capture.insert("engine".into(), json!(engine));
-                }
+                    for (label, val) in [
+                        (crate::t!("settings-capture-mode-auto"), "auto"),
+                        (crate::t!("settings-capture-mode-dxgi"), "dxgi"),
+                        (crate::t!("settings-capture-mode-gdi"), "gdi"),
+                    ] {
+                        let is_active = engine == val;
+                        let btn = egui::Button::new(
+                            RichText::new(label).size(Theme::FONT_SMALL).strong(),
+                        )
+                        .fill(if is_active {
+                            Theme::TAB_ACTIVE_BG
+                        } else {
+                            Theme::TAB_DIM_BG
+                        })
+                        .stroke(Stroke::new(1.0_f32, Theme::STROKE))
+                        .corner_radius(egui::CornerRadius::same(Theme::R_SM))
+                        .wrap();
+
+                        if ui
+                            .add_sized(egui::vec2(84.0, Theme::CONTROL_HEIGHT), btn)
+                            .clicked()
+                        {
+                            screen_capture.insert("engine".into(), json!(val));
+                        }
+                    }
+                });
             },
         );
 

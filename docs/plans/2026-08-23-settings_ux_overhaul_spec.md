@@ -239,9 +239,9 @@ hover하지 않아도 각 섹션/컨트롤이 무엇을 하는지 알 수 있게
 
 ## 진행 순서 체크리스트
 
-- [ ] Phase 1: V-Archive 탭 재구성 + 자동 조회
-- [ ] Phase 2: 탭/섹션 IA 재편 (4탭)
-- [ ] Phase 3: 설명력 보강
-- [ ] Phase 4: 비주얼 톤 통일
+- [x] Phase 1: V-Archive 탭 재구성 + 자동 조회
+- [x] Phase 2: 탭/섹션 IA 재편 (4탭)
+- [x] Phase 3: 설명력 보강
+- [x] Phase 4: 비주얼 톤 통일
 
 각 Phase 완료 후 diff를 사용자에게 보여주고 확인받은 다음 다음 Phase로 진행한다.
