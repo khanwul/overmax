@@ -1,5 +1,6 @@
 pub mod components;
 pub mod debug_ui;
+pub mod dialog_theme;
 pub mod i18n;
 #[cfg(target_os = "linux")]
 pub mod linux_layer_overlay;

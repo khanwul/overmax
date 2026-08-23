@@ -7,8 +7,8 @@ use std::sync::atomic::Ordering;
 
 use crate::system::native_helpers;
 use crate::ui::debug_ui;
+use crate::ui::dialog_theme::DialogTheme;
 use crate::ui::native_app::NativeApp;
-use crate::ui::overlay_theme::Theme;
 #[cfg(target_os = "windows")]
 use crate::ui::overlay_ui;
 use crate::ui::settings_ui;
@@ -98,7 +98,7 @@ impl NativeApp {
 
         ctx.show_viewport_deferred(
             native_helpers::vp_debug(),
-            Self::auxiliary_viewport(&title, [720.0, 480.0]),
+            Self::auxiliary_viewport(&title, [760.0, 480.0]),
             move |ui, class| {
                 // 디버그 창이 비활성(Inactive) 상태라도 게임 플레이 중 탐지 결과 및 로그가 실시간 모니터링되도록 갱신 요청
                 ui.ctx()
@@ -241,7 +241,7 @@ impl NativeApp {
         };
         ctx.show_viewport_deferred(
             native_helpers::vp_settings(),
-            Self::auxiliary_viewport(crate::t!("app-settings-window"), [520.0, 560.0]),
+            Self::auxiliary_viewport(crate::t!("app-settings-window"), [580.0, 600.0]),
             move |ui, class| {
                 ui.ctx().set_pixels_per_point(1.0);
                 #[cfg(debug_assertions)]
@@ -256,8 +256,11 @@ impl NativeApp {
                 egui::Panel::bottom("sett_actions")
                     .frame(
                         egui::Frame::new()
-                            .fill(Theme::PANEL_BG)
-                            .inner_margin(egui::Margin::symmetric(24, 16)),
+                            .fill(DialogTheme::BG_WINDOW)
+                            .inner_margin(egui::Margin::symmetric(
+                                DialogTheme::PANEL_PADDING as i8,
+                                14,
+                            )),
                     )
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -266,27 +269,27 @@ impl NativeApp {
                                 |ui| {
                                     let close_btn = egui::Button::new(
                                         RichText::new(crate::t!("app-close"))
-                                            .size(Theme::FONT_BODY),
+                                            .size(DialogTheme::FONT_BODY),
                                     )
-                                    .min_size(egui::vec2(80.0, Theme::CONTROL_HEIGHT))
-                                    .fill(Theme::SECONDARY)
-                                    .corner_radius(egui::CornerRadius::same(Theme::R_SM));
+                                    .min_size(egui::vec2(84.0, DialogTheme::CONTROL_HEIGHT))
+                                    .fill(DialogTheme::SECONDARY)
+                                    .corner_radius(egui::CornerRadius::same(DialogTheme::R_SM));
                                     if ui.add(close_btn).clicked() {
                                         log_close_request("settings_close_button");
                                         open.store(false, Ordering::Relaxed);
                                         ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
                                     }
 
-                                    ui.add_space(8.0);
+                                    ui.add_space(DialogTheme::GAP_SM);
 
                                     let save_btn = egui::Button::new(
                                         RichText::new(crate::t!("app-save"))
-                                            .size(Theme::FONT_BODY)
+                                            .size(DialogTheme::FONT_BODY)
                                             .strong(),
                                     )
-                                    .min_size(egui::vec2(100.0, Theme::CONTROL_HEIGHT))
-                                    .fill(Theme::PRIMARY)
-                                    .corner_radius(egui::CornerRadius::same(Theme::R_SM));
+                                    .min_size(egui::vec2(100.0, DialogTheme::CONTROL_HEIGHT))
+                                    .fill(DialogTheme::PRIMARY)
+                                    .corner_radius(egui::CornerRadius::same(DialogTheme::R_SM));
                                     if ui.add(save_btn).clicked() {
                                         let base_g = overmax_core::lock_clone_or_default(&base);
                                         let mut merged_g =
@@ -353,7 +356,7 @@ impl NativeApp {
 
         ctx.show_viewport_deferred(
             native_helpers::vp_sync(),
-            Self::auxiliary_viewport(crate::t!("sync-varchive-sync"), [560.0, 720.0]),
+            Self::auxiliary_viewport(crate::t!("sync-varchive-sync"), [600.0, 720.0]),
             move |ui, class| {
                 ui.ctx().set_pixels_per_point(1.0);
                 #[cfg(debug_assertions)]
