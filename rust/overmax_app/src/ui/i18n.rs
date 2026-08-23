@@ -440,6 +440,30 @@ macro_rules! t {
             En => "You must configure the account.txt file path to use auto-upload."
         )
     };
+    ("settings-tab-general") => {
+        $crate::t_select!(
+            Ko => "일반",
+            En => "General"
+        )
+    };
+    ("settings-tab-recommend") => {
+        $crate::t_select!(
+            Ko => "추천",
+            En => "Recommendation"
+        )
+    };
+    ("settings-tab-varchive") => {
+        $crate::t_select!(
+            Ko => "V-Archive",
+            En => "V-Archive"
+        )
+    };
+    ("settings-tab-advanced") => {
+        $crate::t_select!(
+            Ko => "고급",
+            En => "Advanced"
+        )
+    };
     ("settings-general") => {
         $crate::t_select!(
             Ko => "일반",

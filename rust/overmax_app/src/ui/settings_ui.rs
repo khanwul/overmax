@@ -49,7 +49,12 @@ pub fn render_settings_form(ui: &mut egui::Ui, draft: &mut Value, ctx: &Settings
     render_pill_tabs(
         ui,
         "settings_tabs",
-        &["UI", "V-Archive", "System"],
+        &[
+            crate::t!("settings-tab-general"),
+            crate::t!("settings-tab-recommend"),
+            crate::t!("settings-tab-varchive"),
+            crate::t!("settings-tab-advanced"),
+        ],
         &mut active,
     );
     ui.data_mut(|d| d.insert_temp(id, active));
@@ -59,19 +64,30 @@ pub fn render_settings_form(ui: &mut egui::Ui, draft: &mut Value, ctx: &Settings
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| match active {
-            0 => ui_tab(ui, draft),
-            1 => varchive_tab(ui, draft, ctx),
-            _ => system_tab(ui, draft, ctx),
+            0 => general_tab(ui, draft),
+            1 => recommend_tab(ui, draft),
+            2 => varchive_tab(ui, draft, ctx),
+            _ => advanced_tab(ui, draft, ctx),
         });
 }
 
-fn ui_tab(ui: &mut egui::Ui, draft: &mut Value) {
+fn general_tab(ui: &mut egui::Ui, draft: &mut Value) {
+    section_frame(ui, crate::t!("settings-general"), |ui| {
+        general_section(ui, draft);
+    });
+    ui.add_space(16.0);
     section_frame(ui, crate::t!("settings-overlay-section"), |ui| {
         overlay_section(ui, draft);
     });
-    ui.add_space(16.0);
+}
+
+fn recommend_tab(ui: &mut egui::Ui, draft: &mut Value) {
     section_frame(ui, crate::t!("settings-recommend-section"), |ui| {
         recommend_section(ui, draft);
+    });
+    ui.add_space(16.0);
+    section_frame(ui, crate::t!("settings-recommend-provider"), |ui| {
+        recommend_provider_section(ui, draft);
     });
 }
 
@@ -528,48 +544,47 @@ fn scan_candidates_row(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiCon
     });
 }
 
-fn system_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
+fn advanced_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
     section_frame(ui, crate::t!("settings-diagnostics"), |ui| {
-        debug_section(ui, draft, ctx)
+        debug_section(ui, draft, ctx);
     });
+    ui.add_space(16.0);
     section_frame(ui, crate::t!("settings-screen-capture"), |ui| {
-        capture_section(ui, draft)
+        capture_section(ui, draft);
     });
-    section_frame(ui, crate::t!("settings-general"), |ui| {
-        general_section(ui, draft)
-    });
-    section_frame(ui, crate::t!("settings-recommend-provider"), |ui| {
-        recommend_provider_section(ui, draft)
-    });
+    ui.add_space(16.0);
     section_frame(ui, crate::t!("settings-update-section"), |ui| {
-        update_section(ui, draft)
+        update_section(ui, draft);
     });
     #[cfg(target_os = "linux")]
-    section_frame(ui, crate::t!("Linux 앱 실행"), |ui| {
-        form_row(ui, crate::t!("앱 메뉴"), |ui| {
-            if ui.button(crate::t!("바로가기 생성")).clicked() {
-                let result = crate::system::desktop_entry_linux::install(ctx.root.as_path());
-                let (title, description, level) = match result {
-                    Ok(path) => (
-                        "Overmax",
-                        crate::t!("sys-shortcut-create-success", path = path.display()),
-                        rfd::MessageLevel::Info,
-                    ),
-                    Err(error) => (
-                        "Overmax",
-                        crate::t!("sys-shortcut-create-failed", error = error),
-                        rfd::MessageLevel::Error,
-                    ),
-                };
-                let _ = rfd::MessageDialog::new()
-                    .set_title(title)
-                    .set_description(description)
-                    .set_level(level)
-                    .set_buttons(rfd::MessageButtons::Ok)
-                    .show();
-            }
+    {
+        ui.add_space(16.0);
+        section_frame(ui, crate::t!("Linux 앱 실행"), |ui| {
+            form_row(ui, crate::t!("앱 메뉴"), |ui| {
+                if ui.button(crate::t!("바로가기 생성")).clicked() {
+                    let result = crate::system::desktop_entry_linux::install(ctx.root.as_path());
+                    let (title, description, level) = match result {
+                        Ok(path) => (
+                            "Overmax",
+                            crate::t!("sys-shortcut-create-success", path = path.display()),
+                            rfd::MessageLevel::Info,
+                        ),
+                        Err(error) => (
+                            "Overmax",
+                            crate::t!("sys-shortcut-create-failed", error = error),
+                            rfd::MessageLevel::Error,
+                        ),
+                    };
+                    let _ = rfd::MessageDialog::new()
+                        .set_title(title)
+                        .set_description(description)
+                        .set_level(level)
+                        .set_buttons(rfd::MessageButtons::Ok)
+                        .show();
+                }
+            });
         });
-    });
+    }
 }
 
 fn debug_section(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
