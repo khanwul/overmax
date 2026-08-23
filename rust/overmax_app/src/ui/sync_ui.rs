@@ -766,7 +766,6 @@ fn badge(ui: &mut egui::Ui, text: &str, bg: Color32, text_color: Color32) {
 
 pub fn close_if_requested(ctx: &egui::Context, open: &Arc<AtomicBool>) {
     if ctx.input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape)) {
-        crate::ui::native_app_viewports::log_close_request("sync_ui::close_if_requested");
         open.store(false, Ordering::Relaxed);
         ctx.request_repaint_of(ctx.parent_viewport_id());
     }

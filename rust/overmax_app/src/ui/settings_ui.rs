@@ -1,12 +1,10 @@
 //! Settings editor: overlay scale/opacity and capture/matcher intervals.
 
 use crate::ui::dialog_theme::{
-    apply_dialog_style, field_row, render_dialog_tabs, section_card, segmented_row, setting_row,
-    DialogTheme,
+    apply_dialog_style, field_row, render_dialog_tabs, rtl_slider, section_card, segmented_row,
+    setting_row, text_input_full, text_input_with_button, DialogTheme,
 };
-use eframe::egui::{
-    self, Color32, CornerRadius, Frame, Margin, RichText, Slider, Stroke, TextEdit, ViewportClass,
-};
+use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Stroke, ViewportClass};
 use overmax_data::{diff_settings, load_merged_settings, normalize_settings, save_user_settings};
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -93,55 +91,27 @@ fn recommend_tab(ui: &mut egui::Ui, draft: &mut Value) {
 }
 
 fn recommend_section(ui: &mut egui::Ui, draft: &mut Value) {
-    let mut smart_reco = draft
+    let smart_reco = draft
         .get("recommend")
         .and_then(|r| r.get("smart_recommend"))
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    setting_row(
+    segmented_row(
         ui,
         crate::t!("settings-smart-recommend"),
         crate::t!("settings-smart-recommend-hint"),
         |ui| {
-            let response = ui
-                .checkbox(&mut smart_reco, crate::t!("settings-enable"))
-                .on_hover_text(crate::t!("settings-smart-recommend-desc"));
-
-            if response.changed() {
-                if !draft.get("recommend").is_some_and(|v| v.is_object()) {
-                    draft["recommend"] = serde_json::json!({});
-                }
-                draft["recommend"]["smart_recommend"] = serde_json::json!(smart_reco);
-                ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
-            }
-        },
-    );
-
-    ui.add_space(DialogTheme::GAP_MD);
-
-    let current_target = draft
-        .get("recommend")
-        .and_then(|r| r.get("target_rate"))
-        .and_then(|v| v.as_f64())
-        .unwrap_or(99.0);
-
-    segmented_row(
-        ui,
-        crate::t!("settings-target-rate"),
-        crate::t!("settings-target-rate-hint"),
-        |ui| {
             ui.horizontal(|ui| {
                 ui.style_mut().spacing.item_spacing.x = DialogTheme::GAP_XS;
-                ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
+                ui.spacing_mut().button_padding = egui::vec2(8.0, 4.0);
 
-                for (label, val) in [
-                    ("97%", 97.0),
-                    ("99%", 99.0),
-                    ("99.5%", 99.5),
-                    ("100%", 100.0),
+                // right_to_left 이므로 역순으로 추가하여 화면에는 [스마트 | 클래식] 순으로 배치
+                for (label, is_smart) in [
+                    (crate::t!("settings-reco-mode-classic"), false),
+                    (crate::t!("settings-reco-mode-smart"), true),
                 ] {
-                    let is_active = (current_target - val).abs() < 0.001;
+                    let is_active = smart_reco == is_smart;
                     let btn = egui::Button::new(
                         RichText::new(label).size(DialogTheme::FONT_BODY).strong(),
                     )
@@ -150,25 +120,80 @@ fn recommend_section(ui: &mut egui::Ui, draft: &mut Value) {
                     } else {
                         DialogTheme::BG_CONTROL
                     })
-                    .stroke(Stroke::new(1.0_f32, DialogTheme::BG_CARD_STROKE))
+                    .stroke(Stroke::new(1.0, DialogTheme::BG_CARD_STROKE))
                     .corner_radius(CornerRadius::same(DialogTheme::R_SM))
-                    .wrap();
+                    .wrap_mode(egui::TextWrapMode::Extend);
 
                     if ui
-                        .add_sized(egui::vec2(60.0, DialogTheme::CONTROL_HEIGHT), btn)
-                        .on_hover_text(crate::t!("settings-target-rate-desc"))
+                        .add_sized(egui::vec2(84.0, DialogTheme::CONTROL_HEIGHT), btn)
+                        .on_hover_text(crate::t!("settings-smart-recommend-desc"))
                         .clicked()
                     {
                         if !draft.get("recommend").is_some_and(|v| v.is_object()) {
                             draft["recommend"] = serde_json::json!({});
                         }
-                        draft["recommend"]["target_rate"] = serde_json::json!(val);
+                        draft["recommend"]["smart_recommend"] = serde_json::json!(is_smart);
                         ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
                     }
                 }
             });
         },
     );
+
+    if smart_reco {
+        ui.add_space(DialogTheme::GAP_MD);
+
+        let current_target = draft
+            .get("recommend")
+            .and_then(|r| r.get("target_rate"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(99.0);
+
+        segmented_row(
+            ui,
+            crate::t!("settings-target-rate"),
+            crate::t!("settings-target-rate-hint"),
+            |ui| {
+                ui.horizontal(|ui| {
+                    ui.style_mut().spacing.item_spacing.x = DialogTheme::GAP_XS;
+                    ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
+
+                    // right_to_left 이므로 역순으로 추가하여 화면에는 [97% | 99% | 99.5% | 100%] 순으로 배치
+                    for (label, val) in [
+                        ("100%", 100.0),
+                        ("99.5%", 99.5),
+                        ("99%", 99.0),
+                        ("97%", 97.0),
+                    ] {
+                        let is_active = (current_target - val).abs() < 0.001;
+                        let btn = egui::Button::new(
+                            RichText::new(label).size(DialogTheme::FONT_BODY).strong(),
+                        )
+                        .fill(if is_active {
+                            DialogTheme::BG_CONTROL_ACTIVE
+                        } else {
+                            DialogTheme::BG_CONTROL
+                        })
+                        .stroke(Stroke::new(1.0, DialogTheme::BG_CARD_STROKE))
+                        .corner_radius(CornerRadius::same(DialogTheme::R_SM))
+                        .wrap();
+
+                        if ui
+                            .add_sized(egui::vec2(60.0, DialogTheme::CONTROL_HEIGHT), btn)
+                            .on_hover_text(crate::t!("settings-target-rate-desc"))
+                            .clicked()
+                        {
+                            if !draft.get("recommend").is_some_and(|v| v.is_object()) {
+                                draft["recommend"] = serde_json::json!({});
+                            }
+                            draft["recommend"]["target_rate"] = serde_json::json!(val);
+                            ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
+                        }
+                    }
+                });
+            },
+        );
+    }
 }
 
 fn overlay_section(ui: &mut egui::Ui, draft: &mut Value) {
@@ -188,7 +213,9 @@ fn overlay_section(ui: &mut egui::Ui, draft: &mut Value) {
         ui.horizontal(|ui| {
             ui.style_mut().spacing.item_spacing.x = DialogTheme::GAP_XS;
             ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
-            for (label, val) in [("S", 0.75), ("M", 1.0), ("L", 1.25), ("XL", 1.5)] {
+
+            // right_to_left 이므로 역순으로 추가하여 화면에는 [S | M | L | XL] 순으로 배치
+            for (label, val) in [("XL", 1.5), ("L", 1.25), ("M", 1.0), ("S", 0.75)] {
                 let is_active = (current_scale - val).abs() < 0.01;
                 let btn =
                     egui::Button::new(RichText::new(label).size(DialogTheme::FONT_BODY).strong())
@@ -197,7 +224,7 @@ fn overlay_section(ui: &mut egui::Ui, draft: &mut Value) {
                         } else {
                             DialogTheme::BG_CONTROL
                         })
-                        .stroke(Stroke::new(1.0_f32, DialogTheme::BG_CARD_STROKE))
+                        .stroke(Stroke::new(1.0, DialogTheme::BG_CARD_STROKE))
                         .corner_radius(CornerRadius::same(DialogTheme::R_SM))
                         .wrap();
 
@@ -219,15 +246,14 @@ fn overlay_section(ui: &mut egui::Ui, draft: &mut Value) {
         .and_then(|v| v.as_f64())
         .unwrap_or(0.8);
     setting_row(ui, crate::t!("settings-opacity"), "", |ui| {
-        let slider = Slider::new(&mut opacity, 0.1..=1.0)
-            .step_by(0.1)
-            .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
-            .trailing_fill(true);
-
-        if ui
-            .add_sized(egui::vec2(180.0, DialogTheme::CONTROL_HEIGHT), slider)
-            .changed()
-        {
+        if rtl_slider(
+            ui,
+            &mut opacity,
+            0.1..=1.0,
+            0.1,
+            |v| format!("{:.0}%", v * 100.0),
+            130.0,
+        ) {
             overlay.insert("base_opacity".into(), serde_json::json!(opacity));
             ui.ctx().request_repaint_of(ui.ctx().parent_viewport_id());
         }
@@ -389,8 +415,6 @@ fn varchive_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
         );
         ui.add_space(DialogTheme::GAP_MD);
         account_path_row(ui, draft, ctx);
-        ui.add_space(DialogTheme::GAP_LG);
-        scan_candidates_row(ui, draft, ctx);
     });
 }
 
@@ -423,46 +447,17 @@ fn v_archive_id_row(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContex
         .to_string();
 
     field_row(ui, "V-Archive ID", "", |ui| {
-        ui.horizontal(|ui| {
-            let text_res = ui.add(
-                TextEdit::singleline(&mut text)
-                    .font(egui::FontId::proportional(DialogTheme::FONT_BODY))
-                    .vertical_align(egui::Align::Center)
-                    .margin(egui::Margin::symmetric(8, 0))
-                    .desired_width(ui.available_width() - 90.0)
-                    .min_size(egui::vec2(0.0, DialogTheme::CONTROL_HEIGHT)),
-            );
-            if text_res.changed() {
-                entry.insert("v_id".into(), json!(text.trim()));
-            }
-
-            ui.add_space(DialogTheme::GAP_XS);
-
-            let has_id = !text.trim().is_empty();
-            ui.add_enabled_ui(has_id, |ui| {
-                let refresh_btn = egui::Button::new(
-                    RichText::new(crate::t!("sync-refresh")).size(DialogTheme::FONT_BODY),
-                )
-                .fill(if has_id {
-                    DialogTheme::BG_CONTROL_ACTIVE
-                } else {
-                    DialogTheme::BG_CONTROL
-                })
-                .corner_radius(CornerRadius::same(DialogTheme::R_SM))
-                .wrap();
-
-                if ui
-                    .add_sized(egui::vec2(84.0, DialogTheme::CONTROL_HEIGHT), refresh_btn)
-                    .clicked()
-                {
-                    let _ = ctx.fetch_tx.send((
-                        ctx.current_steam_id.clone(),
-                        text.trim().to_string(),
-                        0,
-                    ));
-                }
-            });
-        });
+        let has_id = !text.trim().is_empty();
+        let (changed, clicked) =
+            text_input_with_button(ui, &mut text, "", crate::t!("sync-refresh"), has_id);
+        if clicked {
+            let _ = ctx
+                .fetch_tx
+                .send((ctx.current_steam_id.clone(), text.trim().to_string(), 0));
+        }
+        if changed {
+            entry.insert("v_id".into(), json!(text.trim()));
+        }
     });
 }
 
@@ -475,83 +470,18 @@ fn account_path_row(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContex
             .unwrap_or("")
             .to_string();
 
-        ui.horizontal(|ui| {
-            let text_res = ui.add(
-                TextEdit::singleline(&mut path_str)
-                    .font(egui::FontId::proportional(DialogTheme::FONT_BODY))
-                    .vertical_align(egui::Align::Center)
-                    .margin(egui::Margin::symmetric(8, 0))
-                    .desired_width(ui.available_width() - 90.0)
-                    .min_size(egui::vec2(0.0, DialogTheme::CONTROL_HEIGHT)),
-            );
-            if text_res.changed() {
-                entry.insert("account_path".into(), json!(path_str.trim()));
-            }
-
-            ui.add_space(DialogTheme::GAP_XS);
-
-            let find_btn = egui::Button::new(
-                RichText::new(crate::t!("settings-browse")).size(DialogTheme::FONT_BODY),
-            )
-            .fill(DialogTheme::BG_CONTROL_ACTIVE)
-            .corner_radius(CornerRadius::same(DialogTheme::R_SM))
-            .wrap();
-            if ui
-                .add_sized(egui::vec2(84.0, DialogTheme::CONTROL_HEIGHT), find_btn)
-                .clicked()
+        let (changed, clicked) =
+            text_input_with_button(ui, &mut path_str, "", crate::t!("settings-browse"), true);
+        if clicked {
+            if let Some(file_path) = rfd::FileDialog::new()
+                .add_filter("Text Files", &["txt"])
+                .pick_file()
             {
-                if let Some(file_path) = rfd::FileDialog::new()
-                    .add_filter("Text Files", &["txt"])
-                    .pick_file()
-                {
-                    let path_str = file_path.to_string_lossy().to_string();
-                    entry.insert("account_path".into(), json!(path_str));
-                }
+                let new_path = file_path.to_string_lossy().to_string();
+                entry.insert("account_path".into(), json!(new_path));
             }
-        });
-    });
-}
-
-fn scan_candidates_row(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
-    let entry = user_entry_mut(draft, &ctx.current_steam_id);
-    let account_path = entry
-        .get("account_path")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-    let has_account = !account_path.is_empty();
-
-    ui.vertical(|ui| {
-        ui.add_enabled_ui(has_account, |ui| {
-            let scan_btn = egui::Button::new(
-                RichText::new(crate::t!("settings-find-sync-candidates-btn"))
-                    .size(DialogTheme::FONT_BODY)
-                    .strong(),
-            )
-            .min_size(egui::vec2(ui.available_width(), 40.0))
-            .fill(if has_account {
-                DialogTheme::PRIMARY
-            } else {
-                DialogTheme::BG_CONTROL
-            })
-            .corner_radius(CornerRadius::same(DialogTheme::R_SM));
-
-            if ui.add(scan_btn).clicked() {
-                if let Ok(mut sid) = ctx.sync_steam_id.lock() {
-                    *sid = ctx.current_steam_id.clone();
-                }
-                ctx.sync_open.store(true, Ordering::Relaxed);
-                ctx.scan_pending.store(true, Ordering::Relaxed);
-            }
-        });
-
-        if !has_account {
-            ui.add_space(DialogTheme::GAP_XS);
-            ui.label(
-                RichText::new(crate::t!("settings-account-path-required"))
-                    .color(DialogTheme::TEXT_MUTED)
-                    .size(DialogTheme::FONT_HINT),
-            );
+        } else if changed {
+            entry.insert("account_path".into(), json!(path_str.trim()));
         }
     });
 }
@@ -638,10 +568,11 @@ fn capture_section(ui: &mut egui::Ui, draft: &mut Value) {
                     ui.style_mut().spacing.item_spacing.x = DialogTheme::GAP_XS;
                     ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
 
+                    // right_to_left 이므로 역순으로 추가하여 화면에는 [자동 | DXGI | GDI] 순으로 배치
                     for (label, val) in [
-                        (crate::t!("settings-capture-mode-auto"), "auto"),
-                        (crate::t!("settings-capture-mode-dxgi"), "dxgi"),
                         (crate::t!("settings-capture-mode-gdi"), "gdi"),
+                        (crate::t!("settings-capture-mode-dxgi"), "dxgi"),
+                        (crate::t!("settings-capture-mode-auto"), "auto"),
                     ] {
                         let is_active = engine == val;
                         let btn = egui::Button::new(
@@ -652,12 +583,12 @@ fn capture_section(ui: &mut egui::Ui, draft: &mut Value) {
                         } else {
                             DialogTheme::BG_CONTROL
                         })
-                        .stroke(Stroke::new(1.0_f32, DialogTheme::BG_CARD_STROKE))
+                        .stroke(Stroke::new(1.0, DialogTheme::BG_CARD_STROKE))
                         .corner_radius(CornerRadius::same(DialogTheme::R_SM))
-                        .wrap();
+                        .wrap_mode(egui::TextWrapMode::Extend);
 
                         if ui
-                            .add_sized(egui::vec2(90.0, DialogTheme::CONTROL_HEIGHT), btn)
+                            .add_sized(egui::vec2(108.0, DialogTheme::CONTROL_HEIGHT), btn)
                             .clicked()
                         {
                             screen_capture.insert("engine".into(), json!(val));
@@ -705,7 +636,9 @@ fn general_section(ui: &mut egui::Ui, draft: &mut Value) {
         ui.horizontal(|ui| {
             ui.style_mut().spacing.item_spacing.x = DialogTheme::GAP_XS;
             ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
-            for (label, val) in [("한국어", "ko"), ("English", "en")] {
+
+            // right_to_left 이므로 역순으로 추가하여 화면에는 [한국어 | English] 순으로 배치
+            for (label, val) in [("English", "en"), ("한국어", "ko")] {
                 let is_active = current_lang == val;
                 let btn =
                     egui::Button::new(RichText::new(label).size(DialogTheme::FONT_BODY).strong())
@@ -790,45 +723,37 @@ fn recommend_provider_section(ui: &mut egui::Ui, draft: &mut Value) {
         }
     });
 
-    ui.add_space(DialogTheme::GAP_MD);
+    if enabled {
+        ui.add_space(DialogTheme::GAP_MD);
 
-    let mut url = rec_provider
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    field_row(ui, "Provider URL", "", |ui| {
-        if ui
-            .add(
-                TextEdit::singleline(&mut url)
-                    .hint_text("http://127.0.0.1:8080")
-                    .desired_width(ui.available_width()),
-            )
-            .changed()
-        {
-            rec_provider.insert("url".into(), json!(url.trim()));
-        }
-    });
+        let mut url = rec_provider
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        field_row(ui, "Provider URL", "", |ui| {
+            if text_input_full(ui, &mut url, "http://127.0.0.1:8080") {
+                rec_provider.insert("url".into(), json!(url.trim()));
+            }
+        });
 
-    ui.add_space(DialogTheme::GAP_MD);
+        ui.add_space(DialogTheme::GAP_MD);
 
-    let mut name = rec_provider
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    field_row(ui, crate::t!("settings-display-name"), "", |ui| {
-        if ui
-            .add(
-                TextEdit::singleline(&mut name)
-                    .hint_text(crate::t!("settings-eg-hint", domain = "djmax.gg"))
-                    .desired_width(ui.available_width()),
-            )
-            .changed()
-        {
-            rec_provider.insert("name".into(), json!(name.trim()));
-        }
-    });
+        let mut name = rec_provider
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        field_row(ui, crate::t!("settings-display-name"), "", |ui| {
+            if text_input_full(
+                ui,
+                &mut name,
+                &crate::t!("settings-eg-hint", domain = "djmax.gg"),
+            ) {
+                rec_provider.insert("name".into(), json!(name.trim()));
+            }
+        });
+    }
 }
 
 pub fn render_settings_deferred(
@@ -868,7 +793,6 @@ pub fn save_settings_to_disk(
 
 pub fn close_if_requested(ctx: &egui::Context, open: &Arc<AtomicBool>) {
     if ctx.input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape)) {
-        crate::ui::native_app_viewports::log_close_request("settings_ui::close_if_requested");
         open.store(false, Ordering::Relaxed);
         ctx.request_repaint_of(ctx.parent_viewport_id());
     }

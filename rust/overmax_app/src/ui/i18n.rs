@@ -476,6 +476,18 @@ macro_rules! t {
             En => "Applies Top-50 cutlines, retry gap & momentum"
         )
     };
+    ("settings-reco-mode-smart") => {
+        $crate::t_select!(
+            Ko => "스마트",
+            En => "Smart"
+        )
+    };
+    ("settings-reco-mode-classic") => {
+        $crate::t_select!(
+            Ko => "클래식",
+            En => "Classic"
+        )
+    };
     ("settings-target-rate-hint") => {
         $crate::t_select!(
             Ko => "권장 레벨 산출 기준 정확도",

@@ -81,8 +81,12 @@ pub fn apply_dialog_style(ctx: &egui::Context) {
         s.text_styles = families;
 
         s.visuals.widgets.inactive.bg_fill = DialogTheme::BG_CONTROL;
+        s.visuals.widgets.inactive.expansion = 0.0;
         s.visuals.widgets.hovered.bg_fill = DialogTheme::BG_CONTROL_HOVER;
+        s.visuals.widgets.hovered.expansion = 0.0;
         s.visuals.widgets.active.bg_fill = DialogTheme::PRIMARY;
+        s.visuals.widgets.active.expansion = 0.0;
+        s.visuals.widgets.open.expansion = 0.0;
         s.visuals.selection.bg_fill = DialogTheme::SECONDARY;
 
         s.visuals.window_corner_radius = DialogTheme::R_LG.into();
@@ -131,22 +135,20 @@ pub fn setting_row(
 ) {
     ui.horizontal(|ui| {
         ui.set_min_width(ui.available_width());
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.vertical(|ui| {
+        ui.vertical(|ui| {
+            ui.label(
+                RichText::new(title)
+                    .color(DialogTheme::TEXT_PRIMARY)
+                    .size(DialogTheme::FONT_BODY)
+                    .strong(),
+            );
+            if !hint.is_empty() {
                 ui.label(
-                    RichText::new(title)
-                        .color(DialogTheme::TEXT_PRIMARY)
-                        .size(DialogTheme::FONT_BODY)
-                        .strong(),
+                    RichText::new(hint)
+                        .color(DialogTheme::TEXT_MUTED)
+                        .size(DialogTheme::FONT_HINT),
                 );
-                if !hint.is_empty() {
-                    ui.label(
-                        RichText::new(hint)
-                            .color(DialogTheme::TEXT_MUTED)
-                            .size(DialogTheme::FONT_HINT),
-                    );
-                }
-            });
+            }
         });
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -155,7 +157,7 @@ pub fn setting_row(
     });
 }
 
-/// Standard Layout Pattern 2: Segmented Option Row (Title & Hint, followed by options).
+/// Standard Layout Pattern 2: Segmented Option Row (Title & Hint on left, Buttons right-aligned).
 pub fn segmented_row(
     ui: &mut egui::Ui,
     title: &str,
@@ -186,7 +188,46 @@ pub fn segmented_row(
     });
 }
 
-/// Standard Layout Pattern 3: Full-width / Multi-line Input Row.
+/// Renders an RTL-friendly slider where the formatted value text is placed at the right edge
+/// followed by the slider track on its left.
+pub fn rtl_slider(
+    ui: &mut egui::Ui,
+    value: &mut f64,
+    range: std::ops::RangeInclusive<f64>,
+    step: f64,
+    format_val: impl Fn(f64) -> String,
+    bar_width: f32,
+) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = DialogTheme::GAP_SM;
+
+        // 1. Rightmost element in RTL: Formatted value text with fixed width to prevent jitter
+        let text_label = egui::Label::new(
+            RichText::new(format_val(*value))
+                .color(DialogTheme::TEXT_PRIMARY)
+                .size(DialogTheme::FONT_BODY)
+                .strong(),
+        );
+        ui.add_sized(egui::vec2(44.0, DialogTheme::CONTROL_HEIGHT), text_label);
+
+        // 2. Element to the left of the text: Slider bar with internal show_value disabled
+        let slider = egui::Slider::new(value, range)
+            .step_by(step)
+            .show_value(false)
+            .trailing_fill(true);
+
+        if ui
+            .add_sized(egui::vec2(bar_width, DialogTheme::CONTROL_HEIGHT), slider)
+            .changed()
+        {
+            changed = true;
+        }
+    });
+    changed
+}
+
+/// Standard Layout Pattern 3: Vertical Field Row (Label & Hint on line 1, Full-width input on line 2).
 pub fn field_row(
     ui: &mut egui::Ui,
     label: &str,
@@ -214,6 +255,78 @@ pub fn field_row(
     });
 }
 
+/// Renders a full-width TextEdit with a right-aligned action button, with pixel-perfect vertical centering.
+pub fn text_input_with_button(
+    ui: &mut egui::Ui,
+    text: &mut String,
+    hint_text: &str,
+    button_label: &str,
+    button_enabled: bool,
+) -> (bool, bool) {
+    let mut changed = false;
+    let mut clicked = false;
+    let button_width = 86.0;
+    let spacing = DialogTheme::GAP_SM;
+    let total_avail = ui.available_width();
+    let input_width = (total_avail - button_width - spacing).max(100.0);
+
+    ui.allocate_ui_with_layout(
+        egui::vec2(total_avail, DialogTheme::CONTROL_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = spacing;
+
+            let text_edit = egui::TextEdit::singleline(text)
+                .hint_text(hint_text)
+                .font(egui::FontId::proportional(DialogTheme::FONT_BODY))
+                .vertical_align(egui::Align::Center)
+                .margin(egui::Margin::symmetric(8, 6));
+
+            let text_res = ui.add_sized(
+                egui::vec2(input_width, DialogTheme::CONTROL_HEIGHT),
+                text_edit,
+            );
+            if text_res.changed() {
+                changed = true;
+            }
+
+            ui.add_enabled_ui(button_enabled, |ui| {
+                let btn =
+                    egui::Button::new(RichText::new(button_label).size(DialogTheme::FONT_BODY))
+                        .fill(if button_enabled {
+                            DialogTheme::BG_CONTROL_ACTIVE
+                        } else {
+                            DialogTheme::BG_CONTROL
+                        })
+                        .corner_radius(CornerRadius::same(DialogTheme::R_SM));
+
+                if ui
+                    .add_sized(egui::vec2(button_width, DialogTheme::CONTROL_HEIGHT), btn)
+                    .clicked()
+                {
+                    clicked = true;
+                }
+            });
+        },
+    );
+    (changed, clicked)
+}
+
+/// Renders a full-width TextEdit with pixel-perfect height and centering.
+pub fn text_input_full(ui: &mut egui::Ui, text: &mut String, hint_text: &str) -> bool {
+    let text_edit = egui::TextEdit::singleline(text)
+        .hint_text(hint_text)
+        .font(egui::FontId::proportional(DialogTheme::FONT_BODY))
+        .vertical_align(egui::Align::Center)
+        .margin(egui::Margin::symmetric(8, 6));
+
+    let res = ui.add_sized(
+        egui::vec2(ui.available_width(), DialogTheme::CONTROL_HEIGHT),
+        text_edit,
+    );
+    res.changed()
+}
+
 /// Standardized Pill Tabs for Secondary Dialogs.
 pub fn render_dialog_tabs(
     ui: &mut egui::Ui,
@@ -229,6 +342,7 @@ pub fn render_dialog_tabs(
             .corner_radius(CornerRadius::same(DialogTheme::R_SM))
             .inner_margin(Margin::same(4))
             .show(ui, |ui| {
+                ui.spacing_mut().button_padding = egui::vec2(12.0, 6.0);
                 for (idx, label) in labels.iter().enumerate() {
                     let is_active = *active == idx;
                     let text_color = if is_active {
