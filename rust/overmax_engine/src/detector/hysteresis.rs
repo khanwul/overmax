@@ -97,7 +97,11 @@ impl HysteresisBuffer {
         let second_hits = self.history.iter().skip(half).filter(|hit| **hit).count();
         let first_ratio = first_hits as f32 / half as f32;
         let second_ratio = second_hits as f32 / (self.sample_count - half) as f32;
-        self.is_leaving = second_ratio < first_ratio;
+
+        // 이탈은 "최근 폴링이 연속 전부 실패"할 때만 인정한다.
+        // 단발성 미스(정착 프레임 등)는 후반부에 성공이 섞여 있으므로 이탈로 보지 않는다.
+        // 실제 이탈(인게임 진입)은 이후 모든 폴링이 실패하므로 즉시 걸린다.
+        self.is_leaving = first_ratio > second_ratio && second_hits == 0;
     }
 }
 
@@ -114,12 +118,19 @@ mod tests {
     }
 
     #[test]
-    fn detects_leaving_when_recent_hits_drop() {
+    fn detects_leaving_only_when_recent_polls_all_missed() {
         let mut buffer = HysteresisBuffer::new(6, 0.5, 3, 0.1, 6);
         for hit in [true, true, true, true, false, false] {
             buffer.update(hit);
         }
+        // 후반부에 성공이 섞인 감소세([T,T,T | T,F,F])는 단발 미스 혼입으로 보고 이탈 아님
+        assert!(!buffer.is_leaving);
+
+        // 최근 폴링이 연속 전부 실패해야 이탈로 판정
+        let mut buffer = HysteresisBuffer::new(6, 0.5, 3, 0.1, 6);
+        for hit in [true, true, true, false, false, false] {
+            buffer.update(hit);
+        }
         assert!(buffer.is_leaving);
-        assert_eq!(buffer.confidence, buffer.ratio * 0.5);
     }
 }

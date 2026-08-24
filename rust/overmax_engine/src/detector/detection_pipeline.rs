@@ -1,5 +1,5 @@
 use crate::capture::frame::CapturedFrame;
-use crate::capture::frame_utils::{make_thumbnail, thumbnail_changed};
+use crate::capture::frame_utils::{make_thumbnail, mean_abs_diff, thumbnail_changed};
 use crate::capture::window_tracker::WindowSnapshot;
 use crate::detector::hysteresis::HysteresisBuffer;
 use crate::detector::play_state::PlayStateDetector;
@@ -14,6 +14,23 @@ const JACKET_CHANGE_THRESHOLD: f32 = 2.5;
 const JACKET_FORCE_RECHECK_SEC: f64 = 2.0;
 const JACKET_FORCE_RECHECK_LONG_SEC: f64 = 30.0;
 const STRICT_EDGE_THRESHOLD: f32 = 25.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SleepHint {
+    /// 씬 신호가 있거나 Unknown 진입 초기(<3s): 고속 폴링 주기로 슬립
+    Active,
+    /// 장기 Unknown 상태: 완화된 주기로 슬립하여 불필요한 캡처 비용 절감
+    Relaxed,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SceneFrameView {
+    pub scene_detected: bool,
+    pub is_song_select: bool,
+    pub is_result: bool,
+    pub is_leaving: bool,
+    pub confidence: f32,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DetectionOutput {
@@ -34,7 +51,19 @@ pub struct DetectionOutput {
     pub roi_scale: f32,
     pub roi_offset_y: i32,
     pub stable_hits: u32,
+    pub sleep_hint: SleepHint,
     pub telemetry_snapshot: Option<PipelineTelemetrySnapshot>,
+}
+
+/// 씬 폴링 파싱 실패 시의 원인 진단 정보 (텔레메트리 수집용)
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SceneMissDiag {
+    /// 자켓 Centroid Kernel 1차 게이트에서 거절된 경우
+    pub centroid_rejected: bool,
+    /// 카테고리 띠 단색성 검사에서 탈락한 경우
+    pub band_rejected: bool,
+    /// 매칭은 했으나 유사도 임계 미달일 때의 최고 유사도
+    pub top_similarity: Option<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -156,44 +185,48 @@ impl DetectionPipeline {
     ) -> DetectionOutput {
         self.stats.record_frame_status(scene_detected);
 
-        let is_result = self.last_static_scene.is_result();
-        let is_song_select = self.hysteresis.is_active || is_result;
-        let is_leaving = if is_result {
-            false
+        // Unknown 진입 시점 추적: 씬 폴링/슬립 스케줄링이 어느 진입 경로든 동일하게 참조
+        let acquiring = !scene_detected && !self.hysteresis.is_active;
+        if acquiring {
+            if self.unknown_since.is_none() {
+                self.unknown_since = Some(now);
+            }
         } else {
-            self.hysteresis.is_leaving
-        };
-        let confidence = self.hysteresis.confidence;
+            self.unknown_since = None;
+        }
+        let sleep_hint = self.compute_sleep_hint(acquiring, now);
 
-        if !is_song_select {
+        let view = SceneFrameView {
+            scene_detected,
+            is_song_select: self.hysteresis.is_active || self.last_static_scene.is_result(),
+            is_result: self.last_static_scene.is_result(),
+            is_leaving: !self.last_static_scene.is_result() && self.hysteresis.is_leaving,
+            confidence: self.hysteresis.confidence,
+        };
+
+        if !view.is_song_select {
             self.reset_on_screen_exit();
             return self.output(
-                scene_detected,
-                false,
-                false, // is_result
-                is_leaving,
-                confidence,
+                &view,
                 GameSessionState::detecting(),
                 JacketMatchStatus::NotSongSelect,
                 None,
+                sleep_hint,
             );
         }
 
-        if is_leaving {
+        if view.is_leaving {
             return self.output(
-                scene_detected,
-                true,
-                false, // is_result
-                true,
-                confidence,
+                &view,
                 GameSessionState::detecting(),
                 JacketMatchStatus::Leaving,
                 None,
+                sleep_hint,
             );
         }
 
         // 결과창에서 다시 선곡 화면으로 복귀하는 경우 결과창 캐시 리셋
-        if !is_result {
+        if !view.is_result {
             self.play_state.clear_detected_cache();
         }
 
@@ -209,29 +242,28 @@ impl DetectionPipeline {
         let play_state_elapsed = play_state_start.elapsed().as_micros() as u64;
         self.stats.play_state.update(play_state_elapsed);
 
-        self.output(
-            scene_detected,
-            true,
-            is_result,
-            false,
-            confidence,
-            state,
-            jacket_status,
-            event,
-        )
+        self.output(&view, state, jacket_status, event, sleep_hint)
+    }
+
+    /// 슬립 스케줄링 힌트: 씬 신호가 있거나 Unknown 진입 초기에는 고속 폴링으로
+    /// 씬 전환 반응성을 확보하고, 장기 Unknown 상태에서는 완화 주기로 전환한다.
+    fn compute_sleep_hint(&self, acquiring: bool, now: f64) -> SleepHint {
+        if !acquiring {
+            return SleepHint::Active;
+        }
+        let unknown_duration = now - self.unknown_since.unwrap_or(now);
+        if unknown_duration < 3.0 {
+            SleepHint::Active
+        } else {
+            SleepHint::Relaxed
+        }
     }
 
     fn detect_scene_if_due(&mut self, frame: &CapturedFrame, now: f64) -> Option<SceneType> {
         // 씬이 Unknown인 경우(진입 대기): 빠른 인식을 위해 0.3초 주기로 감시
         // 씬이 이미 확정된 경우(유지 중): CPU 소모 최소화를 위해 2.0초 주기로 완화 (이탈은 픽셀 매칭으로 즉시 처리되므로 반응성 무관)
+        // 참고: unknown_since 타임라인은 process_frame_shared 가 단일 소유자로 갱신한다.
         let acquiring = self.last_static_scene == SceneType::Unknown || !self.hysteresis.is_active;
-        if acquiring {
-            if self.unknown_since.is_none() {
-                self.unknown_since = Some(now);
-            }
-        } else {
-            self.unknown_since = None;
-        }
 
         let cooldown = if acquiring {
             let unknown_duration = now - self.unknown_since.unwrap_or(now);
@@ -249,10 +281,15 @@ impl DetectionPipeline {
         }
 
         let is_unknown = self.last_static_scene == SceneType::Unknown;
-        let Some((scene, matched_song_id)) =
-            parse_static_scene(frame, &self.rois, &self.jacket_matcher, is_unknown)
-        else {
+        let (parse_res, miss_diag) =
+            parse_static_scene(frame, &self.rois, &self.jacket_matcher, is_unknown);
+        let Some((scene, matched_song_id)) = parse_res else {
             debug_println!("    [detect_scene_if_due] static scene miss! now={}", now);
+
+            // 미스 진단 기록: 참조 썸네일 대비 픽셀 차이 + 거절 단계(centroid/band/유사도)
+            let thumb_diff = self.screen_static_thumb_diff(frame);
+            self.stats.record_scene_miss(thumb_diff, miss_diag);
+
             self.last_static_scene = SceneType::Unknown;
             self.last_scene_check_ts = now;
             return Some(SceneType::Unknown);
@@ -281,6 +318,14 @@ impl DetectionPipeline {
         let final_scene = self.commit_result_scene(scene);
         self.last_scene_check_ts = now;
         Some(final_scene)
+    }
+
+    /// 현재 프레임의 자켓 ROI 썸네일과 마지막 저장 썸네일의 평균 픽셀 차이.
+    /// 참조 썸네일 부재 또는 ROI 크롭 실패 시 None (정적 여부 판단 불가).
+    fn screen_static_thumb_diff(&self, frame: &CapturedFrame) -> Option<f32> {
+        let previous = self.last_jacket_thumb.as_deref()?;
+        let current = self.rois.and_then_roi(frame, "jacket", make_thumbnail)?;
+        Some(mean_abs_diff(&current, previous))
     }
 
     fn commit_result_scene(&mut self, candidate: SceneType) -> SceneType {
@@ -388,24 +433,20 @@ impl DetectionPipeline {
         image_changed || now - self.last_jacket_match_ts >= limit
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn output(
         &self,
-        scene_detected: bool,
-        is_song_select: bool,
-        is_result: bool,
-        is_leaving: bool,
-        confidence: f32,
+        view: &SceneFrameView,
         state: GameSessionState,
         jacket_status: JacketMatchStatus,
         event: Option<VerifiedPlayEvent>,
+        sleep_hint: SleepHint,
     ) -> DetectionOutput {
         DetectionOutput {
-            scene_detected,
-            is_song_select,
-            is_result,
-            is_leaving,
-            confidence,
+            scene_detected: view.scene_detected,
+            is_song_select: view.is_song_select,
+            is_result: view.is_result,
+            is_leaving: view.is_leaving,
+            confidence: view.confidence,
             state,
             event,
             current_song_id: self.current_song_id,
@@ -418,6 +459,7 @@ impl DetectionPipeline {
             roi_scale: self.rois.scale(),
             roi_offset_y: self.rois.offset_y(),
             stable_hits: self.play_state.stable_hits(),
+            sleep_hint,
             telemetry_snapshot: None,
         }
     }
@@ -566,9 +608,15 @@ fn detect_freestyle_scene_via_edge(
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
     is_unknown: bool,
-) -> Option<(SceneType, i32, f32)> {
-    let jacket_roi = rois.get_roi_for_scene("jacket", SceneType::Freestyle)?;
-    let jacket = jacket_roi.and_then(frame, |jacket_img| Some(jacket_img.to_image_region()))?;
+) -> (Option<(SceneType, i32, f32)>, SceneMissDiag) {
+    let mut diag = SceneMissDiag::default();
+    let Some(jacket_roi) = rois.get_roi_for_scene("jacket", SceneType::Freestyle) else {
+        return (None, diag);
+    };
+    let Some(jacket) = jacket_roi.and_then(frame, |jacket_img| Some(jacket_img.to_image_region()))
+    else {
+        return (None, diag);
+    };
 
     // 1차 게이트: Centroid Kernel 사전 검사
     let kernel_ok = matcher.check_centroid_kernel(
@@ -582,34 +630,41 @@ fn detect_freestyle_scene_via_edge(
         if is_unknown {
             debug_println!("    [scene_gate] Rejected by 1st Centroid Kernel Gate for freestyle");
         }
-        return None;
+        diag.centroid_rejected = true;
+        return (None, diag);
     }
 
     // 2차 게이트: 카테고리 띠 단색성 검사
     let band_ok = check_category_band_solid(frame, jacket_roi, rois.scale());
 
-    if band_ok {
-        if is_unknown {
-            debug_println!(
-                "    [telemetry] match_jacket triggered while scene=Unknown, candidate=freestyle"
+    if !band_ok {
+        diag.band_rejected = true;
+        return (None, diag);
+    }
+
+    if is_unknown {
+        debug_println!(
+            "    [telemetry] match_jacket triggered while scene=Unknown, candidate=freestyle"
+        );
+    }
+    if let Some(match_res) = matcher.match_jacket(
+        &jacket.bgra,
+        jacket.width as usize,
+        jacket.height as usize,
+        4,
+    ) {
+        let threshold = matcher.similarity_threshold();
+        if match_res.similarity < threshold {
+            diag.top_similarity = Some(match_res.similarity);
+        } else if let Ok(song_id) = match_res.image_id.parse::<i32>() {
+            debug_println!("    [detect_freestyle_scene_via_edge] Freestyle screen detected via jacket band and similarity ({:.4})!", match_res.similarity);
+            return (
+                Some((SceneType::Freestyle, song_id, match_res.similarity)),
+                diag,
             );
         }
-        if let Some(match_res) = matcher.match_jacket(
-            &jacket.bgra,
-            jacket.width as usize,
-            jacket.height as usize,
-            4,
-        ) {
-            let threshold = matcher.similarity_threshold();
-            if match_res.similarity >= threshold {
-                if let Ok(song_id) = match_res.image_id.parse::<i32>() {
-                    debug_println!("    [detect_freestyle_scene_via_edge] Freestyle screen detected via jacket band and similarity ({:.4})!", match_res.similarity);
-                    return Some((SceneType::Freestyle, song_id, match_res.similarity));
-                }
-            }
-        }
     }
-    None
+    (None, diag)
 }
 
 fn detect_openmatch_scene_via_edge(
@@ -617,9 +672,15 @@ fn detect_openmatch_scene_via_edge(
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
     is_unknown: bool,
-) -> Option<(SceneType, i32, f32)> {
-    let jacket_roi = rois.get_roi_for_scene("jacket", SceneType::OpenMatch)?;
-    let jacket = jacket_roi.and_then(frame, |jacket_img| Some(jacket_img.to_image_region()))?;
+) -> (Option<(SceneType, i32, f32)>, SceneMissDiag) {
+    let mut diag = SceneMissDiag::default();
+    let Some(jacket_roi) = rois.get_roi_for_scene("jacket", SceneType::OpenMatch) else {
+        return (None, diag);
+    };
+    let Some(jacket) = jacket_roi.and_then(frame, |jacket_img| Some(jacket_img.to_image_region()))
+    else {
+        return (None, diag);
+    };
 
     // 1차 초고속 게이트: Centroid Kernel 사전 검사
     let kernel_ok = matcher.check_centroid_kernel(
@@ -633,34 +694,41 @@ fn detect_openmatch_scene_via_edge(
         if is_unknown {
             debug_println!("    [scene_gate] Rejected by 1st Centroid Kernel Gate for openmatch");
         }
-        return None;
+        diag.centroid_rejected = true;
+        return (None, diag);
     }
 
     // 2차 게이트: 카테고리 띠 단색성 검사
     let band_ok = check_category_band_solid(frame, jacket_roi, rois.scale());
 
-    if band_ok {
-        if is_unknown {
-            debug_println!(
-                "    [telemetry] match_jacket triggered while scene=Unknown, candidate=openmatch"
+    if !band_ok {
+        diag.band_rejected = true;
+        return (None, diag);
+    }
+
+    if is_unknown {
+        debug_println!(
+            "    [telemetry] match_jacket triggered while scene=Unknown, candidate=openmatch"
+        );
+    }
+    if let Some(match_res) = matcher.match_jacket(
+        &jacket.bgra,
+        jacket.width as usize,
+        jacket.height as usize,
+        4,
+    ) {
+        let threshold = matcher.similarity_threshold();
+        if match_res.similarity < threshold {
+            diag.top_similarity = Some(match_res.similarity);
+        } else if let Ok(song_id) = match_res.image_id.parse::<i32>() {
+            debug_println!("    [detect_openmatch_scene_via_edge] OpenMatch screen detected via jacket band and similarity ({:.4})!", match_res.similarity);
+            return (
+                Some((SceneType::OpenMatch, song_id, match_res.similarity)),
+                diag,
             );
         }
-        if let Some(match_res) = matcher.match_jacket(
-            &jacket.bgra,
-            jacket.width as usize,
-            jacket.height as usize,
-            4,
-        ) {
-            let threshold = matcher.similarity_threshold();
-            if match_res.similarity >= threshold {
-                if let Ok(song_id) = match_res.image_id.parse::<i32>() {
-                    debug_println!("    [detect_openmatch_scene_via_edge] OpenMatch screen detected via jacket band and similarity ({:.4})!", match_res.similarity);
-                    return Some((SceneType::OpenMatch, song_id, match_res.similarity));
-                }
-            }
-        }
     }
-    None
+    (None, diag)
 }
 
 fn parse_static_scene(
@@ -668,17 +736,31 @@ fn parse_static_scene(
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
     is_unknown: bool,
-) -> Option<(SceneType, Option<i32>)> {
+) -> (Option<(SceneType, Option<i32>)>, SceneMissDiag) {
     // 1. 결과창 감지 우선 (Native CV)
     if let Some((scene, song_id)) = detect_result_scene_via_edge(frame, rois, matcher, is_unknown) {
-        return Some((scene, Some(song_id)));
+        return (Some((scene, Some(song_id))), SceneMissDiag::default());
     }
 
     // 2. 프리스타일 및 오픈매치 선곡창 자켓 매칭 동시 비교하여 경합 (Native CV)
-    let freestyle_res = detect_freestyle_scene_via_edge(frame, rois, matcher, is_unknown);
-    let openmatch_res = detect_openmatch_scene_via_edge(frame, rois, matcher, is_unknown);
+    let (freestyle_res, fs_diag) =
+        detect_freestyle_scene_via_edge(frame, rois, matcher, is_unknown);
+    let (openmatch_res, om_diag) =
+        detect_openmatch_scene_via_edge(frame, rois, matcher, is_unknown);
 
-    match (freestyle_res, openmatch_res) {
+    // 실패 원인 진단: 두 후보 중 관측된 최악의 게이트 상태를 병합
+    let diag = SceneMissDiag {
+        centroid_rejected: fs_diag.centroid_rejected && om_diag.centroid_rejected,
+        band_rejected: fs_diag.band_rejected && om_diag.band_rejected,
+        top_similarity: match (fs_diag.top_similarity, om_diag.top_similarity) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        },
+    };
+
+    let result = match (freestyle_res, openmatch_res) {
         (Some((f_scene, f_id, f_sim)), Some((o_scene, o_id, o_sim))) => {
             // 둘 다 임계치를 넘었을 경우, 유사도(Similarity)가 더 높은 씬을 승자로 채택
             if f_sim >= o_sim {
@@ -692,7 +774,8 @@ fn parse_static_scene(
         (Some((f_scene, f_id, _)), None) => Some((f_scene, Some(f_id))),
         (None, Some((o_scene, o_id, _))) => Some((o_scene, Some(o_id))),
         (None, None) => None,
-    }
+    };
+    (result, diag)
 }
 
 pub fn detect_static_scene(
@@ -701,6 +784,7 @@ pub fn detect_static_scene(
     matcher: &overmax_data::JacketMatcher,
 ) -> SceneType {
     parse_static_scene(frame, rois, matcher, true)
+        .0
         .map(|(scene, _)| scene)
         .unwrap_or(SceneType::Unknown)
 }
@@ -795,9 +879,50 @@ fn check_category_band_solid(
 
 #[cfg(test)]
 mod tests {
-    use super::{DetectionPipeline, JacketMatchStatus};
+    use super::{DetectionPipeline, JacketMatchStatus, SleepHint};
     use crate::capture::frame::CapturedFrame;
     use overmax_data::ImageIndexDb;
+
+    #[test]
+    fn scene_poll_miss_flips_to_unknown_and_records_diag() {
+        let mut pipeline = DetectionPipeline::new(ImageIndexDb::new("missing.db", 0.6));
+        let frame = blank_frame();
+        use overmax_core::SceneType;
+
+        pipeline.last_static_scene = SceneType::Freestyle;
+        pipeline.hysteresis.is_active = true;
+        pipeline.rois.set_scene(SceneType::Freestyle);
+
+        // 파싱 실패 시 Unknown 전환 + 진단 지표(거절 단계) 집계 확인
+        let out = pipeline.detect(&frame, 10.0);
+        assert_eq!(pipeline.last_static_scene, SceneType::Unknown);
+        assert_eq!(out.sleep_hint, SleepHint::Active);
+
+        let snap = pipeline.stats.maybe_take_snapshot(0.0).unwrap();
+        assert_eq!(snap.scene_poll_misses, 1);
+        assert!(snap.scene_miss_band_rejects > 0 || snap.scene_miss_centroid_rejects > 0);
+    }
+
+    #[test]
+    fn sleep_hint_is_active_during_unknown_warmup_and_relaxed_after() {
+        let mut pipeline = DetectionPipeline::new(ImageIndexDb::new("missing.db", 0.6));
+        let frame = blank_frame();
+        use overmax_core::SceneType;
+
+        // Unknown 진입 초기(<3s): 고속 폴링 유지로 씬 전환 반응성 확보
+        let warmup = pipeline.process_frame_with_scene(&frame, SceneType::Unknown, 1.0);
+        assert_eq!(warmup.sleep_hint, SleepHint::Active);
+        let late_warmup = pipeline.process_frame_with_scene(&frame, SceneType::Unknown, 2.9);
+        assert_eq!(late_warmup.sleep_hint, SleepHint::Active);
+
+        // 장기 Unknown(>=3s): 완화 주기 전환으로 캡처 비용 절감
+        let relaxed = pipeline.process_frame_with_scene(&frame, SceneType::Unknown, 4.0);
+        assert_eq!(relaxed.sleep_hint, SleepHint::Relaxed);
+
+        // 씬 신호 복귀 시 즉시 Active 복원
+        let recovered = pipeline.process_frame_with_scene(&frame, SceneType::Freestyle, 5.0);
+        assert_eq!(recovered.sleep_hint, SleepHint::Active);
+    }
 
     #[test]
     fn stays_detecting_until_hysteresis_activates() {

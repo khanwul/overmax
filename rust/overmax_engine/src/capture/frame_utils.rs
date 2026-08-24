@@ -193,7 +193,7 @@ pub fn compute_pixel_checksum(frame: &CapturedFrame, roi: RoiRect) -> Option<u64
     Some(sum)
 }
 
-fn mean_abs_diff(current: &[u8], previous: &[u8]) -> f32 {
+pub(crate) fn mean_abs_diff(current: &[u8], previous: &[u8]) -> f32 {
     let sum = current
         .iter()
         .zip(previous)

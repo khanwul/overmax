@@ -66,12 +66,5 @@
 | 2026-08-18 | VerifiedPlayEvent 도메인 이벤트 분리 및 결과창 1회 래치 방출 | UI 메인 루프에서의 절차적 상태 검증 누수를 제거하고, PlayStateDetector 내 Rising-Edge 세션 래치(Once-per-session)를 통해 안정화된 플레이 유효 기록을 Zero-Allocation Option<VerifiedPlayEvent> 값 객체로 단 1회 방출하여 엔진-데이터 계층 간 디커플링 완성 | [game_state.rs](../../rust/overmax_core/src/game_state.rs) / [play_state.rs](../../rust/overmax_engine/src/detector/play_state.rs) / [detection_pipeline.rs](../../rust/overmax_engine/src/detector/detection_pipeline.rs) / [native_app_recommend.rs](../../rust/overmax_app/src/ui/native_app_recommend.rs) |
 | 2026-08-20 | Data-First RoiCache 및 ResultModeDiffLatch 분리, PatternRecord 모델링 | 산발적인 수동 캐시 조작으로 인한 미플레이 곡 점수 잔류 버그를 원천 차단하고, 연산 절약용 관측 캐시(`RoiCache`)와 결과창 깜빡임 보정용 래치(`ResultModeDiffLatch`)의 도메인 책임을 명확히 분리하여 `PatternRecord` (Unplayed/Played) 기반의 타입 안전한 감지 파이프라인 정립 | [game_state.rs](../../rust/overmax_core/src/game_state.rs) / [play_state.rs](../../rust/overmax_engine/src/detector/play_state.rs) |
 | 2026-08-21 | 결과창 VerifiedPlayEvent 맥스콤보/점수 개선 시 재방출 및 UI 동기화 | 결과창 연출 순서(점수 롤링 후 MAX COMBO 뱃지 등장)로 인해 점수 인식 시점에 1차 이벤트가 나간 후 MAX COMBO가 누락되던 결함을 해결하기 위해, 동일 결과창 세션이어도 점수 상승 또는 MAX COMBO 획득 시 VerifiedPlayEvent 재방출을 허용하고 빠른 업로드 시 세션 실시간 컨텍스트를 머지하도록 보정 | [play_state.rs](../../rust/overmax_engine/src/detector/play_state.rs) / [native_app.rs](../../rust/overmax_app/src/ui/native_app.rs) |
-
-
-
-
-
-
-
-
-
+| 2026-08-25 | SleepHint 기반 적응형 폴링 스케줄링 도입 | 워커가 fingerprint 부재 시 무조건 1초 슬립해 Unknown→씬 전환 인식이 ~2-3초 지연. 파이프라인이 Active(120ms)/Relaxed(1s) 힌트를 산출하는 SSOT 구조로 전환 | [detection_pipeline.rs](../../rust/overmax_engine/src/detector/detection_pipeline.rs) / [detection_worker.rs](../../rust/overmax_engine/src/detector/detection_worker.rs) |
+| 2026-08-25 | is_leaving 판정에 연속 미스 요건 적용 | 단발성 미스(스크롤 정착 프레임)가 이탈로 오판되어 오버레이가 ~2초 꺼지는 결함 해결. 최근 폴링이 전부 실패할 때만 이탈 인정 → 실제 인게임 진입의 빠른 OFF 유지 | [hysteresis.rs](../../rust/overmax_engine/src/detector/hysteresis.rs) |

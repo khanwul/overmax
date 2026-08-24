@@ -18,6 +18,10 @@ Overmax v0.4.0 마일스톤 활성 작업 목록 및 백로그입니다.
 - [x] **1.4 디텍션 워커 틱과 egui Repaint 스케줄링 최적화**
   - [x] `RepaintFingerprint` 값 객체 기반 단일 Change Detector 도입으로 정적 화면에서 불필요한 `request_repaint()` 0회 차단 (GPU/CPU 낭비 제거)
   - [x] 창 위치 이동(`game_rect`), 씬 감지, 자켓 매칭, 캡처 에러 등 실질적인 렌더 변화 시에만 100% Repaint 트리거 보장
+- [x] **1.5 파이프라인 주도 적응형 슬립 스케줄링 (`SleepHint`) 및 Unknown 씬 전환 지연 단축**
+  - [x] `DetectionPipeline`이 `SleepHint`(Active/Relaxed)를 단일 판정자로 산출하고 `DetectionOutput`으로 워커에 전달 (Unknown 진입 3초 워밍업 동안만 Active)
+  - [x] 워커 `sleep_duration()`을 fingerprint 불린 대신 hint 매핑으로 전환하여 Unknown → 씬 인식 지연 ~2-3초 → ~1초 단축
+  - [x] 반복 캡처 실패 시 연속 오류 카운터가 임계를 넘으면 힌트를 Relaxed로 강등하여 고속 재시도 스핀 완화
 
 ---
 

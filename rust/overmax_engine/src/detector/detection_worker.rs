@@ -7,7 +7,9 @@ use crate::capture::frame::CapturedFrame;
 #[cfg(target_os = "linux")]
 use crate::capture::window_tracker::WindowSnapshot;
 use crate::capture::window_tracker::WindowTracker;
-use crate::detector::detection_pipeline::{DetectionOutput, DetectionPipeline, JacketMatchStatus};
+use crate::detector::detection_pipeline::{
+    DetectionOutput, DetectionPipeline, JacketMatchStatus, SleepHint,
+};
 use overmax_core::GameSessionState;
 use overmax_data::{DataCompatibility, ImageIndexDb, Settings};
 use std::path::{Path, PathBuf};
@@ -116,6 +118,7 @@ struct DetectionWorker {
     is_foreground: bool,
     repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
     last_fingerprint: Option<RepaintFingerprint>,
+    last_sleep_hint: SleepHint,
     last_scene_type: overmax_core::SceneType,
     frame_buffer: CapturedFrame,
     window_scheduler: WindowQueryScheduler,
@@ -155,6 +158,7 @@ impl DetectionWorker {
             is_foreground: false,
             repaint_callback,
             last_fingerprint: None,
+            last_sleep_hint: SleepHint::Relaxed,
             last_scene_type: overmax_core::SceneType::Unknown,
             frame_buffer: CapturedFrame {
                 width: 0,
@@ -330,6 +334,7 @@ impl DetectionWorker {
                     self.last_fingerprint = Some(fingerprint);
                 }
 
+                self.last_sleep_hint = out.sleep_hint;
                 let _ = self.detection_tx.send(out);
                 if state_changed {
                     self.request_repaint();
@@ -434,6 +439,7 @@ impl DetectionWorker {
                     self.last_fingerprint = Some(fingerprint);
                 }
 
+                self.last_sleep_hint = out.sleep_hint;
                 let _ = self.detection_tx.send(out);
                 if state_changed || overlay_snapshot_changed {
                     self.request_repaint();
@@ -492,6 +498,7 @@ impl DetectionWorker {
             roi_scale: 1.0,
             roi_offset_y: 0,
             stable_hits: 0,
+            sleep_hint: SleepHint::Relaxed,
             telemetry_snapshot: None,
         }
     }
@@ -586,6 +593,7 @@ impl DetectionWorker {
                 roi_scale: 1.0,
                 roi_offset_y: 0,
                 stable_hits: 0,
+                sleep_hint: SleepHint::Relaxed,
                 telemetry_snapshot: None,
             });
             self.request_repaint();
@@ -625,14 +633,9 @@ impl DetectionWorker {
         let capture_settings = self.settings.screen_capture();
         if self.was_found {
             if self.is_foreground {
-                let is_active = self
-                    .last_fingerprint
-                    .as_ref()
-                    .is_some_and(|f| f.is_song_select || f.scene_detected);
-                if is_active {
-                    Duration::from_millis(capture_settings.active_sleep_ms)
-                } else {
-                    Duration::from_millis(1000)
+                match self.last_sleep_hint {
+                    SleepHint::Active => Duration::from_millis(capture_settings.active_sleep_ms),
+                    SleepHint::Relaxed => Duration::from_secs(1),
                 }
             } else {
                 Duration::from_millis(capture_settings.background_sleep_ms)
@@ -645,7 +648,7 @@ impl DetectionWorker {
     fn log_telemetry_snapshot(&self, snap: &crate::detector::telemetry::PipelineTelemetrySnapshot) {
         use crate::detector::telemetry::format_duration_us;
         let msg = format!(
-            "[Telemetry] 5s snap ({:.1}s): capture={}(max {}) detect={}(max {}) [scene={}(max {}), jacket={}(max {}), play={}(max {})] | active={} unknown={} match_hits={}",
+            "[Telemetry] 5s snap ({:.1}s): capture={}(max {}) detect={}(max {}) [scene={}(max {}), jacket={}(max {}), play={}(max {})] | active={} unknown={} match_hits={} miss={} maxdiff={:.1} cg={} band={} minsim={:.3}",
             snap.period_sec,
             format_duration_us(snap.capture_avg_us),
             format_duration_us(snap.capture_max_us),
@@ -659,7 +662,12 @@ impl DetectionWorker {
             format_duration_us(snap.play_state_max_us),
             snap.active_frames,
             snap.unknown_frames,
-            snap.match_jacket_count
+            snap.match_jacket_count,
+            snap.scene_poll_misses,
+            snap.scene_miss_max_thumb_diff,
+            snap.scene_miss_centroid_rejects,
+            snap.scene_miss_band_rejects,
+            snap.scene_miss_min_top_similarity
         );
         println!("{msg}");
         self.log(msg.clone());
