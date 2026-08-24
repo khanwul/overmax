@@ -8,6 +8,7 @@ pub enum Locale {
     #[default]
     Ko,
     En,
+    Ja,
 }
 
 static CURRENT_LOCALE: AtomicU8 = AtomicU8::new(0);
@@ -16,6 +17,7 @@ pub fn set_locale(locale: Locale) {
     let code = match locale {
         Locale::Ko => 0,
         Locale::En => 1,
+        Locale::Ja => 2,
     };
     CURRENT_LOCALE.store(code, Ordering::Relaxed);
 }
@@ -23,14 +25,16 @@ pub fn set_locale(locale: Locale) {
 pub fn current_locale() -> Locale {
     match CURRENT_LOCALE.load(Ordering::Relaxed) {
         1 => Locale::En,
+        2 => Locale::Ja,
         _ => Locale::Ko,
     }
 }
 
-/// Reads the top-level `"language"` key (`"ko"`/`"en"`) from merged settings JSON.
+/// Reads the top-level `"language"` key (`"ko"`/`"en"`/`"ja"`) from merged settings JSON.
 pub fn set_locale_from_settings(settings: &Value) {
     let locale = match settings.get("language").and_then(Value::as_str) {
         Some("en") => Locale::En,
+        Some("ja") => Locale::Ja,
         _ => Locale::Ko,
     };
     set_locale(locale);
@@ -40,10 +44,19 @@ pub fn set_locale_from_settings(settings: &Value) {
 /// Selects translation based on current locale without string allocations.
 #[macro_export]
 macro_rules! t_select {
-    (Ko => $ko:expr, En => $en:expr) => {
+    // Fully translated arm (Ko / En / Ja all provided).
+    (Ko => $ko:expr, En => $en:expr, Ja => $ja:expr) => {
         match $crate::ui::i18n::current_locale() {
             $crate::ui::i18n::Locale::Ko => $ko,
             $crate::ui::i18n::Locale::En => $en,
+            $crate::ui::i18n::Locale::Ja => $ja,
+        }
+    };
+    // Transitional arm: Japanese translation not yet authored; falls back to English.
+    (Ko => $ko:expr, En => $en:expr) => {
+        match $crate::ui::i18n::current_locale() {
+            $crate::ui::i18n::Locale::Ko => $ko,
+            $crate::ui::i18n::Locale::En | $crate::ui::i18n::Locale::Ja => $en,
         }
     };
 }
@@ -533,7 +546,8 @@ macro_rules! t {
     ("settings-language") => {
         $crate::t_select!(
             Ko => "언어",
-            En => "Language"
+            En => "Language",
+            Ja => "言語"
         )
     };
     ("settings-recommend-provider") => {
@@ -969,6 +983,11 @@ mod tests {
         );
         assert_eq!(t!(gold = GoldMeta::HalfRandom), "Half Random");
         assert_eq!(t!(assist = AssistMeta::Caution), "Caution");
+
+        // Japanese infra: un-authored keys fall back to English, authored keys use the Ja arm.
+        set_locale(Locale::Ja);
+        assert_eq!(t!("settings-title"), "Settings");
+        assert_eq!(t!("settings-language"), "言語");
 
         set_locale(Locale::Ko);
     }

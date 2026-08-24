@@ -637,8 +637,8 @@ fn general_section(ui: &mut egui::Ui, draft: &mut Value) {
             ui.style_mut().spacing.item_spacing.x = DialogTheme::GAP_XS;
             ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
 
-            // right_to_left 이므로 역순으로 추가하여 화면에는 [한국어 | English] 순으로 배치
-            for (label, val) in [("English", "en"), ("한국어", "ko")] {
+            // right_to_left 이므로 역순으로 추가하여 화면에는 [한국어 | English | 日本語] 순으로 배치
+            for (label, val) in [("日本語", "ja"), ("English", "en"), ("한국어", "ko")] {
                 let is_active = current_lang == val;
                 let btn =
                     egui::Button::new(RichText::new(label).size(DialogTheme::FONT_BODY).strong())
