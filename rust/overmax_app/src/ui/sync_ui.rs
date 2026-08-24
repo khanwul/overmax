@@ -61,304 +61,17 @@ pub fn render_sync<F1, F2, F3, F4>(
         );
         ui.add_space(16.0);
 
-        // 1. Steam ID Account Card
-        Frame::new()
-            .fill(Theme::CARD)
-            .stroke(Stroke::new(1.0_f32, Theme::STROKE))
-            .corner_radius(CornerRadius::same(Theme::R_MD))
-            .inner_margin(Margin::same(16))
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    let mut label_text = "Steam ID".to_string();
-                    if let Some(user) = props.steam_users.get(props.steam_id) {
-                        if !user.persona_name.is_empty() {
-                            label_text = format!("{} ({})", user.persona_name, user.account_name);
-                        }
-                    }
-
-                    ui.add_sized(
-                        egui::vec2(160.0, Theme::CONTROL_HEIGHT),
-                        egui::Label::new(
-                            RichText::new(label_text)
-                                .color(Theme::TEXT_PRIMARY)
-                                .size(Theme::FONT_BODY),
-                        )
-                        .truncate(),
-                    );
-                    ui.add_space(8.0);
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let scan_btn = egui::Button::new(
-                            RichText::new(crate::t!("sync-scan"))
-                                .size(Theme::FONT_BODY)
-                                .strong(),
-                        )
-                        .fill(Theme::PRIMARY)
-                        .corner_radius(egui::CornerRadius::same(Theme::R_SM));
-
-                        if ui
-                            .add_sized(egui::vec2(80.0, Theme::CONTROL_HEIGHT), scan_btn)
-                            .clicked()
-                        {
-                            (props.on_scan)();
-                        }
-
-                        ui.add_space(8.0);
-
-                        let text_edit = egui::TextEdit::singleline(props.steam_id)
-                            .font(egui::FontId::proportional(Theme::FONT_BODY))
-                            .vertical_align(egui::Align::Center)
-                            .margin(egui::Margin::symmetric(8, 6));
-
-                        ui.add_sized(
-                            egui::vec2(ui.available_width(), Theme::CONTROL_HEIGHT),
-                            text_edit,
-                        );
-                    });
-                });
-                if !props.status.is_empty() {
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(props.status)
-                            .size(Theme::FONT_SMALL)
-                            .color(Theme::TEXT_MUTED),
-                    );
-                }
-            });
+        steam_account_card(
+            ui,
+            props.steam_id,
+            props.steam_users,
+            props.status,
+            &props.on_scan,
+        );
 
         ui.add_space(12.0);
 
-        // 2. Filter Card Section
-        let filter_id = ui.make_persistent_id("sync_filter_settings");
-        let mut filter = ui
-            .data_mut(|d| d.get_temp::<SyncFilterSettings>(filter_id))
-            .unwrap_or_else(|| props.initial_filter.clone());
-        let mut filter_changed = false;
-
-        Frame::new()
-            .fill(Theme::CARD)
-            .stroke(Stroke::new(1.0_f32, Theme::STROKE))
-            .corner_radius(CornerRadius::same(Theme::R_MD))
-            .inner_margin(Margin::same(12))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let icon = if filter.open { "▼" } else { "▶" };
-                    let toggle_btn = egui::Button::new(
-                        RichText::new(crate::t!("sync-filter-btn", icon = icon))
-                            .color(Theme::TEXT_ACCENT)
-                            .size(Theme::FONT_BODY)
-                            .strong(),
-                    )
-                    .fill(Color32::TRANSPARENT);
-
-                    if ui.add(toggle_btn).clicked() {
-                        filter.open = !filter.open;
-                        filter_changed = true;
-                    }
-
-                    if filter.open {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let reset_btn = egui::Button::new(
-                                RichText::new(crate::t!("sync-reset-btn")).size(Theme::FONT_SMALL),
-                            )
-                            .fill(Theme::SECONDARY)
-                            .corner_radius(CornerRadius::same(Theme::R_SM));
-                            if ui.add(reset_btn).clicked() {
-                                filter = SyncFilterSettings::default();
-                                filter_changed = true;
-                            }
-                        });
-                    }
-                });
-
-                if filter.open {
-                    ui.add_space(8.0);
-
-                    egui::Grid::new("sync_filter_form_grid")
-                        .num_columns(2)
-                        .spacing([12.0, 8.0])
-                        .min_col_width(170.0)
-                        .show(ui, |ui| {
-                            // Row 1: Mode
-                            ui.add_sized(
-                                [170.0, 20.0],
-                                egui::Label::new(
-                                    RichText::new(crate::t!("sync-mode"))
-                                        .color(Theme::TEXT_SECONDARY)
-                                        .size(Theme::FONT_SMALL)
-                                        .strong(),
-                                ),
-                            );
-                            ui.horizontal(|ui| {
-                                filter_changed |= toggle_btn(
-                                    ui,
-                                    overmax_core::Mode::B4.as_str(),
-                                    &mut filter.mode_4b,
-                                    crate::ui::components::ModeBadge::mode_color(
-                                        overmax_core::Mode::B4,
-                                    ),
-                                );
-                                filter_changed |= toggle_btn(
-                                    ui,
-                                    overmax_core::Mode::B5.as_str(),
-                                    &mut filter.mode_5b,
-                                    crate::ui::components::ModeBadge::mode_color(
-                                        overmax_core::Mode::B5,
-                                    ),
-                                );
-                                filter_changed |= toggle_btn(
-                                    ui,
-                                    overmax_core::Mode::B6.as_str(),
-                                    &mut filter.mode_6b,
-                                    crate::ui::components::ModeBadge::mode_color(
-                                        overmax_core::Mode::B6,
-                                    ),
-                                );
-                                filter_changed |= toggle_btn(
-                                    ui,
-                                    overmax_core::Mode::B8.as_str(),
-                                    &mut filter.mode_8b,
-                                    crate::ui::components::ModeBadge::mode_color(
-                                        overmax_core::Mode::B8,
-                                    ),
-                                );
-                            });
-                            ui.end_row();
-
-                            // Row 2: Difficulty
-                            ui.add_sized(
-                                [170.0, 20.0],
-                                egui::Label::new(
-                                    RichText::new(crate::t!("sync-difficulty"))
-                                        .color(Theme::TEXT_SECONDARY)
-                                        .size(Theme::FONT_SMALL)
-                                        .strong(),
-                                ),
-                            );
-                            ui.horizontal(|ui| {
-                                filter_changed |= toggle_btn(
-                                    ui,
-                                    overmax_core::Difficulty::NM.as_str(),
-                                    &mut filter.diff_nm,
-                                    crate::ui::overlay_ui::diff_color(overmax_core::Difficulty::NM),
-                                );
-                                filter_changed |= toggle_btn(
-                                    ui,
-                                    overmax_core::Difficulty::HD.as_str(),
-                                    &mut filter.diff_hd,
-                                    crate::ui::overlay_ui::diff_color(overmax_core::Difficulty::HD),
-                                );
-                                filter_changed |= toggle_btn(
-                                    ui,
-                                    overmax_core::Difficulty::MX.as_str(),
-                                    &mut filter.diff_mx,
-                                    crate::ui::overlay_ui::diff_color(overmax_core::Difficulty::MX),
-                                );
-                                filter_changed |= toggle_btn(
-                                    ui,
-                                    overmax_core::Difficulty::SC.as_str(),
-                                    &mut filter.diff_sc,
-                                    crate::ui::overlay_ui::diff_color(overmax_core::Difficulty::SC),
-                                );
-                            });
-                            ui.end_row();
-
-                            // Row 3: Level Slider
-                            let min_lbl = LEVEL_LABELS.get(filter.min_level_idx).unwrap_or(&"1");
-                            let max_lbl = LEVEL_LABELS.get(filter.max_level_idx).unwrap_or(&"SC15");
-                            ui.add_sized(
-                                [170.0, 20.0],
-                                egui::Label::new(
-                                    RichText::new(crate::t!(
-                                        "sync-level-range",
-                                        min = min_lbl,
-                                        max = max_lbl
-                                    ))
-                                    .color(Theme::TEXT_SECONDARY)
-                                    .size(Theme::FONT_SMALL)
-                                    .strong(),
-                                ),
-                            );
-                            let mut min_f = filter.min_level_idx as f64;
-                            let mut max_f = filter.max_level_idx as f64;
-                            if dual_thumb_range_slider(
-                                ui,
-                                "level_range_slider",
-                                &mut min_f,
-                                &mut max_f,
-                                0.0,
-                                29.0,
-                            ) {
-                                filter.min_level_idx = min_f.round() as usize;
-                                filter.max_level_idx = max_f.round() as usize;
-                                filter_changed = true;
-                            }
-                            ui.end_row();
-
-                            // Row 4: Rate Slider
-                            ui.add_sized(
-                                [170.0, 20.0],
-                                egui::Label::new(
-                                    RichText::new(format!(
-                                        "Rate ({:.1}% ~ {:.1}%)",
-                                        filter.min_rate, filter.max_rate
-                                    ))
-                                    .color(Theme::TEXT_SECONDARY)
-                                    .size(Theme::FONT_SMALL)
-                                    .strong(),
-                                ),
-                            );
-                            if dual_thumb_range_slider(
-                                ui,
-                                "rate_range_slider",
-                                &mut filter.min_rate,
-                                &mut filter.max_rate,
-                                0.0,
-                                100.0,
-                            ) {
-                                filter_changed = true;
-                            }
-                            ui.end_row();
-
-                            // Row 5: Checkboxes
-                            ui.add_sized([170.0, 20.0], egui::Label::new(""));
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .checkbox(
-                                        &mut filter.require_mc_not_on_varchive,
-                                        RichText::new(crate::t!("sync-max-combo-only"))
-                                            .size(Theme::FONT_SMALL)
-                                            .color(Theme::TEXT_PRIMARY),
-                                    )
-                                    .changed()
-                                {
-                                    filter_changed = true;
-                                }
-
-                                ui.add_space(20.0);
-
-                                if ui
-                                    .checkbox(
-                                        &mut filter.exclude_unuploaded,
-                                        RichText::new(crate::t!("sync-exclude-unuploaded"))
-                                            .size(Theme::FONT_SMALL)
-                                            .color(Theme::TEXT_PRIMARY),
-                                    )
-                                    .changed()
-                                {
-                                    filter_changed = true;
-                                }
-                            });
-                            ui.end_row();
-                        });
-                }
-            });
-
-        if filter_changed {
-            ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
-            (props.on_filter_change)(filter.clone());
-        }
+        let filter = filter_card(ui, props.initial_filter, props.on_filter_change);
 
         let sort_mode_id = ui.make_persistent_id("sync_sort_mode");
         let mut sort_mode =
@@ -462,6 +175,25 @@ pub fn render_sync<F1, F2, F3, F4>(
                 for c in sorted_candidates {
                     candidate_row(ui, c, props.on_upload, props.on_delete);
                 }
+                let filtered_candidates: Vec<&SyncCandidate> = props
+                    .candidates
+                    .iter()
+                    .filter(|c| matches_filter(c, &filter))
+                    .collect();
+                let total_count = props.candidates.len();
+                let filtered_count = filtered_candidates.len();
+
+                let sort_mode = candidates_header(ui, total_count, filtered_count);
+                ui.add_space(12.0);
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        ui.style_mut().spacing.item_spacing.y = 12.0;
+                        for c in sort_candidates(filtered_candidates, sort_mode) {
+                            candidate_row(ui, c, props.on_upload, props.on_delete);
+                        }
+                    });
             });
     };
 
@@ -476,6 +208,391 @@ pub fn render_sync<F1, F2, F3, F4>(
             )
             .show(ui, |ui| body(ui));
     }
+}
+
+/// 상단 Steam 계정 카드: ID 표시/입력, 스캔 버튼, 상태 메시지.
+fn steam_account_card<F: Fn()>(
+    ui: &mut egui::Ui,
+    steam_id: &mut String,
+    steam_users: &std::collections::HashMap<String, crate::system::steam_session::SteamUser>,
+    status: &str,
+    on_scan: F,
+) {
+    Frame::new()
+        .fill(Theme::CARD)
+        .stroke(Stroke::new(1.0_f32, Theme::STROKE))
+        .corner_radius(CornerRadius::same(Theme::R_MD))
+        .inner_margin(Margin::same(16))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let mut label_text = "Steam ID".to_string();
+                if let Some(user) = steam_users.get(steam_id.as_str()) {
+                    if !user.persona_name.is_empty() {
+                        label_text = format!("{} ({})", user.persona_name, user.account_name);
+                    }
+                }
+
+                ui.add_sized(
+                    egui::vec2(160.0, Theme::CONTROL_HEIGHT),
+                    egui::Label::new(
+                        RichText::new(label_text)
+                            .color(Theme::TEXT_PRIMARY)
+                            .size(Theme::FONT_BODY),
+                    )
+                    .truncate(),
+                );
+                ui.add_space(8.0);
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let scan_btn = egui::Button::new(
+                        RichText::new(crate::t!("sync-scan"))
+                            .size(Theme::FONT_BODY)
+                            .strong(),
+                    )
+                    .fill(Theme::PRIMARY)
+                    .corner_radius(egui::CornerRadius::same(Theme::R_SM));
+
+                    if ui
+                        .add_sized(egui::vec2(80.0, Theme::CONTROL_HEIGHT), scan_btn)
+                        .clicked()
+                    {
+                        on_scan();
+                    }
+
+                    ui.add_space(8.0);
+
+                    let text_edit = egui::TextEdit::singleline(steam_id)
+                        .font(egui::FontId::proportional(Theme::FONT_BODY))
+                        .vertical_align(egui::Align::Center)
+                        .margin(egui::Margin::symmetric(8, 6));
+
+                    ui.add_sized(
+                        egui::vec2(ui.available_width(), Theme::CONTROL_HEIGHT),
+                        text_edit,
+                    );
+                });
+            });
+            if !status.is_empty() {
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(status)
+                        .size(Theme::FONT_SMALL)
+                        .color(Theme::TEXT_MUTED),
+                );
+            }
+        });
+}
+
+/// 필터 카드: 접기/펼치기 토글과 필터 폼. 상태는 egui temp storage로 유지되며,
+/// 변경 시 콜백이 호출된다. 최종 필터를 반환한다.
+fn filter_card<F: Fn(SyncFilterSettings)>(
+    ui: &mut egui::Ui,
+    initial_filter: &SyncFilterSettings,
+    on_filter_change: F,
+) -> SyncFilterSettings {
+    let filter_id = ui.make_persistent_id("sync_filter_settings");
+    let mut filter = ui
+        .data_mut(|d| d.get_temp::<SyncFilterSettings>(filter_id))
+        .unwrap_or_else(|| initial_filter.clone());
+    let mut filter_changed = false;
+
+    Frame::new()
+        .fill(Theme::CARD)
+        .stroke(Stroke::new(1.0_f32, Theme::STROKE))
+        .corner_radius(CornerRadius::same(Theme::R_MD))
+        .inner_margin(Margin::same(12))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let icon = if filter.open { "▼" } else { "▶" };
+
+                let toggle_btn = egui::Button::new(
+                    RichText::new(crate::t!("sync-filter-btn", icon = icon))
+                        .color(Theme::TEXT_ACCENT)
+                        .size(Theme::FONT_BODY)
+                        .strong(),
+                )
+                .fill(Color32::TRANSPARENT);
+
+                if ui.add(toggle_btn).clicked() {
+                    filter.open = !filter.open;
+                    filter_changed = true;
+                }
+
+                if filter.open {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let reset_btn = egui::Button::new(
+                            RichText::new(crate::t!("sync-reset-btn")).size(Theme::FONT_SMALL),
+                        )
+                        .fill(Theme::SECONDARY)
+                        .corner_radius(CornerRadius::same(Theme::R_SM));
+                        if ui.add(reset_btn).clicked() {
+                            filter = SyncFilterSettings::default();
+                            filter_changed = true;
+                        }
+                    });
+                }
+            });
+
+            if filter.open {
+                render_filter_form(ui, &mut filter, &mut filter_changed);
+            }
+        });
+
+    if filter_changed {
+        ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+        on_filter_change(filter.clone());
+    }
+    filter
+}
+
+/// 필터 폼 그리드: 모드 / 난이도 / 레벨 슬라이더 / Rate 슬라이더 / 체크박스 행.
+fn render_filter_form(
+    ui: &mut egui::Ui,
+    filter: &mut SyncFilterSettings,
+    filter_changed: &mut bool,
+) {
+    ui.add_space(8.0);
+
+    egui::Grid::new("sync_filter_form_grid")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .min_col_width(170.0)
+        .show(ui, |ui| {
+            // Row 1: Mode
+            ui.add_sized(
+                [170.0, 20.0],
+                egui::Label::new(
+                    RichText::new(crate::t!("sync-mode"))
+                        .color(Theme::TEXT_SECONDARY)
+                        .size(Theme::FONT_SMALL)
+                        .strong(),
+                ),
+            );
+            ui.horizontal(|ui| {
+                for mode in [
+                    overmax_core::Mode::B4,
+                    overmax_core::Mode::B5,
+                    overmax_core::Mode::B6,
+                    overmax_core::Mode::B8,
+                ] {
+                    *filter_changed |= toggle_btn(
+                        ui,
+                        mode.as_str(),
+                        match mode {
+                            overmax_core::Mode::B4 => &mut filter.mode_4b,
+                            overmax_core::Mode::B5 => &mut filter.mode_5b,
+                            overmax_core::Mode::B6 => &mut filter.mode_6b,
+                            _ => &mut filter.mode_8b,
+                        },
+                        crate::ui::components::ModeBadge::mode_color(mode),
+                    );
+                }
+            });
+            ui.end_row();
+
+            // Row 2: Difficulty
+            ui.add_sized(
+                [170.0, 20.0],
+                egui::Label::new(
+                    RichText::new(crate::t!("sync-difficulty"))
+                        .color(Theme::TEXT_SECONDARY)
+                        .size(Theme::FONT_SMALL)
+                        .strong(),
+                ),
+            );
+            ui.horizontal(|ui| {
+                for diff in [
+                    overmax_core::Difficulty::NM,
+                    overmax_core::Difficulty::HD,
+                    overmax_core::Difficulty::MX,
+                    overmax_core::Difficulty::SC,
+                ] {
+                    *filter_changed |= toggle_btn(
+                        ui,
+                        diff.as_str(),
+                        match diff {
+                            overmax_core::Difficulty::NM => &mut filter.diff_nm,
+                            overmax_core::Difficulty::HD => &mut filter.diff_hd,
+                            overmax_core::Difficulty::MX => &mut filter.diff_mx,
+                            _ => &mut filter.diff_sc,
+                        },
+                        crate::ui::overlay_ui::diff_color(diff),
+                    );
+                }
+            });
+            ui.end_row();
+
+            // Row 3: Level Slider
+            let min_lbl = LEVEL_LABELS.get(filter.min_level_idx).unwrap_or(&"1");
+            let max_lbl = LEVEL_LABELS.get(filter.max_level_idx).unwrap_or(&"SC15");
+            ui.add_sized(
+                [170.0, 20.0],
+                egui::Label::new(
+                    RichText::new(crate::t!("sync-level-range", min = min_lbl, max = max_lbl))
+                        .color(Theme::TEXT_SECONDARY)
+                        .size(Theme::FONT_SMALL)
+                        .strong(),
+                ),
+            );
+            let mut min_f = filter.min_level_idx as f64;
+            let mut max_f = filter.max_level_idx as f64;
+            if dual_thumb_range_slider(ui, "level_range_slider", &mut min_f, &mut max_f, 0.0, 29.0)
+            {
+                filter.min_level_idx = min_f.round() as usize;
+                filter.max_level_idx = max_f.round() as usize;
+                *filter_changed = true;
+            }
+            ui.end_row();
+
+            // Row 4: Rate Slider
+            ui.add_sized(
+                [170.0, 20.0],
+                egui::Label::new(
+                    RichText::new(format!(
+                        "Rate ({:.1}% ~ {:.1}%)",
+                        filter.min_rate, filter.max_rate
+                    ))
+                    .color(Theme::TEXT_SECONDARY)
+                    .size(Theme::FONT_SMALL)
+                    .strong(),
+                ),
+            );
+            if dual_thumb_range_slider(
+                ui,
+                "rate_range_slider",
+                &mut filter.min_rate,
+                &mut filter.max_rate,
+                0.0,
+                100.0,
+            ) {
+                *filter_changed = true;
+            }
+            ui.end_row();
+
+            // Row 5: Checkboxes
+            ui.add_sized([170.0, 20.0], egui::Label::new(""));
+            ui.horizontal(|ui| {
+                if ui
+                    .checkbox(
+                        &mut filter.require_mc_not_on_varchive,
+                        RichText::new(crate::t!("sync-max-combo-only"))
+                            .size(Theme::FONT_SMALL)
+                            .color(Theme::TEXT_PRIMARY),
+                    )
+                    .changed()
+                {
+                    *filter_changed = true;
+                }
+
+                ui.add_space(20.0);
+
+                if ui
+                    .checkbox(
+                        &mut filter.exclude_unuploaded,
+                        RichText::new(crate::t!("sync-exclude-unuploaded"))
+                            .size(Theme::FONT_SMALL)
+                            .color(Theme::TEXT_PRIMARY),
+                    )
+                    .changed()
+                {
+                    *filter_changed = true;
+                }
+            });
+            ui.end_row();
+        });
+}
+
+/// 후보 리스트 헤더: 건수 표시와 정렬 토글. 선택된 정렬 모드를 반환한다.
+fn candidates_header(ui: &mut egui::Ui, total_count: usize, filtered_count: usize) -> SyncSortMode {
+    let sort_mode_id = ui.make_persistent_id("sync_sort_mode");
+    let mut sort_mode =
+        ui.data_mut(|d| d.get_temp::<SyncSortMode>(sort_mode_id).unwrap_or_default());
+
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(crate::t!("sync-upload-candidates"))
+                .color(Theme::TEXT_PRIMARY)
+                .size(Theme::FONT_BODY)
+                .strong(),
+        );
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new(format!("{} / {}", filtered_count, total_count))
+                .color(Theme::TEXT_ACCENT)
+                .size(Theme::FONT_BODY)
+                .strong(),
+        );
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let diff_btn_fill = if sort_mode == SyncSortMode::RateDiff {
+                Theme::PRIMARY
+            } else {
+                Theme::SECONDARY
+            };
+            let diff_btn = egui::Button::new(
+                RichText::new(crate::t!("sync-sort-by-change")).size(Theme::FONT_SMALL),
+            )
+            .fill(diff_btn_fill)
+            .corner_radius(CornerRadius::same(Theme::R_SM));
+            if ui.add(diff_btn).clicked() {
+                sort_mode = SyncSortMode::RateDiff;
+                ui.data_mut(|d| d.insert_temp(sort_mode_id, sort_mode));
+            }
+
+            ui.add_space(4.0);
+
+            let title_btn_fill = if sort_mode == SyncSortMode::Title {
+                Theme::PRIMARY
+            } else {
+                Theme::SECONDARY
+            };
+            let title_btn = egui::Button::new(
+                RichText::new(crate::t!("sync-sort-by-title")).size(Theme::FONT_SMALL),
+            )
+            .fill(title_btn_fill)
+            .corner_radius(CornerRadius::same(Theme::R_SM));
+            if ui.add(title_btn).clicked() {
+                sort_mode = SyncSortMode::Title;
+                ui.data_mut(|d| d.insert_temp(sort_mode_id, sort_mode));
+            }
+        });
+    });
+    sort_mode
+}
+
+/// 정렬 모드에 따라 후보 목록을 정렬해 반환한다.
+fn sort_candidates(
+    mut candidates: Vec<&SyncCandidate>,
+    sort_mode: SyncSortMode,
+) -> Vec<&SyncCandidate> {
+    match sort_mode {
+        SyncSortMode::Title => {
+            candidates.sort_by(|a, b| {
+                let mode_cmp = a.button_mode.cmp(&b.button_mode);
+                if mode_cmp != std::cmp::Ordering::Equal {
+                    return mode_cmp;
+                }
+                a.song_name.cmp(&b.song_name)
+            });
+        }
+        SyncSortMode::RateDiff => {
+            candidates.sort_by(|a, b| {
+                let diff_a = match a.varchive_rate {
+                    None => a.overmax_rate,
+                    Some(vr) => a.overmax_rate - vr,
+                };
+                let diff_b = match b.varchive_rate {
+                    None => b.overmax_rate,
+                    Some(vr) => b.overmax_rate - vr,
+                };
+                diff_b
+                    .partial_cmp(&diff_a)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+    }
+    candidates
 }
 
 fn toggle_btn(ui: &mut egui::Ui, text: &str, active: &mut bool, active_color: Color32) -> bool {
