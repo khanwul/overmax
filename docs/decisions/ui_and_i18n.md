@@ -35,3 +35,4 @@
 
 
 
+| 2026-08-25 | Locale::Ja 변종 추가 및 `t_select!` 3-암/2-암(En 폴백) 이중 규칙 확장, 전체 139키 일본어 번역 완성 | 컴파일 타임 0-Cost SSOT 아키텍처 유지하며 신규 로케일을 점진적 폴백(En) 방식으로 안전하게 확장. CJK 폰트는 기존 meiryo/msgothic 시스템 폰트 폴백으로 무비용 커버 | [i18n.rs](../../rust/overmax_app/src/ui/i18n.rs) / [settings_ui.rs](../../rust/overmax_app/src/ui/settings_ui.rs) |
