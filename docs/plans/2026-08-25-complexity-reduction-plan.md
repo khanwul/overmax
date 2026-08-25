@@ -45,8 +45,10 @@
     씬별 차이만 설정으로 주입. `SceneMissDiag` 진단은 체인에서 자동 수집.
   - 래더매치 감지(6.1) 착수 전 완료가 목표 — 사본 3번째 탄생 방지.
   - 각 단계 커밋마다 기존 테스트 + 새 회귀 테스트 유지.
-- [ ] **Step 4: `record_db.rs` 책임 분리** (선택 — Step 1~3 완료 후 재평가)
+- [x] **Step 4: `record_db.rs` 책임 분리** (선택 — Step 1~3 완료 후 재평가)
 
+  - 적용 구조: `store/record_db/` 디렉터리 모듈(mod: 구조체+CRUD 코어 / schema / queries / sync).
+    자식 모듈은 부모 private 항목에 접근 가능하므로 가시성 변경 없이 public API 유지.
 ## 4. 검증 기준
 
 - 매 단계: `cargo test --workspace` 전체 통과, `cargo clippy --all-targets` 경고 0
