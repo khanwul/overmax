@@ -39,7 +39,7 @@
   - mpsc 채널 번들을 값 객체(`SyncChannels` 등 이미 일부 존재하는지 재확인)로 묶고,
     `spawn_upload`의 후보 탐색·페이로드 조립·쓰레드 스폰을 헬퍼로 분리.
   - 채널 연결 관계는 기능 변경 없이 이동만 한다.
-- [~] **Step 3: `detection_pipeline.rs` 씬 감지 게이트 체인 추상화** (코드 완료 — 온디바이스 텔레메트리 동일성 확인 후 완료 처리)
+- [x] **Step 3: `detection_pipeline.rs` 씬 감지 게이트 체인 추상화**
   - `detect_result/freestyle/openmatch_scene_via_edge`의 공통 구조
     (ROI → centroid 게이트 → band 게이트 → 자켓 매칭)을 `SceneGate` 체인으로 추상화,
     씬별 차이만 설정으로 주입. `SceneMissDiag` 진단은 체인에서 자동 수집.
