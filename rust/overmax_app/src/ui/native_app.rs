@@ -196,6 +196,32 @@ pub(crate) struct SyncWorkerChannels {
     pub(crate) delete_req_tx: Sender<overmax_data::RecordKey>,
 }
 
+impl SyncWorkerChannels {
+    /// 동기화 워커와 UI 간의 모든 mpsc 채널 쌍을 생성해 번들로 반환한다.
+    fn new() -> Self {
+        let (sync_tx, sync_rx) = mpsc::channel();
+        let (upload_req_tx, upload_req_rx) = mpsc::channel();
+        let (upload_res_tx, upload_res_rx) = mpsc::channel();
+        let (delete_req_tx, delete_req_rx) = mpsc::channel::<overmax_data::RecordKey>();
+        let (fetch_req_tx, fetch_req_rx) = mpsc::channel();
+        let (fetch_res_tx, fetch_res_rx) = mpsc::channel();
+        Self {
+            sync_rx,
+            sync_tx,
+            upload_req_rx,
+            upload_req_tx,
+            upload_res_rx,
+            upload_res_tx,
+            fetch_req_rx,
+            fetch_req_tx,
+            fetch_res_rx,
+            fetch_res_tx,
+            delete_req_rx,
+            delete_req_tx,
+        }
+    }
+}
+
 pub struct AppStateTracker {
     pub prev_debug_open: Changed<bool>,
     pub prev_settings_open: Changed<bool>,
@@ -346,16 +372,10 @@ impl NativeApp {
         let sync_open = Arc::new(AtomicBool::new(false));
         let debug_open = Arc::new(AtomicBool::new(false));
 
-        let (sync_tx, sync_rx) = mpsc::channel();
-        let (upload_req_tx, upload_req_rx) = mpsc::channel();
-        let (upload_res_tx, upload_res_rx) = mpsc::channel();
-        let (delete_req_tx, delete_req_rx) = mpsc::channel::<overmax_data::RecordKey>();
+        let sync_channels = SyncWorkerChannels::new();
         let (ui_cmd_tx, ui_cmd_rx) = mpsc::channel();
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         let _ = &ui_cmd_tx;
-        let (fetch_req_tx, fetch_req_rx) = mpsc::channel();
-        let (fetch_res_tx, fetch_res_rx) = mpsc::channel();
-
         let ctx_holder: Arc<Mutex<Option<egui::Context>>> = Arc::new(Mutex::new(Some(initial_ctx)));
 
         let platform =
@@ -436,20 +456,7 @@ impl NativeApp {
             capture_fatal: None,
             session: GameSessionState::detecting(),
             confidence: 0.0,
-            sync_channels: SyncWorkerChannels {
-                sync_rx,
-                sync_tx,
-                upload_req_rx,
-                upload_req_tx,
-                upload_res_rx,
-                upload_res_tx,
-                fetch_req_rx,
-                fetch_req_tx,
-                fetch_res_rx,
-                fetch_res_tx,
-                delete_req_rx,
-                delete_req_tx,
-            },
+            sync_channels,
             detection_rx,
             ui_cmd_rx,
             varchive_db,
@@ -725,107 +732,19 @@ impl NativeApp {
                 &candidate.composer,
             );
             if res.success {
-                let success_message = if res.updated {
+                let base_message = if res.updated {
                     crate::t!("status-updated")
                 } else {
                     crate::t!("status-registered")
                 };
-                let btn = button_num(candidate.button_mode.as_str());
 
-                let varchive_settings = settings.varchive();
-                let v_id = varchive_settings
-                    .user_map
-                    .get(&steam)
-                    .and_then(|u| u.v_id.as_deref())
-                    .unwrap_or("")
-                    .to_string();
-
-                let cache_updated = if !v_id.is_empty() {
-                    match varchive_upload::fetch_single_song_records_blocking(
-                        &v_id,
-                        btn,
-                        candidate.song_id,
-                    ) {
-                        Ok(data) => {
-                            if let Err(e) =
-                                record_db.merge_varchive_fetched_records(&steam, btn, &data, false)
-                            {
-                                Err(crate::t!("sys-api-ok-cache-failed", error = e))
-                            } else {
-                                Ok(())
-                            }
-                        }
-                        Err(e) => {
-                            let fallback_payload = serde_json::json!({
-                                "records": [
-                                    {
-                                        "title": candidate.song_id,
-                                        "pattern": candidate.difficulty,
-                                        "score": candidate.overmax_rate,
-                                        "maxCombo": candidate.overmax_mc,
-                                        "updatedAt": ""
-                                    }
-                                ]
-                            });
-                            if let Err(ue) = record_db.merge_varchive_fetched_records(
-                                &steam,
-                                btn,
-                                &fallback_payload,
-                                false,
-                            ) {
-                                Err(crate::t!(
-                                    "sys-api-and-fallback-failed",
-                                    api_error = e,
-                                    fallback_error = ue
-                                ))
-                            } else {
-                                Ok(())
-                            }
-                        }
-                    }
-                } else {
-                    let fallback_payload = serde_json::json!({
-                        "records": [
-                            {
-                                "title": candidate.song_id,
-                                "pattern": candidate.difficulty,
-                                "score": candidate.overmax_rate,
-                                "maxCombo": candidate.overmax_mc,
-                                "updatedAt": ""
-                            }
-                        ]
-                    });
-                    record_db
-                        .merge_varchive_fetched_records(&steam, btn, &fallback_payload, false)
-                        .map_err(|e| crate::t!("sys-fallback-cache-failed", error = e))
-                };
-
-                let success_message = match cache_updated {
-                    Ok(_) => {
-                        let mut msg = success_message.to_string();
-                        if let Ok(Some(rank)) = record_db.get_varchive_top50_rank(
-                            &steam,
-                            candidate.button_mode,
-                            &candidate.song_id.to_string(),
-                            candidate.difficulty,
-                        ) {
-                            let place_msg = crate::t!(
-                                "sys-place-achieved",
-                                mode = candidate.button_mode,
-                                rank = rank
-                            );
-                            msg = crate::t!(
-                                "sys-upload-msg-with-rank",
-                                message = &msg,
-                                rank_msg = &place_msg
-                            );
-                        }
-                        Ok(msg)
-                    }
-                    Err(err_msg) => Err(err_msg),
-                };
-
-                match success_message {
+                match sync_varchive_cache_after_upload(
+                    &record_db,
+                    &settings,
+                    &steam,
+                    &candidate,
+                    base_message,
+                ) {
                     Ok(msg) => {
                         let _ = tx.send((key, is_quick_upload, "success".into(), msg));
                     }
@@ -1102,6 +1021,91 @@ impl NativeApp {
             ctx.request_repaint();
         });
     }
+}
+
+/// 업로드 성공 후 V-Archive 캐시 병합 및 Top-50 랭크 메시지를 생성한다.
+/// 캐시 갱신 실패 시 Err(사유)를 반환하되 업로드 자체는 성공임에 유의한다.
+fn sync_varchive_cache_after_upload(
+    record_db: &RecordDB,
+    settings: &overmax_data::Settings,
+    steam: &str,
+    candidate: &SyncCandidate,
+    base_message: &str,
+) -> Result<String, String> {
+    let btn = button_num(candidate.button_mode.as_str());
+
+    let varchive_settings = settings.varchive();
+    let v_id = varchive_settings
+        .user_map
+        .get(steam)
+        .and_then(|u| u.v_id.as_deref())
+        .unwrap_or("")
+        .to_string();
+
+    let cache_updated = if !v_id.is_empty() {
+        match varchive_upload::fetch_single_song_records_blocking(&v_id, btn, candidate.song_id) {
+            Ok(data) => record_db
+                .merge_varchive_fetched_records(steam, btn, &data, false)
+                .map_err(|e| crate::t!("sys-api-ok-cache-failed", error = e)),
+            Err(e) => {
+                let payload = upload_fallback_payload(candidate);
+                record_db
+                    .merge_varchive_fetched_records(steam, btn, &payload, false)
+                    .map_err(|ue| {
+                        crate::t!(
+                            "sys-api-and-fallback-failed",
+                            api_error = e,
+                            fallback_error = ue
+                        )
+                    })
+            }
+        }
+    } else {
+        let payload = upload_fallback_payload(candidate);
+        record_db
+            .merge_varchive_fetched_records(steam, btn, &payload, false)
+            .map_err(|e| crate::t!("sys-fallback-cache-failed", error = e))
+    };
+
+    let mut msg = base_message.to_string();
+    match cache_updated {
+        Ok(_) => {
+            if let Ok(Some(rank)) = record_db.get_varchive_top50_rank(
+                steam,
+                candidate.button_mode,
+                &candidate.song_id.to_string(),
+                candidate.difficulty,
+            ) {
+                let place_msg = crate::t!(
+                    "sys-place-achieved",
+                    mode = candidate.button_mode,
+                    rank = rank
+                );
+                msg = crate::t!(
+                    "sys-upload-msg-with-rank",
+                    message = &msg,
+                    rank_msg = &place_msg
+                );
+            }
+            Ok(msg)
+        }
+        Err(err_msg) => Err(err_msg),
+    }
+}
+
+/// 오프라인/실패 폴백용 단일 곡 기록 페이로드.
+fn upload_fallback_payload(candidate: &SyncCandidate) -> serde_json::Value {
+    serde_json::json!({
+        "records": [
+            {
+                "title": candidate.song_id,
+                "pattern": candidate.difficulty,
+                "score": candidate.overmax_rate,
+                "maxCombo": candidate.overmax_mc,
+                "updatedAt": ""
+            }
+        ]
+    })
 }
 
 #[cfg(test)]
