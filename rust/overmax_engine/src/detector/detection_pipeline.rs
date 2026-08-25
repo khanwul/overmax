@@ -603,14 +603,19 @@ fn detect_result_scene_via_edge(
     None
 }
 
-fn detect_freestyle_scene_via_edge(
+/// 선곡 계열 씬의 공통 자켓 게이트 체인:
+/// ROI 크롭 → Centroid Kernel 게이트 → 카테고리 띠 단색성 검사 → 자켓 유사도 매칭.
+/// 성공 시 (song_id, similarity), 실패 시 거절 단계가 기록된 SceneMissDiag를 반환한다.
+fn run_jacket_match_gate(
     frame: &CapturedFrame,
     rois: &RoiManager,
     matcher: &overmax_data::JacketMatcher,
+    scene: SceneType,
     is_unknown: bool,
-) -> (Option<(SceneType, i32, f32)>, SceneMissDiag) {
+    gate_label: &str,
+) -> (Option<(i32, f32)>, SceneMissDiag) {
     let mut diag = SceneMissDiag::default();
-    let Some(jacket_roi) = rois.get_roi_for_scene("jacket", SceneType::Freestyle) else {
+    let Some(jacket_roi) = rois.get_roi_for_scene("jacket", scene) else {
         return (None, diag);
     };
     let Some(jacket) = jacket_roi.and_then(frame, |jacket_img| Some(jacket_img.to_image_region()))
@@ -619,52 +624,67 @@ fn detect_freestyle_scene_via_edge(
     };
 
     // 1차 게이트: Centroid Kernel 사전 검사
-    let kernel_ok = matcher.check_centroid_kernel(
+    if !matcher.check_centroid_kernel(
         &jacket.bgra,
         jacket.width as usize,
         jacket.height as usize,
         4,
-    );
-
-    if !kernel_ok {
+    ) {
         if is_unknown {
-            debug_println!("    [scene_gate] Rejected by 1st Centroid Kernel Gate for freestyle");
+            debug_println!(
+                "    [scene_gate] Rejected by 1st Centroid Kernel Gate for {gate_label}"
+            );
         }
         diag.centroid_rejected = true;
         return (None, diag);
     }
 
     // 2차 게이트: 카테고리 띠 단색성 검사
-    let band_ok = check_category_band_solid(frame, jacket_roi, rois.scale());
-
-    if !band_ok {
+    if !check_category_band_solid(frame, jacket_roi, rois.scale()) {
         diag.band_rejected = true;
         return (None, diag);
     }
 
     if is_unknown {
         debug_println!(
-            "    [telemetry] match_jacket triggered while scene=Unknown, candidate=freestyle"
+            "    [telemetry] match_jacket triggered while scene=Unknown, candidate={gate_label}"
         );
     }
-    if let Some(match_res) = matcher.match_jacket(
+
+    let Some(match_res) = matcher.match_jacket(
         &jacket.bgra,
         jacket.width as usize,
         jacket.height as usize,
         4,
-    ) {
-        let threshold = matcher.similarity_threshold();
-        if match_res.similarity < threshold {
-            diag.top_similarity = Some(match_res.similarity);
-        } else if let Ok(song_id) = match_res.image_id.parse::<i32>() {
-            debug_println!("    [detect_freestyle_scene_via_edge] Freestyle screen detected via jacket band and similarity ({:.4})!", match_res.similarity);
-            return (
-                Some((SceneType::Freestyle, song_id, match_res.similarity)),
-                diag,
-            );
-        }
+    ) else {
+        return (None, diag);
+    };
+    let threshold = matcher.similarity_threshold();
+    if match_res.similarity < threshold {
+        diag.top_similarity = Some(match_res.similarity);
+        return (None, diag);
     }
-    (None, diag)
+    match match_res.image_id.parse::<i32>() {
+        Ok(song_id) => (Some((song_id, match_res.similarity)), diag),
+        Err(_) => (None, diag),
+    }
+}
+
+fn detect_freestyle_scene_via_edge(
+    frame: &CapturedFrame,
+    rois: &RoiManager,
+    matcher: &overmax_data::JacketMatcher,
+    is_unknown: bool,
+) -> (Option<(SceneType, i32, f32)>, SceneMissDiag) {
+    let (res, diag) = run_jacket_match_gate(
+        frame,
+        rois,
+        matcher,
+        SceneType::Freestyle,
+        is_unknown,
+        "freestyle",
+    );
+    (res.map(|(id, sim)| (SceneType::Freestyle, id, sim)), diag)
 }
 
 fn detect_openmatch_scene_via_edge(
@@ -673,62 +693,15 @@ fn detect_openmatch_scene_via_edge(
     matcher: &overmax_data::JacketMatcher,
     is_unknown: bool,
 ) -> (Option<(SceneType, i32, f32)>, SceneMissDiag) {
-    let mut diag = SceneMissDiag::default();
-    let Some(jacket_roi) = rois.get_roi_for_scene("jacket", SceneType::OpenMatch) else {
-        return (None, diag);
-    };
-    let Some(jacket) = jacket_roi.and_then(frame, |jacket_img| Some(jacket_img.to_image_region()))
-    else {
-        return (None, diag);
-    };
-
-    // 1차 초고속 게이트: Centroid Kernel 사전 검사
-    let kernel_ok = matcher.check_centroid_kernel(
-        &jacket.bgra,
-        jacket.width as usize,
-        jacket.height as usize,
-        4,
+    let (res, diag) = run_jacket_match_gate(
+        frame,
+        rois,
+        matcher,
+        SceneType::OpenMatch,
+        is_unknown,
+        "openmatch",
     );
-
-    if !kernel_ok {
-        if is_unknown {
-            debug_println!("    [scene_gate] Rejected by 1st Centroid Kernel Gate for openmatch");
-        }
-        diag.centroid_rejected = true;
-        return (None, diag);
-    }
-
-    // 2차 게이트: 카테고리 띠 단색성 검사
-    let band_ok = check_category_band_solid(frame, jacket_roi, rois.scale());
-
-    if !band_ok {
-        diag.band_rejected = true;
-        return (None, diag);
-    }
-
-    if is_unknown {
-        debug_println!(
-            "    [telemetry] match_jacket triggered while scene=Unknown, candidate=openmatch"
-        );
-    }
-    if let Some(match_res) = matcher.match_jacket(
-        &jacket.bgra,
-        jacket.width as usize,
-        jacket.height as usize,
-        4,
-    ) {
-        let threshold = matcher.similarity_threshold();
-        if match_res.similarity < threshold {
-            diag.top_similarity = Some(match_res.similarity);
-        } else if let Ok(song_id) = match_res.image_id.parse::<i32>() {
-            debug_println!("    [detect_openmatch_scene_via_edge] OpenMatch screen detected via jacket band and similarity ({:.4})!", match_res.similarity);
-            return (
-                Some((SceneType::OpenMatch, song_id, match_res.similarity)),
-                diag,
-            );
-        }
-    }
-    (None, diag)
+    (res.map(|(id, sim)| (SceneType::OpenMatch, id, sim)), diag)
 }
 
 fn parse_static_scene(
