@@ -73,13 +73,6 @@ pub fn render_sync<F1, F2, F3, F4>(
 
         let filter = filter_card(ui, props.initial_filter, props.on_filter_change);
 
-        let sort_mode_id = ui.make_persistent_id("sync_sort_mode");
-        let mut sort_mode =
-            ui.data_mut(|d| d.get_temp::<SyncSortMode>(sort_mode_id).unwrap_or_default());
-
-        ui.add_space(16.0);
-
-        // Candidate List Header with filter stats
         let total_count = props.candidates.len();
         let filtered_candidates: Vec<&SyncCandidate> = props
             .candidates
@@ -88,112 +81,16 @@ pub fn render_sync<F1, F2, F3, F4>(
             .collect();
         let filtered_count = filtered_candidates.len();
 
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(crate::t!("sync-upload-candidates"))
-                    .color(Theme::TEXT_PRIMARY)
-                    .size(Theme::FONT_BODY)
-                    .strong(),
-            );
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new(format!("{} / {}", filtered_count, total_count))
-                    .color(Theme::TEXT_ACCENT)
-                    .size(Theme::FONT_BODY)
-                    .strong(),
-            );
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let diff_btn_fill = if sort_mode == SyncSortMode::RateDiff {
-                    Theme::PRIMARY
-                } else {
-                    Theme::SECONDARY
-                };
-                let diff_btn = egui::Button::new(
-                    RichText::new(crate::t!("sync-sort-by-change")).size(Theme::FONT_SMALL),
-                )
-                .fill(diff_btn_fill)
-                .corner_radius(CornerRadius::same(Theme::R_SM));
-                if ui.add(diff_btn).clicked() {
-                    sort_mode = SyncSortMode::RateDiff;
-                    ui.data_mut(|d| d.insert_temp(sort_mode_id, sort_mode));
-                }
-
-                ui.add_space(4.0);
-
-                let title_btn_fill = if sort_mode == SyncSortMode::Title {
-                    Theme::PRIMARY
-                } else {
-                    Theme::SECONDARY
-                };
-                let title_btn = egui::Button::new(
-                    RichText::new(crate::t!("sync-sort-by-title")).size(Theme::FONT_SMALL),
-                )
-                .fill(title_btn_fill)
-                .corner_radius(CornerRadius::same(Theme::R_SM));
-                if ui.add(title_btn).clicked() {
-                    sort_mode = SyncSortMode::Title;
-                    ui.data_mut(|d| d.insert_temp(sort_mode_id, sort_mode));
-                }
-            });
-        });
+        let sort_mode = candidates_header(ui, total_count, filtered_count);
         ui.add_space(12.0);
-
-        let mut sorted_candidates = filtered_candidates;
-
-        match sort_mode {
-            SyncSortMode::Title => {
-                sorted_candidates.sort_by(|a, b| {
-                    let mode_cmp = a.button_mode.cmp(&b.button_mode);
-                    if mode_cmp != std::cmp::Ordering::Equal {
-                        return mode_cmp;
-                    }
-                    a.song_name.cmp(&b.song_name)
-                });
-            }
-            SyncSortMode::RateDiff => {
-                sorted_candidates.sort_by(|a, b| {
-                    let diff_a = match a.varchive_rate {
-                        None => a.overmax_rate,
-                        Some(vr) => a.overmax_rate - vr,
-                    };
-                    let diff_b = match b.varchive_rate {
-                        None => b.overmax_rate,
-                        Some(vr) => b.overmax_rate - vr,
-                    };
-                    diff_b
-                        .partial_cmp(&diff_a)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-            }
-        }
 
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 ui.style_mut().spacing.item_spacing.y = 12.0;
-                for c in sorted_candidates {
+                for c in sort_candidates(filtered_candidates, sort_mode) {
                     candidate_row(ui, c, props.on_upload, props.on_delete);
                 }
-                let filtered_candidates: Vec<&SyncCandidate> = props
-                    .candidates
-                    .iter()
-                    .filter(|c| matches_filter(c, &filter))
-                    .collect();
-                let total_count = props.candidates.len();
-                let filtered_count = filtered_candidates.len();
-
-                let sort_mode = candidates_header(ui, total_count, filtered_count);
-                ui.add_space(12.0);
-
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| {
-                        ui.style_mut().spacing.item_spacing.y = 12.0;
-                        for c in sort_candidates(filtered_candidates, sort_mode) {
-                            candidate_row(ui, c, props.on_upload, props.on_delete);
-                        }
-                    });
             });
     };
 
