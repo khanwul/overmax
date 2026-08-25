@@ -32,7 +32,4 @@
 | 2026-08-24 | 추천 레벨(권장 레벨) 기준 레이팅 정확도(Target Rate) 4단계 설정화 | 플레이어 성향(클리어/순회 지향 vs 판정/퍼펙트 지향)에 따라 맞춤형 권장 레벨을 도출할 수 있도록 97%, 99%(기본), 99.5%, 100% 4단계 1열 선택 버튼 UI 및 Effective Floor 역산 로직 반영 | [settings.rs](../../rust/overmax_data/src/config/settings.rs) / [settings_ui.rs](../../rust/overmax_app/src/ui/settings_ui.rs) / [scoring.rs](../../rust/overmax_data/src/service/recommend/scoring.rs) |
 | 2026-08-24 | 기동 시 오버레이 뷰포트 흰색 깜빡임(Flashing) 소거 및 0ms 즉각 은닉/투명화 | eframe 클로저 진입 즉시 Win32 핸들을 획득하여 `setup_overlay_window` 및 `SW_HIDE`를 실행하고, 초기 뷰포트 크기를 1x1 마이크로 크기로 설정하여 앱 기동 시 불투명 흰색 프레임이 노출되던 결함을 100% 소거 | [windows.rs](../../rust/overmax_app/src/ui/platform/windows.rs) / [native_app.rs](../../rust/overmax_app/src/ui/native_app.rs) |
 | 2026-08-24 | 보조 창 전용 ODDS 디자인 시스템 분리 및 4탭 설정창 UX 개편 | 240x160 인게임 HUD 테마와 데스크톱 다이얼로그 테마를 완전 격리(`dialog_theme.rs`), 4개 전용 탭(일반/추천/V-Archive/고급) 구조화, 2행 전폭 입력 폼(`field_row`), RTL 슬라이더(`rtl_slider`) 및 세그먼트 루프 표준화 구축 | [dialog_theme.rs](../../rust/overmax_app/src/ui/dialog_theme.rs) / [settings_ui.rs](../../rust/overmax_app/src/ui/settings_ui.rs) / [sync_ui.rs](../../rust/overmax_app/src/ui/sync_ui.rs) |
-
-
-
 | 2026-08-25 | Locale::Ja 변종 추가 및 `t_select!` 3-암/2-암(En 폴백) 이중 규칙 확장, 전체 139키 일본어 번역 완성 | 컴파일 타임 0-Cost SSOT 아키텍처 유지하며 신규 로케일을 점진적 폴백(En) 방식으로 안전하게 확장. CJK 폰트는 기존 meiryo/msgothic 시스템 폰트 폴백으로 무비용 커버 | [i18n.rs](../../rust/overmax_app/src/ui/i18n.rs) / [settings_ui.rs](../../rust/overmax_app/src/ui/settings_ui.rs) |
