@@ -480,19 +480,42 @@ pub(crate) fn derive_skill_profile<F>(
 where
     F: Fn(i32, overmax_core::Mode, Difficulty) -> f64,
 {
+    let target_ratio = rate_to_rate_ratio(target_rate);
     let mut sc_floors: Vec<f64> = Vec::new();
     let mut pad_floors: Vec<f64> = Vec::new();
 
     for &(sid, m, d) in top50.rank_map.keys() {
         if m == button_mode {
-            let eff_floor = if let Some(&rating) = top50.rating_map.get(&(sid, m, d)) {
+            let floor = find_floor(sid, m, d);
+            let eff_floor = if floor > 0.0 {
+                if let Some(&raw_rate) = top50.rate_map.get(&(sid, m, d)) {
+                    let rate = if raw_rate > 100.0 {
+                        raw_rate / 10000.0
+                    } else {
+                        raw_rate
+                    };
+                    if rate > 0.0 && target_ratio > 0.0 {
+                        (floor * (rate_to_rate_ratio(rate) / target_ratio)).clamp(1.0, 17.0)
+                    } else {
+                        floor
+                    }
+                } else if let Some(&rating) = top50.rating_map.get(&(sid, m, d)) {
+                    if rating > 0.0 {
+                        rating_to_effective_floor(rating, target_rate)
+                    } else {
+                        floor
+                    }
+                } else {
+                    floor
+                }
+            } else if let Some(&rating) = top50.rating_map.get(&(sid, m, d)) {
                 if rating > 0.0 {
                     rating_to_effective_floor(rating, target_rate)
                 } else {
-                    find_floor(sid, m, d)
+                    0.0
                 }
             } else {
-                find_floor(sid, m, d)
+                0.0
             };
 
             if eff_floor > 0.0 {

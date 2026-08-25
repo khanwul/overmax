@@ -1,3 +1,4 @@
+//! RecordDB 모듈 진입점 및 데이터 구조체, 코어 CRUD, 커넥션 풀, 플레이 이벤트 로깅 책임.
 use overmax_core::{Difficulty, Mode, RecordKey, RecordValue, VerifiedPlayEvent};
 use rusqlite::{params, Connection, Result};
 use std::fs;
@@ -23,6 +24,8 @@ pub struct VArchiveTop50Summary {
     pub rank_map: std::collections::HashMap<RecordKey, usize>,
     /// 1위 ~ 50위 곡들의 레이팅 맵 (RecordKey -> Performance / V-Archive Rating)
     pub rating_map: std::collections::HashMap<RecordKey, f64>,
+    /// 1위 ~ 50위 곡들의 정확도 맵 (RecordKey -> Rate %)
+    pub rate_map: std::collections::HashMap<RecordKey, f64>,
     /// 모드 내 등록된 유효 레이팅(rating > 0) 곡 수
     pub total_recorded_count: usize,
 }

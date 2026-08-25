@@ -419,7 +419,7 @@ impl RecordDB {
         };
 
         let button_mode = mode.as_str();
-        let query = "SELECT song_id, difficulty, rating
+        let query = "SELECT song_id, difficulty, rating, score
                      FROM varchive_records
                      WHERE steam_id = ?1 AND button_mode = ?2 AND rating > 0
                      ORDER BY rating DESC
@@ -427,6 +427,7 @@ impl RecordDB {
 
         let mut rank_map = std::collections::HashMap::new();
         let mut rating_map = std::collections::HashMap::new();
+        let mut rate_map = std::collections::HashMap::new();
         let mut cutoff_rating = 0.0f64;
         let mut total_count = 0usize;
 
@@ -434,16 +435,18 @@ impl RecordDB {
             if let Ok(mut rows) = stmt.query(rusqlite::params![steam_id, button_mode]) {
                 let mut rank = 1;
                 while let Ok(Some(row)) = rows.next() {
-                    if let (Ok(song_id_str), Ok(diff_str), Ok(rating)) = (
+                    if let (Ok(song_id_str), Ok(diff_str), Ok(rating), Ok(score)) = (
                         row.get::<_, String>(0),
                         row.get::<_, String>(1),
                         row.get::<_, f64>(2),
+                        row.get::<_, f64>(3),
                     ) {
                         if let (Ok(sid), Some(diff)) =
                             (song_id_str.parse::<i32>(), Difficulty::from_str(&diff_str))
                         {
                             rank_map.insert((sid, mode, diff), rank);
                             rating_map.insert((sid, mode, diff), rating);
+                            rate_map.insert((sid, mode, diff), score);
                             cutoff_rating = rating;
                             total_count += 1;
                             rank += 1;
@@ -457,6 +460,7 @@ impl RecordDB {
             cutoff_rating,
             rank_map,
             rating_map,
+            rate_map,
             total_recorded_count: total_count,
         }
     }

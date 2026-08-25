@@ -185,7 +185,7 @@ impl RecordManager {
             return VArchiveTop50Summary::default();
         }
 
-        let mut rated_records: Vec<(i32, Difficulty, f64)> = local_records
+        let mut rated_records: Vec<(i32, Difficulty, f64, f64)> = local_records
             .into_iter()
             .filter_map(|r| {
                 let floor = find_floor(r.song_id, mode, r.difficulty);
@@ -193,7 +193,7 @@ impl RecordManager {
                     let rating = crate::service::recommend::scoring::calculate_performance_rating(
                         floor, r.rate,
                     );
-                    Some((r.song_id, r.difficulty, rating))
+                    Some((r.song_id, r.difficulty, rating, r.rate))
                 } else {
                     None
                 }
@@ -206,12 +206,14 @@ impl RecordManager {
         let top50_slice = &rated_records[..rated_records.len().min(50)];
         let mut rank_map = std::collections::HashMap::new();
         let mut rating_map = std::collections::HashMap::new();
+        let mut rate_map = std::collections::HashMap::new();
         let mut cutoff_rating = 0.0f64;
 
-        for (idx, &(song_id, diff, rating)) in top50_slice.iter().enumerate() {
+        for (idx, &(song_id, diff, rating, rate)) in top50_slice.iter().enumerate() {
             let rank = idx + 1;
             rank_map.insert((song_id, mode, diff), rank);
             rating_map.insert((song_id, mode, diff), rating);
+            rate_map.insert((song_id, mode, diff), rate);
             cutoff_rating = rating;
         }
 
@@ -219,6 +221,7 @@ impl RecordManager {
             cutoff_rating,
             rank_map,
             rating_map,
+            rate_map,
             total_recorded_count: top50_slice.len(),
         }
     }

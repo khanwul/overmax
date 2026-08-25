@@ -446,6 +446,7 @@ fn test_derive_top50_base_floor() {
         cutoff_rating: 150.0,
         rank_map: rank_map.clone(),
         rating_map: HashMap::new(),
+        rate_map: HashMap::new(),
         total_recorded_count: 4,
     };
 
@@ -468,6 +469,7 @@ fn test_derive_top50_base_floor() {
         cutoff_rating: 140.0,
         rank_map: rank_map.clone(),
         rating_map: HashMap::new(),
+        rate_map: HashMap::new(),
         total_recorded_count: 5,
     };
     let find_floor_even = |sid: i32, m: Mode, d: Difficulty| match sid {
@@ -1231,6 +1233,7 @@ fn test_skill_profile_estimation_and_cross_track_fallback() {
         cutoff_rating: 175.0,
         rank_map,
         rating_map: HashMap::new(),
+        rate_map: HashMap::new(),
     };
 
     let find_floor = |sid: i32, _m: Mode, _d: Difficulty| -> f64 {
@@ -1747,6 +1750,7 @@ fn test_skill_profile_estimation_uses_effective_floor_from_performance_rating() 
         cutoff_rating: 130.0,
         rank_map,
         rating_map,
+        rate_map: HashMap::new(),
     };
 
     let find_floor = |sid: i32, _m: Mode, _d: Difficulty| match sid {
@@ -1891,6 +1895,7 @@ fn test_recommended_level_with_different_target_rates() {
         cutoff_rating: rating,
         rank_map,
         rating_map,
+        rate_map: HashMap::new(),
     };
     let find_floor = |_: i32, _: Mode, _: Difficulty| 13.0;
 
@@ -1921,4 +1926,41 @@ fn test_recommended_level_with_different_target_rates() {
         derive_recommended_level(None, &[], Difficulty::SC, &profile_100, 100.0),
         Some("SC 12".to_string())
     );
+}
+
+#[test]
+fn test_skill_profile_calibration_with_real_rate_map() {
+    use std::collections::HashMap;
+
+    // 실제 Floor 12.0인 SC 곡에서 99.8%를 기록한 케이스 5개
+    let mut rank_map = HashMap::new();
+    let mut rate_map = HashMap::new();
+    let mut rating_map = HashMap::new();
+
+    for i in 1..=5 {
+        rank_map.insert((i, Mode::B4, Difficulty::SC), i as usize);
+        rate_map.insert((i, Mode::B4, Difficulty::SC), 99.8);
+        // V-Archive 서버에서 185.0점(왜곡치)을 주더라도
+        rating_map.insert((i, Mode::B4, Difficulty::SC), 185.0);
+    }
+
+    let top50 = crate::store::record_db::VArchiveTop50Summary {
+        total_recorded_count: 5,
+        cutoff_rating: 185.0,
+        rank_map,
+        rating_map,
+        rate_map,
+    };
+    let find_floor = |_: i32, _: Mode, _: Difficulty| 12.0;
+
+    // 99.5% 타깃 기준: 12.0 * (rate_ratio(99.8) / rate_ratio(99.5))
+    // = 12.0 * (0.990 / 0.975) = 12.18층
+    let profile = derive_skill_profile(&top50, &find_floor, Mode::B4, 99.5);
+
+    // V-Archive 레이팅(185점 -> 14층 뻥튀기) 대신 실질 12.18층으로 정확하게 계산됨을 검증!
+    assert_eq!(profile.sc.sample_count, 5);
+    assert!((profile.sc.mu - 12.18).abs() < 0.05);
+
+    let rec_lvl = derive_recommended_level(None, &[], Difficulty::SC, &profile, 99.5);
+    assert_eq!(rec_lvl, Some("SC 12".to_string()));
 }
