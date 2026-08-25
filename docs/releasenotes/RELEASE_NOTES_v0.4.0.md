@@ -1,7 +1,7 @@
 # Overmax v0.4.0 릴리즈 노트
 
 > v0.3.3 이후 변경 사항 (v0.4.0)  
-> 반영 기준 커밋: `e8c7ab8` (`v0.3.3` ~ `e8c7ab8`, 문서 커밋 제외 최종)
+> 반영 기준 커밋: `0fa5656` (`v0.3.3` ~ `0fa5656`, 문서 커밋 제외 최종)
 
 ---
 
@@ -155,3 +155,15 @@
 * **[씬 미스 진단 계측]**:
   * 폴링 미스 시 거절 단계(Centroid Kernel/카테고리 띠/유사도 임계)와 참조 썸네일 대비 픽셀 diff를 5초 텔레메트리 스냅샷(`cg/band/minsim/maxdiff`)으로 집계하여 향후 임계값 튜닝 근거 확보.
   * `SceneFrameView` 값 객체 도입으로 `output()` 9개 위치 인자 수프 해소 및 `too_many_arguments` 억제 제거.
+
+### 🏗️ 12. 복잡도 감소 리팩터링 및 아키텍처 핫스팟 책임 분리 (`6109799`, `fe761a1`, `9f3c33a`, `28a9d4e`, `f9776f1`)
+* **[동기화 창(`sync_ui.rs`) 거대 함수 컴포넌트화 (`6109799`, `fe761a1`)]**:
+  * 454줄 단일 함수 `render_sync`를 `steam_account_card`, `filter_card`(+`render_filter_form`), `candidates_header`, `sort_candidates` 전용 컴포넌트로 추출하고, `render_sync`는 ~60줄의 순수 오케스트레이터로 경량화하여 UI 렌더링 유지보수성을 대폭 향상했습니다.
+* **[앱 초기화 채널 번들화 및 업로드 후처리 분리(`native_app.rs`) (`9f3c33a`)]**:
+  * `SyncWorkerChannels` 팩토리를 도입하여 `NativeApp::new`의 7개 튜플 채널 선언 및 수동 연결을 캡슐화했습니다.
+  * `spawn_upload`의 V-Archive 캐시 병합/Top-50 랭크 흐름을 `sync_varchive_cache_after_upload` 헬퍼로 분리하고, 오프라인 폴백 페이로드 생성을 `upload_fallback_payload`로 단일화했습니다.
+* **[선곡 계열 씬 감지 게이트 체인 통합(`detection_pipeline.rs`) (`28a9d4e`)]**:
+  * Freestyle과 OpenMatch 씬 인식의 60줄 복붙 체인($\text{ROI Crop} \rightarrow \text{Centroid Kernel Gate} \rightarrow \text{Category Band Solidity} \rightarrow \text{Jacket Matcher}$)을 `run_jacket_match_gate` 단일 체인으로 통합하여 래더매치(Ladder Match) 확장 대비 및 거절 단계 진단(`SceneMissDiag`)을 무비용 일원화했습니다.
+* **[`RecordDB` 책임별 디렉터리 모듈 분할(`rust/overmax_data/src/store/record_db/`) (`f9776f1`)]**:
+  * 1,586줄 단일 파일을 `mod.rs`(구조체, CRUD 코어, 커넥션 풀/재시도 가드, play_events), `schema.rs`(테이블 DDL, ensure_schema, JSON 캐시 이관), `queries.rs`(Top-50 요약/랭크, 최근 기록, 동기화 후보 SQL 쿼리), `sync.rs`(V-Archive API 레코드 병합)로 분할하여 SQLite DDL, 리포트, API 동기화 책임을 격리하고 public API를 100% 보존했습니다.
+
