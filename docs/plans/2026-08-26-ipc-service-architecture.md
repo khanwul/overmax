@@ -3,7 +3,7 @@
 **작성일**: 2026-08-26  
 **작업 브랜치**: `feat/ipc-service-architecture`  
 **관련 TASKS**: v0.5.0 로드맵 1번 섹션 (IPC & Extensibility Protocol)  
-**상태**: 설계 전체 확정 (§3 트랜스포트, §5 규격, §6 구현 설계). 구현 진행 중
+**상태**: 설계 전체 확정 및 v1 구현 완료 (2026-08-27). SSE 이벤트 스트리밍(1.1), JSON-RPC 2.0 RPC 메서드 4종(1.2: `get_current_context`, `get_recommendations`, `set_overlay_visibility`, `list_methods`), 설정 UI, 통합 테스트 포함. 잔여 과제는 §1.1의 TASKS 1.3 (Provider 규격 일관화).
 
 ---
 
