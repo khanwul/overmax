@@ -98,12 +98,10 @@ cargo build --release -p overmax-app
 
 ## Roadmap
 
-Overmax is currently focused on the following goals per the backlog for the next version (v0.4.0). See [TASKS.md](TASKS.md) for detailed status and issue tracking.
+Overmax is currently focused on the following goals per the backlog for the next version (v0.5.0). See [TASKS.md](TASKS.md) for detailed status and issue tracking.
 
-1. **Improve recommendations**: refine and optimize the personalized pattern-recommendation algorithm
-2. **Optimize memory usage**: protect runtime performance and reduce background resource consumption
-3. **Broaden detected scenes**: support detecting more in-game situations, such as ladder matches
-4. **Fully replace the V-Archive client (long-term goal)**: an all-in-one backup pipeline from local play-record collection through sync and instant upload
+1. **Broaden detected scenes**: support detecting more in-game situations, such as ladder matches (ban/pick and result screens)
+2. **Fully replace the V-Archive client (long-term goal)**: an all-in-one backup pipeline from local play-record collection through sync and instant upload
 
 ---
 

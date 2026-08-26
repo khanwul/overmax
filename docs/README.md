@@ -72,7 +72,7 @@ OS별 구동 가이드 및 외부 연동 프로토콜 규격을 보관합니다.
 
 ### 5. Release Notes (`docs/releasenotes/`)
 버전별 배포 내역입니다. (작성 규칙은 [`AGENTS.md`](../AGENTS.md)의 Release Protocol 준수)
-* [`RELEASE_NOTES_v0.4.0.md`](releasenotes/RELEASE_NOTES_v0.4.0.md): 지능형 다차원 선곡 추천 엔진, 미니멀 사유 뱃지/툴팁, VerifiedPlayEvent 이벤트 아키텍처, 미플레이 곡 잔류 방지 및 유령 기록 자동 정화, 템플릿 매칭 Zero-Allocation.
+* [`RELEASE_NOTES_v0.4.0.md`](releasenotes/RELEASE_NOTES_v0.4.0.md): 지능형 다차원 선곡 추천 엔진, 미니멀 사유 뱃지/툴팁, VerifiedPlayEvent 이벤트 아키텍처, ODDS 설정창 개편, 일본어(JA) 지원, 템플릿 매칭 Zero-Allocation 및 MAX COMBO 해시 캐싱.
 * [`RELEASE_NOTES_v0.3.3.md`](releasenotes/RELEASE_NOTES_v0.3.3.md): 다중 모니터 DPI 인식, 1-Pass 매칭, Centroid 사전 게이트, 영어 UI 지원.
 * [`RELEASE_NOTES_v0.3.2.md`](releasenotes/RELEASE_NOTES_v0.3.2.md): 다국어 i18n 시스템 및 UI 설정 개선.
 * [`RELEASE_NOTES_v0.3.1.md`](releasenotes/RELEASE_NOTES_v0.3.1.md): V-Archive 증분 동기화, 동기화 필터, Favorite 마스킹, Linux 1차 포팅.
@@ -80,7 +80,7 @@ OS별 구동 가이드 및 외부 연동 프로토콜 규격을 보관합니다.
 
 ### 6. Archive (`docs/archive/tasks/`)
 완료된 이전 버전의 마일스톤 태스크 목록입니다.
-* [`TASKS_v0.4.0_archive.md`](archive/tasks/TASKS_v0.4.0_archive.md): v0.4.0 이전 마일스톤 완료 작업 (추천 Trait, 1-Pass 매칭, DPI V2, i18n 등).
+* [`TASKS_v0.4.0_archive.md`](archive/tasks/TASKS_v0.4.0_archive.md): v0.4.0 마일스톤 완료 작업 (스마트 추천 엔진, TrueSkill 실력 모델, ODDS 다이얼로그, RecordDB 분할, 일본어 i18n 등).
 * [`TASKS_v0.3.0_archive.md`](archive/tasks/TASKS_v0.3.0_archive.md): v0.3.0 마일스톤 완료 작업.
 * [`TASKS_v0.2.0_archive.md`](archive/tasks/TASKS_v0.2.0_archive.md): v0.2.0 마일스톤 완료 작업.
 

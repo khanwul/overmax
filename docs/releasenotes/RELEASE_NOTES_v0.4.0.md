@@ -1,7 +1,6 @@
 # Overmax v0.4.0 릴리즈 노트
 
 > v0.3.3 이후 변경 사항 (v0.4.0)
-> 반영 기준 커밋: `899a49c` (`v0.3.3` ~ `899a49c`, 문서 커밋 제외 최종)
 
 ---
 
@@ -101,6 +100,8 @@
 * **[스택 기반 비트 패킹 및 CPU Popcount 연산 최적화]**:
   * 글자당 20여 회 발생하던 동적 `Vec<u8>` 힙 할당을 스택 기반 `[u32; 32]` 비트마스크 패킹 및 CPU `count_ones()`(popcnt) 연산으로 전환하여 매칭 연산 속도를 10~20배 가속하고 힙 할당을 0으로 소거.
   * `detect_score`의 문자열 왕복(`char -> String -> parse -> u32`)을 정수 직접 누적으로 직결하여 파이프라인 무할당화 달성.
+* **[MAX COMBO 뱃지 판독의 `PatternRecord` 및 `RoiCache` 통합 (`fe9e725`)]**:
+  * 매 프레임 무조건 실행되던 DCT 2D 연산 기반 `detect_max_combo` 해시 계산을 `PatternRecord` 및 `RateInputChecksums`(점수+뱃지 복합 체크섬)에 통합하여, 정적 선곡 화면에서의 불필요한 해시 연산을 소거하고 `play_state` 연산 시간을 85% 이상 단축 (~6.9ms ➔ <1ms).
 * **[선곡 계열 씬 감지 게이트 체인 통합 (`28a9d4e`)]**:
   * Freestyle과 OpenMatch 씬 인식의 60줄 복붙 체인($\text{ROI Crop} \rightarrow \text{Centroid Kernel Gate} \rightarrow \text{Category Band Solidity} \rightarrow \text{Jacket Matcher}$)을 `run_jacket_match_gate` 단일 체인으로 통합하여 래더매치(Ladder Match) 확장 대비 및 거절 단계 진단(`SceneMissDiag`)을 무비용 일원화.
 * **[파이프라인 SSOT 폴링 정책 (SleepHint) & 이탈 판정 정밀화 (`e8c7ab8`)]**:
@@ -135,6 +136,7 @@
   * **2행 전폭 입력 폼 (`field_row` + `text_input_with_button`)**: 1행 라벨/설명, 2행 TextEdit + Action Button 구조를 통해 다국어 번역 길이 차이에 구애받지 않는 반응형 전폭 인풋 파이프라인 구축.
   * **RTL 슬라이더 (`rtl_slider`) & 세그먼트 루프 표준화**: `egui`의 `right_to_left` 레이아웃에서 발생하는 `Slider` 내부 역전 현상을 `[44px 고정 수치 라벨] -> [슬라이더 바(show_value(false))]` 순차 렌더링으로 우아하게 해결하고, 세그먼트 버튼들을 표준 RTL 역순 루프로 일관되게 정돈.
   * **동기화 및 보조 뷰포트 정렬 일치**: 동기화 창(`sync_ui.rs`)의 Steam ID `TextEdit` 내부 패딩(`symmetric(8, 6)`)과 스캔 버튼 높이를 32px로 일치시키고, 디버그 창 닫기 진단 로그 스팸을 정리.
+  * **V-Archive 연동 용어 직관화 (`fc2c225`)**: 수동/즉시 업로드 동작 방식에 맞추어 설정창의 "자동 업로드 연동" 표기를 "업로드 연동(Upload Integration / アップロード連携)"으로 직관적으로 정돈.
 * **[winit 초기화 시점 0ms 뷰포트 은닉]**:
   * `eframe::run_native`의 생성 클로저 진입 시점에 `init_overlay_window_immediate()`를 즉시 호출하여, `NativeApp::new`의 무거운 초기화 작업이 시작되기 전에 `setup_overlay_window`(`WS_EX_LAYERED`, `WS_POPUP`, `DwmExtendFrameIntoClientArea`) 및 `ShowWindow(hwnd, SW_HIDE)`를 0ms 시점에 실행.
   * `native_options`의 메인 뷰포트 초기 크기를 `[1.0, 1.0]` + `with_visible(false)`로 설정하여 winit 윈도우 생성 시 불투명 흰색 프레임이 DWM에 노출되는 시간적 틈을 물리적으로 차단.
