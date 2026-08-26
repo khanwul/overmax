@@ -92,8 +92,34 @@ SSE 응답)** 다. SSE+POST 조합은:
 
 - **WebSocket 직접 구현**: 손구현 프레이밍 400줄은 땜질이 아니라 장기 부채 (AGENTS.md
   땜질 금지 원칙 위반 소지)
-- **Named Pipe**: Windows 종속 — Linux 지원 범위와 충돌
 - **tokio+axum**: 견고하나 무거운 의존성 트리 + 기존 std 스레드 아키텍처와 이질적
+
+### 3.5 재검토 기록 (2026-08-26): "로컬 IPC" 관점 검증
+
+최초 검토 당시 Named Pipe가 거론되었던 배경(외부 network 연동과의 거리감)에 대해
+재검증한 결과, 기존 선택(SSE + loopback TCP)을 유지 확정한다.
+
+**전제 사실 — fan-out은 트랜스포트와 직교이다**: 커널이 fan-out을 대행하는 크로스플랫폼
+로컬 IPC 프리미티브는 존재하지 않는다(UDP 멀티캐스트가 유일한 커널 레벨 fan-out이지만,
+방화벽·loopback 멀티캐스트 설정 편차로 기본값 채택 불가). TCP loopback / Named Pipe /
+UDS 어느 쪽이든 N 클라이언트 팬아웃은 서버 프로세스(Broadcaster)의 몫이므로,
+트랜스포트를 교체해도 fan-out 요구는 해소되지 않는다.
+
+배제 근거:
+
+- **Named Pipe(Win) + UDS(Linux) 듀얼 백엔드**: std는 UDS만 지원 — Windows Named Pipe는
+  `Win32_System_Pipes` 기능 추가 + unsafe Win32 호출 필요. 백엔드 2개 유지에 따른
+  플랫폼 분기와 CI 검증 행렬 2배는 Linux 호환 원칙("공용 계약 최소 확장")과 충돌.
+  Linux FIFO는 다중 리더 시 데이터 분배가 비결정적이라 결국 UDS로 회귀. 대가 대비
+  얻는 이득은 OS ACL 접근 제어뿐이며, 이는 토큰 방식(`cache/ipc_endpoint.json`에
+  발급된 비밀을 헤더로 제시 — 파일 권한이 자연 게이트 역할)으로 아키텍처 변경 없이
+  앱 레벨에서 동등 달성 가능한 업그레이드 경로가 된다.
+- **공유메모리 링**: 알림 프리미티브가 OS마다 상이(eventfd vs named event)해 분기가
+  불가피하고 슬로우 컨슈머 처리가 복잡. 초당 수 회·KB 미만인 본 서비스 이벤트 레이트에서
+  성능 이득이 전무한 과설계.
+- **loopback TCP의 성격 재확인**: `127.0.0.1` 한정 바인딩은 패킷이 NIC를 벗어나지 않는
+  물리적 로컬 전용 채널이며, 명시적 loopback 바인딩이라 Windows 방화벽 팝업도
+  발생하지 않는다.
 
 ---
 
