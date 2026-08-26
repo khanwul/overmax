@@ -3,7 +3,7 @@
 **작성일**: 2026-08-26  
 **작업 브랜치**: `feat/ipc-service-architecture`  
 **관련 TASKS**: v0.5.0 로드맵 1번 섹션 (IPC & Extensibility Protocol)  
-**상태**: 철학 확정, 세부 결정 보류 (착업 시 채움)
+**상태**: 핵심 설계 확정 (트랜스포트·포트·기본값·엔벨로프·RPC 형식). 구현 상세는 §6 열린 질문 참조
 
 ---
 
@@ -37,14 +37,15 @@ MCP 매핑)은 각 착업 단계에서 본 문서의 빈칸을 채우는 방식�
 `is_stable = false`인 중간 상태는 외부에 노출하지 않는다 — 불변 조건 1번("stable일 때만
 commit")의 자연스러운 확장.
 
-### ③ 하나의 소켓, 하나의 언어 (Single Socket, Single Envelope)
+### ③ 하나의 포트, 하나의 언어 (Single Port, Single Envelope)
 단일 localhost 포트에서 이벤트 푸시(SSE)와 RPC(POST)를 모두 처리한다.
 공용 엔벨로프 하나로 통일한다:
 
 ```json
-{ "protocol": "overmax-ipc/1", "type": "event.play_verified" | "rpc.request" }
+{ "protocol": "overmax-ipc/1", "type": "play_verified", "seq": 42, "ts_ms": 1770000000000, "payload": { } }
 ```
 
+RPC 요청은 같은 포트의 단일 `POST /rpc`에서 JSON-RPC 2.0 형식으로 운반한다.
 기존 `overmax-recommend/1`의 버저닝 문화를 계승한다.
 
 ### ④ 로컬 신뢰, 명시적 동의 (Local-Only Trust)
@@ -115,16 +116,59 @@ IPC 서버 장애가 게임/오버레이에 무영향.
 
 ---
 
-## 5. 열린 질문 (착업 시 결정)
+## 5. 확정 결정 (2026-08-26 2차 논의)
 
-1. **포트 정책**: 고정 vs 설정 가능, 충돌 시 fallback 여부
-2. **기본 ON/OFF**: 아웃오브박스 켜짐 vs 설정에서 명시적 활성화
-3. **엔벨로프 규격**: `overmax-ipc/1` 이벤트 스키마 및 버저닝 상세 (`overmax-recommend/1` 계승)
-4. **RPC POST 경로 매핑**: MCP 시맨틱 매핑 위치 및 엔드포인트 설계 (1.2 착업 시)
+### 5.1 포트 정책: 대역 바인딩 + 설정 우선
+
+- 기본 포트 `30110`, 허용 대역 **30100~30199**
+  - 양 OS 임시(ephemeral) 포트 범위 밖 + 잘 알려진 점유자 없는 안전 대역
+  - 회피 근거: 49152+(Windows 동적 포트), 32768~49151(Linux ip_local_port_range), 8080/3000/9000대(개발 도구 표준)
+- `settings.json`의 `ipc.port`로 사용자 명시 설정 가능 (delta 형식 불변)
+- 바인딩 실패 시 대역 내 `+1..+19` 순차 스캔 → 모두 실패하면 **IPC만 비활성화(fail-closed), 게임/오버레이 무영향**
+- 실제 확정 포트는 로그 및 `cache/ipc_endpoint.json`(재생성 가능 캐시)으로 노출 — 향후 MCP stdio 브릿지의 포트 발견 경로
+
+### 5.2 기본 OFF
+
+- `ipc.enabled = false` 기본값. 원칙 ④(명시적 동의)의 직접 반영
+- 설정창 **고급 탭**에 배치 (네트워크 노출 영역이므로 일반 플레이어 기본 동선에서 분리)
+
+### 5.3 SSE 이벤트 규격: named-event + 단일 봉투
+
+```text
+GET /events  →
+event: play_detected              ← SSE 표준 event 필드 (디스팟치용)
+data: {"protocol":"overmax-ipc/1","type":"play_detected",
+       "seq":42,"ts_ms":1770000000000,"payload":{...}}
+```
+
+- **연결별 단조 증가 `seq`**: 재접속 후 유실 감지용. 유실 시 RPC 스냅샷 재조회로 복구
+- **접속 직후 `state_snapshot` 선송신**: 클라이언트가 POST 조회와 경쟁 없이 초기 상태 수령
+- 하트비트: `: ping` 주석 행, 15초 고정 간격
+- 버저닝: `/1` 내 필드 추가 허용, 호환 깨짐은 `/2`. 미지 이벤트 타입은 클라이언트가 무시 (forward-compat 의무화)
+- 필드명은 `overmax-recommend/1`과 동일 snake_case (`song_id`, `mode`, `diff`) — 코어 타입(`VerifiedPlayEvent`)과 1:1 대응
+- v1 이벤트 3종: `scene_detected`, `song_detected`, `play_verified`
+  - `_detected` 명명: 상태 변화를 '선언'하는 게 아니라 관찰된 '감지'를 '통지'하는 입장 (원칙 ② 반영). 단, `play_verified`는 verified flow 용어를 그대로 계승
+
+### 5.4 RPC 매핑: 단일 `POST /rpc`, JSON-RPC 2.0 서브셋
+
+- 결정적 근거: MCP 자체가 와이어 포맷으로 JSON-RPC 2.0을 사용 → 1.2에서 `/mcp` 엔드포인트가 내부 핸들러 레지스트리를 공유하는 얇은 어댑터로 승격 가능
+- 초기 메서드 3종: `get_current_context`, `get_recommendations`, `set_overlay_visibility` (읽기 우선, 제어 최소 1개)
+- 라우트 3개로 고정: `/rpc`, `/events`, `GET /`(매니페스트 — 발견·디버깅용)
+- 보호 가드 (비용 ≈ 0):
+  - `Host: 127.0.0.1[:port]` 헤더 검증 → DNS 리바인딩 차단
+  - `Content-Type: application/json` 강제 → CORS preflight 유도로 악성 웹페이지의 cross-origin POST 차단
 
 ---
 
-## 6. Non-Goals
+## 6. 열린 질문 (착업 시 결정)
+
+1. **SSE 응답 writer와 RPC 핸들러 스레드 모델 상세** — thread-per-client 내 read/write 분할 방식
+2. **`state_snapshot` 페이로드 범위** — 어떤 상태를 스냅샷에 포함할지 (곡/모드/난이도/rate 외 추가 여부)
+3. **설정 UI 컨트롤 상세** — 고급 탭 내 배치와 포트 입력 UX
+
+---
+
+## 7. Non-Goals
 
 - 원격 노출 / 인증 체계 고도화
 - 캡처 프레임 등 실시간 영상 스트리밍 (상태·이벤트만)
