@@ -488,9 +488,9 @@ macro_rules! t {
     };
     ("settings-varchive-upload") => {
         $crate::t_select!(
-            Ko => "자동 업로드 연동",
-            En => "Auto Upload Integration",
-            Ja => "自動アップロード連携"
+            Ko => "업로드 연동",
+            En => "Upload Integration",
+            Ja => "アップロード連携"
         )
     };
     ("settings-varchive-upload-desc") => {
@@ -509,9 +509,9 @@ macro_rules! t {
     };
     ("settings-account-path-required") => {
         $crate::t_select!(
-            Ko => "자동 업로드를 사용하려면 account.txt 파일 경로를 설정해야 합니다.",
-            En => "You must configure the account.txt file path to use auto-upload.",
-            Ja => "自動アップロードには account.txt ファイルパスの設定が必要です。"
+            Ko => "업로드를 사용하려면 account.txt 파일 경로를 설정해야 합니다.",
+            En => "You must configure the account.txt file path to use upload.",
+            Ja => "アップロードには account.txt ファイルパスの設定が必要です。"
         )
     };
     ("settings-tab-general") => {
