@@ -167,9 +167,9 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 # Future Focus
 
-1. **외부 연동 및 IPC 프로토콜 고도화**:
-   - ~~실시간 이벤트 스트리밍, MCP(Model Context Protocol) 기반 외부 호출 RPC~~ → **완료 (v0.5.0)**: SSE 이벤트 스트리밍(`scene_detected`/`song_detected`/`play_verified` + 접속 시 `state_snapshot`)과 JSON-RPC 2.0 메서드(`get_current_context`, `get_recommendations`, `set_overlay_visibility`, `list_methods`) 구현 완료.
-   - 남은 과제: Recommend-Provider 규격(`overmax-recommend/1`)과 신규 IPC/RPC 아키텍처의 일관화 정리.
+1. **외부 연동 및 IPC 프로토콜 고도화** — **완료 (v0.5.0)**:
+   - SSE 이벤트 스트리밍(`scene_detected`/`song_detected`/`play_verified` + 접속 시 `state_snapshot`)과 JSON-RPC 2.0 메서드(`get_current_context`, `get_recommendations`, `set_overlay_visibility`, `list_methods`) 구현 완료.
+   - Provider 규격(`overmax-recommend/1`)과 IPC 규격(`overmax-ipc/1`)은 역할이 다른 별개 프로토콜로 유지하되, `song_id`/`mode`/`diff` 공통 와이어 어휘와 `x/1` 버저닝 문화를 공유하도록 단일화 완료 (`RecommendEntry` serde rename + 계약 고정 테스트, 프로토콜 ID 상수화).
 2. **플레이어 편의성 및 인게임 유틸리티**:
    - 글로벌 단축키(Hotkeys) 지원 및 연습용 노트 레인 임시 가림막(Lane Blind) 오버레이 구현.
 3. **기록 수집 및 V-Archive 자동 연동**:

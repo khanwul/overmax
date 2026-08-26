@@ -12,8 +12,8 @@ Overmax v0.5.0 마일스톤 활성 작업 목록 및 백로그입니다.
 - [x] **1.2 외부 ➔ 내부 호출 인터페이스 (Inbound RPC / MCP 지원)**
   - [x] 외부 도구 및 AI 에이전트 연동을 위한 호출 프로토콜 설계 (MCP - Model Context Protocol 유력 검토)
   - [x] 현재 곡 정보 조회, 추천 목록 요청, 오버레이 상태 제어 RPC 엔드포인트 정의
-- [ ] **1.3 Recommend-Provider 프로토콜 통합 및 정리**
-  - [ ] 기존 Provider Fetch 규격(`recommend-provider-protocol.md`)을 신규 IPC/RPC 아키텍처와 일관되게 단일화 및 정리
+- [x] **1.3 Recommend-Provider 프로토콜 통합 및 정리**
+  - [x] 기존 Provider Fetch 규격(`recommend-provider-protocol.md`)을 신규 IPC/RPC 아키텍처와 일관되게 단일화 및 정리
 
 ---
 

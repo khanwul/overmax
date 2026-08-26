@@ -6,6 +6,7 @@ use crate::community::client::Song;
 use crate::service::record_manager::RecordManager;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RecommendReasonKind {
     /// V-Archive Top-50 컷라인 돌파 타깃
     Top50Attack,
@@ -47,7 +48,12 @@ pub struct RecommendEntry {
     pub song_id: i32,
     pub song_name: String,
     pub composer: String,
+    /// 와이어 포맷은 공통 어휘(`mode`)를 사용 — `overmax-recommend/1` 및
+    /// `overmax-ipc/1` 이벤트와 동일한 키 (docs/guides/recommend-provider-protocol.md §4)
+    #[serde(rename = "mode")]
     pub button_mode: Mode,
+    /// 와이어 포맷은 공통 어휘(`diff`)를 사용
+    #[serde(rename = "diff")]
     pub difficulty: Difficulty,
     pub level: Option<u32>,
     pub floor: Option<f64>,
@@ -294,4 +300,47 @@ where
     pub current_diff: Difficulty,
     pub target_rate: f64,
     pub now_unix: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 공통 어휘 계약 고정: `RecommendEntry` 직렬화는 `overmax-recommend/1` 및
+    /// `overmax-ipc/1`과 동일한 `song_id`/`mode`/`diff` 키를 사용해야 한다.
+    #[test]
+    fn recommend_entry_serializes_shared_wire_vocabulary() {
+        let entry = RecommendEntry {
+            song_id: 123,
+            song_name: "Test Song".into(),
+            composer: "Composer".into(),
+            button_mode: Mode::B5,
+            difficulty: Difficulty::SC,
+            level: None,
+            floor: None,
+            floor_name: None,
+            rate: None,
+            is_max_combo: false,
+            score: Some(0.87),
+            reason: None,
+        };
+
+        let v = serde_json::to_value(&entry).expect("serialize");
+        assert_eq!(v["song_id"], 123);
+        assert_eq!(v["mode"], "5B");
+        assert_eq!(v["diff"], "SC");
+        assert!(v.get("button_mode").is_none(), "internal field name leaked");
+        assert!(v.get("difficulty").is_none(), "internal field name leaked");
+    }
+
+    #[test]
+    fn reason_kind_serializes_snake_case() {
+        let reason = RecommendReason {
+            kind: RecommendReasonKind::Top50Attack,
+            detail: "cut-line".into(),
+            rank: None,
+        };
+        let v = serde_json::to_value(&reason).expect("serialize");
+        assert_eq!(v["kind"], "top50_attack");
+    }
 }

@@ -9,6 +9,10 @@ use std::time::{Duration, Instant};
 use crate::service::recommend::{RecommendContext, VaryDim};
 use serde::{Deserialize, Serialize};
 
+/// 외부 추천 Provider 규격 식별자 (docs/guides/recommend-provider-protocol.md).
+/// IPC 계층(`overmax-ipc/1`)과 별개 프로토콜이지만 버저닝 문화(`x/1`)를 공유한다.
+pub const RECOMMEND_PROTOCOL_ID: &str = "overmax-recommend/1";
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProviderManifest {
     pub protocol: String,
@@ -33,7 +37,7 @@ fn default_endpoint() -> String {
 impl Default for ProviderManifest {
     fn default() -> Self {
         Self {
-            protocol: "overmax-recommend/1".to_string(),
+            protocol: RECOMMEND_PROTOCOL_ID.to_string(),
             name: None,
             vary: vec![VaryDim::SongId, VaryDim::Mode, VaryDim::Diff],
             ttl_sec: default_ttl(),
@@ -64,7 +68,7 @@ pub fn test_provider_connection_blocking(provider_url: &str) -> Result<ProviderM
         .json()
         .map_err(|e| format!("Manifest JSON 파싱 실패: {}", e))?;
 
-    if manifest.protocol != "overmax-recommend/1" {
+    if manifest.protocol != RECOMMEND_PROTOCOL_ID {
         return Err(format!(
             "지원하지 않는 프로토콜 버전: {}",
             manifest.protocol

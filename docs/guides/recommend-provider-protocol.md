@@ -98,7 +98,25 @@ GET {endpoint}?song_id={id}&mode={mode}&diff={diff}&v_id={v_id}
 
 ---
 
-## 3. 예제 파이썬 Mock 서버
+## 3. Overmax IPC(`overmax-ipc/1`)와의 관계
+
+`overmax-recommend/1`은 **Provider(외부 서비스)가 구현하는 인바운드 규격**이고,
+`overmax-ipc/1`(설정창 고급 탭의 로컬 IPC 서버)은 **Overmax가 구현하는 아웃바운드 규격**으로
+역할이 다른 별개 프로토콜입니다. 다만 두 규격은 동일한 버저닝 문화와 공통 와이어 어휘를 공유합니다.
+
+| 공유 요소 | 내용 |
+|---|---|
+| 버저닝 문화 | `x/1` 내 필드 추가는 호환, 키 변경은 `/2` 승격. 미지 필드는 수신자가 무시 (forward-compat) |
+| 패턴 식별 어휘 | `song_id` / `mode` (`4B`,`5B`,`6B`,`8B`) / `diff` (`NM`,`HD`,`MX`,`SC`) — 이벤트·RPC·Provider 응답 모두 동일 |
+| snake_case | 모든 JSON 필드명 |
+
+Overmax 내부에서는 `RecommendEntry` 직렬화가 이 공통 어휘를 그대로 사용하며
+(`rust/overmax_data/src/service/recommend/types.rs`의 계약 고정 단위 테스트 참조),
+IPC RPC `get_recommendations` 응답도 동일한 키 체계로 제공됩니다.
+
+---
+
+## 4. 예제 파이썬 Mock 서버
 
 프로토콜 구현을 검증할 수 있는 예제 Python Mock 서버가 `examples/recommend_mock_server.py` 파일로 제공됩니다.
 
@@ -110,3 +128,12 @@ python examples/recommend_mock_server.py
 
 * 실행 시 `http://127.0.0.1:8080` 포트에서 대기합니다.
 * Overmax 설정창 -> System 탭 -> **추천 Provider**에서 `http://127.0.0.1:8080`을 입력하여 연동을 테스트할 수 있습니다.
+
+---
+
+## 5. 프로토콜 식별자 상수
+
+앱 내부에서는 문자열 리터럴 대신 상수를 사용해야 합니다 (불일치 방지):
+
+* `overmax-recommend/1`: `rust/overmax_data/src/service/recommend_provider_fetch.rs`의 `RECOMMEND_PROTOCOL_ID`
+* `overmax-ipc/1`: `rust/overmax_app/src/system/ipc_server.rs`의 `PROTOCOL_ID`

@@ -23,6 +23,10 @@ const MAX_RPC_BODY: usize = 64 * 1024;
 
 pub const PROTOCOL_ID: &str = "overmax-ipc/1";
 
+// 외부 추천 Provider 규격(`overmax-recommend/1`)과는 별개 프로토콜이다.
+// 두 규격은 `song_id`/`mode`/`diff` 공통 와이어 어휘와 `x/1` 버저닝 문화를 공유하며,
+// 규격 상세는 docs/guides/recommend-provider-protocol.md §4를 참조한다.
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 퍼블릭 엔트리포인트
 // ─────────────────────────────────────────────────────────────────────────────

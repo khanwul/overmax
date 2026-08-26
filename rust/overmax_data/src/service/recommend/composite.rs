@@ -6,6 +6,7 @@ use overmax_core::{Difficulty, Mode};
 use serde::Deserialize;
 
 use crate::community::client::VArchiveDB;
+use crate::service::recommend_provider_fetch::RECOMMEND_PROTOCOL_ID;
 use crate::service::record_manager::{RecordManager, RecordSource};
 
 use super::local::LocalFloorRecommender;
@@ -136,7 +137,7 @@ impl RecommendationSource for ProviderCacheReader {
             }
         };
 
-        if payload.protocol != "overmax-recommend/1" || payload.entries.is_empty() {
+        if payload.protocol != RECOMMEND_PROTOCOL_ID || payload.entries.is_empty() {
             return RecommendBundle {
                 source_id: self.source_id.clone(),
                 source_label: self.source_label.clone(),

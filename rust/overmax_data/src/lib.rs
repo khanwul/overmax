@@ -31,7 +31,7 @@ pub use service::recommend::{
 };
 pub use service::recommend_provider_fetch::{
     fetch_manifest_blocking, fetch_recommend_blocking, get_cached_manifest,
-    test_provider_connection_blocking, ProviderManifest,
+    test_provider_connection_blocking, ProviderManifest, RECOMMEND_PROTOCOL_ID,
 };
 pub use service::record_manager::{RecordManager, RecordSource};
 pub use store::image_index::{ImageEntry, ImageIndexDb, ImageMatch};
