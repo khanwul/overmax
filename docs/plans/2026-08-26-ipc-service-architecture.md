@@ -3,7 +3,7 @@
 **작성일**: 2026-08-26  
 **작업 브랜치**: `feat/ipc-service-architecture`  
 **관련 TASKS**: v0.5.0 로드맵 1번 섹션 (IPC & Extensibility Protocol)  
-**상태**: 핵심 설계 확정 (트랜스포트·포트·기본값·엔벨로프·RPC 형식). 구현 상세는 §6 열린 질문 참조
+**상태**: 설계 전체 확정 (§3 트랜스포트, §5 규격, §6 구현 설계). 구현 진행 중
 
 ---
 
@@ -186,11 +186,51 @@ data: {"protocol":"overmax-ipc/1","type":"play_detected",
 
 ---
 
-## 6. 열린 질문 (착업 시 결정)
+## 6. 구현 설계 결정 (2026-08-26 3차 논의 — 착수 직전 확정)
 
-1. **SSE 응답 writer와 RPC 핸들러 스레드 모델 상세** — thread-per-client 내 read/write 분할 방식
-2. **`state_snapshot` 페이로드 범위** — 어떤 상태를 스냅샷에 포함할지 (곡/모드/난이도/rate 외 추가 여부)
-3. **설정 UI 컨트롤 상세** — 고급 탭 내 배치와 포트 입력 UX
+### 6.1 스레드 모델: 리스너 + 허브 + 클라이언트당 스레드
+
+```
+[GUI drain 루프] ─try_send(bounded 64)→ [허브 스레드] ─Sender 클론 fan-out→ [SSE 클라이언트 스레드들]
+[리스너 스레드: nonblocking accept, 250ms 폴링]
+```
+
+- **설정 변경 감지는 폴링**: `detection_worker`가 `merged_settings`(Arc&lt;Mutex&gt;)를 매 사이클 읽는 기존 패턴과 동일하게, accept 루프 250ms 틱마다 설정을 읽어 ON/OFF·포트 변경 시 리바인딩. 신규 명령 채널 없음 — 설정 변경이 앱 재시작 없이 반영됨
+- **seq는 클라이언트 writer 스레드가 할당** (연결별 단조 보장)
+- **백프레셔**: GUI→허브 bounded 채널 가득 시 해당 이벤트 drop (`state_snapshot`+RPC로 회수 가능). 게임/GUI 경로는 절대 블록되지 않음 (원칙 ①)
+- 유휴 비용: 클라이언트 0명 시 park된 스레드 2개 + 폴링 4회/초 ≈ 0
+
+### 6.2 이벤트 훅 지점: `drain_detection_results()` 단일 관찰자
+
+파이프라인 수정 0 — GUI 계층의 `native_app_recommend.rs::drain_detection_results()`가
+이미 필요한 3종 이벤트 원천을 모두 보유:
+
+| 이벤트 | 원천 |
+|---|---|
+| `scene_detected` | `self.session != output.state` 비교 지점 |
+| `song_detected` | 안정화된 컨텍스트 (`state.is_valid()`) |
+| `play_verified` | `output.event` (DB 커밋과 동일 이벤트) |
+
+중복 억제는 퍼블리셔 측 compare-and-publish(직전 발행 스냅샷과 동일하면 스킵)로 처리.
+
+### 6.3 `state_snapshot` 페이로드: `GameSessionState` 직렬화 그대로 + 알파
+
+```json
+{ "scene": "Freestyle", "stable": true, "fullscreen": true,
+  "context": { "song_id": 123, "mode": "5B", "diff": "SC",
+               "rate": 99.23, "is_max_combo": false } | null,
+  "app_version": "0.4.0" }
+```
+
+- 코어 타입(`GameSessionState`, `PlayContext`)이 이미 `Serialize` 파생이라 변환 코드 최소
+- **곡 제목은 의도적 미포함**: `songs.json`은 공개 데이터이므로 클라이언트가 `song_id`로
+  자체 해석. IPC↔VArchiveDB 결합을 만들지 않음 (관찰 최소주의, 원칙 ②)
+
+### 6.4 설정 UI: 고급 탭 섹션 카드 1장
+
+기존 `section_card` 패턴 준용 — enabled 체크박스 + 포트 입력(1024~65535 clamp,
+권장 대역 30100~30199 힌트) + 런타임 상태 라인(`실행 중 · 127.0.0.1:{port}`).
+i18n ko/en 키 추가. 저장은 기존 delta 디바운스 플로우 그대로.
 
 ---
 
