@@ -100,8 +100,11 @@ cargo build --release -p overmax-app
 
 Overmax is currently focused on the following goals per the backlog for the next version (v0.5.0). See [TASKS.md](TASKS.md) for detailed status and issue tracking.
 
-1. **Broaden detected scenes**: support detecting more in-game situations, such as ladder matches (ban/pick and result screens)
-2. **Fully replace the V-Archive client (long-term goal)**: an all-in-one backup pipeline from local play-record collection through sync and instant upload
+1. **IPC & Extensibility Protocol**: real-time outbound event streaming, MCP (Model Context Protocol) inbound RPC, and recommend-provider consolidation
+2. **In-game Utilities & Controls**: global hotkeys support and practice lane blind/curtain overlay
+3. **Record Automation**: background auto-upload to V-Archive upon result screen verification
+4. **Broaden detected scenes**: support detecting more in-game situations, such as ladder matches (ban/pick and result screens)
+5. **Fully replace the V-Archive client (long-term goal)**: an all-in-one backup pipeline from local play-record collection through sync and instant upload
 
 ---
 
