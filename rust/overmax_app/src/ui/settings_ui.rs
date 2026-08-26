@@ -22,6 +22,8 @@ pub struct SettingsUiContext {
     pub fetch_tx: Sender<(String, String, i32)>,
     pub steam_users:
         Arc<Mutex<std::collections::HashMap<String, crate::system::steam_session::SteamUser>>>,
+    /// IPC 서버 실제 바인딩 포트 (None = 비활성)
+    pub ipc_bound_port: crate::system::ipc_server::BoundPortSlot,
 }
 
 pub fn render_settings_form(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
@@ -487,6 +489,9 @@ fn account_path_row(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContex
 }
 
 fn advanced_tab(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
+    section_card(ui, crate::t!("settings-ipc-section"), |ui| {
+        ipc_section(ui, draft, ctx);
+    });
     section_card(ui, crate::t!("settings-diagnostics"), |ui| {
         debug_section(ui, draft, ctx);
     });
@@ -546,6 +551,84 @@ fn debug_section(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) 
             }
         },
     );
+}
+
+/// 외부 연동(로컬 IPC) 섹션: enabled 토글 + 포트 입력 + 런타임 상태.
+/// 저장은 draft(Value)를 거쳐 기존 delta 디바운스 플로우로 반영되며,
+/// 서버 측(매니저 스레드)이 merged settings를 폴링하여 런타임에 반영한다.
+fn ipc_section(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
+    let ipc_obj = object_section_mut(draft, "ipc");
+
+    let mut enabled = ipc_obj
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    // ── 상태 라인 (런타임 바인딩 슬롯 조회) ──
+    let bound = ctx.ipc_bound_port.lock().ok().and_then(|g| *g);
+    setting_row(
+        ui,
+        crate::t!("settings-ipc-enable"),
+        crate::t!("settings-ipc-enable-hint"),
+        |ui| {
+            if ui.checkbox(&mut enabled, "").changed() {
+                ipc_obj.insert("enabled".to_string(), Value::Bool(enabled));
+            }
+        },
+    );
+    if enabled {
+        if let Some(port) = bound {
+            ui.label(
+                RichText::new(format!(
+                    "{} · 127.0.0.1:{port}",
+                    crate::t!("settings-ipc-status-running")
+                ))
+                .color(Color32::from_rgb(120, 200, 120))
+                .size(DialogTheme::FONT_BODY),
+            );
+        } else {
+            ui.label(
+                RichText::new(crate::t!("settings-ipc-status-stopped"))
+                    .color(DialogTheme::TEXT_MUTED)
+                    .size(DialogTheme::FONT_BODY),
+            );
+        }
+    }
+
+    // ── 포트 입력 (enabled 시에만 편집) ──
+    let current_port = ipc_obj.get("port").and_then(Value::as_u64).unwrap_or(30110);
+    let mut port_text = port_draft_text(ipc_obj, current_port);
+    ui.add_space(DialogTheme::GAP_SM);
+    setting_row(
+        ui,
+        crate::t!("settings-ipc-port"),
+        crate::t!("settings-ipc-port-hint"),
+        |ui| {
+            let text_edit = egui::TextEdit::singleline(&mut port_text)
+                .font(egui::FontId::new(
+                    DialogTheme::FONT_BODY,
+                    egui::FontFamily::Monospace,
+                ))
+                .vertical_align(egui::Align::Center);
+            let response = ui.add_sized(egui::vec2(90.0, DialogTheme::CONTROL_HEIGHT), text_edit);
+            if response.changed() {
+                let cleaned: String = port_text.chars().filter(|c| c.is_ascii_digit()).collect();
+                if let Ok(port) = cleaned.parse::<u16>() {
+                    if (1024..=65535).contains(&port) {
+                        ipc_obj.insert("port".to_string(), json!(port));
+                    }
+                }
+            }
+        },
+    );
+}
+
+/// 포트 임시 편집 문자열. 확정된 값과 다른 미완성 입력을 유지하기 위한 최소 장치.
+fn port_draft_text(ipc_obj: &Map<String, Value>, fallback: u64) -> String {
+    match ipc_obj.get("port").and_then(Value::as_u64) {
+        Some(p) => p.to_string(),
+        None => fallback.to_string(),
+    }
 }
 
 fn capture_section(ui: &mut egui::Ui, draft: &mut Value) {

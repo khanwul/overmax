@@ -41,6 +41,13 @@ impl NativeApp {
                 self.session = output.state.clone();
             }
 
+            // ── IPC 이벤트 발행 (관찰자 — 파이프라인/DB 경로 무변경) ──
+            // 안정화된 상태만 스냅샷 캐시에 반영 (불변 조건 1번의 확장)
+            if output.state.is_stable {
+                crate::system::ipc_server::update_latest_state(output.state.clone());
+            }
+            self.publish_ipc_events(&output.state);
+
             if let Some(event) = output.event {
                 if self.record_manager.handle_verified_play(&event) {
                     debug_ui::push_log(
@@ -53,6 +60,15 @@ impl NativeApp {
                     );
                     changed = true;
                 }
+                // play_verified는 DB 커밋 성공 여부와 무관하게 확정 이벤트로 통지
+                self.ipc_publisher
+                    .publish(crate::system::ipc_server::IpcEvent::PlayVerified {
+                        song_id: event.song_id,
+                        mode: event.mode.as_str().to_string(),
+                        diff: event.diff.as_str().to_string(),
+                        rate: event.rate,
+                        is_max_combo: event.is_max_combo,
+                    });
             }
         }
 
@@ -60,6 +76,44 @@ impl NativeApp {
             self.refresh_overlay_data();
             self.log_overlay_state();
             ctx.request_repaint();
+        }
+    }
+
+    /// 감지 상태 → IPC 이벤트 변환 발행 (compare-and-publish 중복 억제 포함).
+    /// `scene`/`context` 조합이 직전 발행과 동일하면 아무것도 보내지 않는다.
+    fn publish_ipc_events(&mut self, state: &GameSessionState) {
+        use crate::system::ipc_server::IpcEvent;
+
+        let scene_key = format!("{:?}", state.scene);
+        if self.last_ipc_scene_key.as_deref() != Some(scene_key.as_str()) {
+            self.ipc_publisher.publish(IpcEvent::SceneDetected {
+                scene: scene_key.clone(),
+            });
+            self.last_ipc_scene_key = Some(scene_key);
+        }
+
+        if !state.is_stable {
+            return;
+        }
+        let Some(ctx) = &state.context else {
+            return;
+        };
+        let ctx_key = (
+            ctx.song_id,
+            ctx.mode,
+            ctx.diff,
+            ctx.rate.to_bits(),
+            ctx.is_max_combo,
+        );
+        if self.last_ipc_context_key.as_ref() != Some(&ctx_key) {
+            self.ipc_publisher.publish(IpcEvent::SongDetected {
+                song_id: ctx.song_id,
+                mode: ctx.mode.as_str().to_string(),
+                diff: ctx.diff.as_str().to_string(),
+                rate: ctx.rate,
+                is_max_combo: ctx.is_max_combo,
+            });
+            self.last_ipc_context_key = Some(ctx_key);
         }
     }
 

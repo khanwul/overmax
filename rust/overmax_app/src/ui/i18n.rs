@@ -591,6 +591,55 @@ macro_rules! t {
             Ja => "リアルタイム検出メトリクスと診断ログを表示"
         )
     };
+    ("settings-ipc-section") => {
+        $crate::t_select!(
+            Ko => "외부 연동 (로컬 IPC)",
+            En => "External Integration (Local IPC)",
+            Ja => "外部連携 (ローカルIPC)"
+        )
+    };
+    ("settings-ipc-enable") => {
+        $crate::t_select!(
+            Ko => "IPC 서버 사용",
+            En => "Enable IPC server",
+            Ja => "IPCサーバーを使用"
+        )
+    };
+    ("settings-ipc-enable-hint") => {
+        $crate::t_select!(
+            Ko => "127.0.0.1에서만 동작하는 로컬 이벤트/RPC 서버",
+            En => "Local event/RPC server bound to 127.0.0.1 only",
+            Ja => "127.0.0.1限定のローカルイベント/RPCサーバー"
+        )
+    };
+    ("settings-ipc-port") => {
+        $crate::t_select!(
+            Ko => "포트",
+            En => "Port",
+            Ja => "ポート"
+        )
+    };
+    ("settings-ipc-port-hint") => {
+        $crate::t_select!(
+            Ko => "권장 대역 30100~30199 · 충돌 시 대역 내 자동 전환",
+            En => "Recommended band 30100-30199 · auto-fallback within band",
+            Ja => "推奨帯域30100〜30199・衝突時は帯域内で自動切替"
+        )
+    };
+    ("settings-ipc-status-running") => {
+        $crate::t_select!(
+            Ko => "실행 중",
+            En => "Running",
+            Ja => "実行中"
+        )
+    };
+    ("settings-ipc-status-stopped") => {
+        $crate::t_select!(
+            Ko => "중지",
+            En => "Stopped",
+            Ja => "停止中"
+        )
+    };
     ("settings-capture-engine-hint") => {
         $crate::t_select!(
             Ko => "DXGI: 고성능 / GDI: 호환성",

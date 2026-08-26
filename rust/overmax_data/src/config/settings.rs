@@ -774,6 +774,31 @@ impl Default for RecommendSettings {
     }
 }
 
+/// 외부 연동(IPC) 서버 설정. 기본 OFF (원칙: 명시적 동의).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct IpcSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_ipc_port")]
+    pub port: u16,
+}
+
+fn default_ipc_port() -> u16 {
+    30110
+}
+
+/// 권장 포트 대역 (양 OS 임시 포트 범위 밖 안전 구간)
+pub const IPC_PORT_BAND: std::ops::RangeInclusive<u16> = 30100..=30199;
+
+impl Default for IpcSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: default_ipc_port(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
 pub struct Settings {
     #[serde(default)]
@@ -796,6 +821,8 @@ pub struct Settings {
     pub recommend_provider: Option<RecommendProviderSettings>,
     #[serde(default)]
     pub recommend: Option<RecommendSettings>,
+    #[serde(default)]
+    pub ipc: Option<IpcSettings>,
 }
 
 impl Settings {
@@ -828,5 +855,8 @@ impl Settings {
     }
     pub fn recommend(&self) -> RecommendSettings {
         self.recommend.clone().unwrap_or_default()
+    }
+    pub fn ipc(&self) -> IpcSettings {
+        self.ipc.unwrap_or_default()
     }
 }

@@ -289,6 +289,11 @@ pub struct NativeApp {
     pub(crate) last_detection_output: Option<DetectionOutput>,
     pub(crate) last_telemetry_snapshot:
         Option<overmax_engine::detector::telemetry::PipelineTelemetrySnapshot>,
+    pub(crate) ipc_publisher: crate::system::ipc_server::IpcPublisher,
+    pub(crate) ipc_bound_port: crate::system::ipc_server::BoundPortSlot,
+    pub(crate) last_ipc_scene_key: Option<String>,
+    pub(crate) last_ipc_context_key:
+        Option<(i32, overmax_core::Mode, overmax_core::Difficulty, u32, bool)>,
 }
 
 impl NativeApp {
@@ -411,6 +416,14 @@ impl NativeApp {
         let settings_writer =
             Arc::new(crate::system::settings_writer::SettingsDebounceWriter::new());
 
+        // IPC 서버 매니저 (설정 OFF가 기본 — enabled 시에만 바인딩됨)
+        let (ipc_publisher, _ipc_handle, ipc_bound_port) =
+            crate::system::ipc_server::spawn_ipc_manager(
+                root.as_ref().clone(),
+                merged_settings.clone(),
+                env!("CARGO_PKG_VERSION"),
+            );
+
         let settings = SharedSettings {
             defaults: defaults.clone(),
             base: base_settings.clone(),
@@ -476,6 +489,10 @@ impl NativeApp {
             toast: None,
             last_detection_output: None,
             last_telemetry_snapshot: None,
+            ipc_publisher,
+            ipc_bound_port,
+            last_ipc_scene_key: None,
+            last_ipc_context_key: None,
         };
 
         app.handle_auto_refresh();

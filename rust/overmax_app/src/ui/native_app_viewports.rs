@@ -209,6 +209,7 @@ impl NativeApp {
             sync_steam_id: self.sync_state.steam_id.clone(),
             fetch_tx: self.sync_channels.fetch_req_tx.clone(),
             steam_users: self.sync_state.steam_users.clone(),
+            ipc_bound_port: self.ipc_bound_port.clone(),
         };
         ctx.show_viewport_deferred(
             native_helpers::vp_settings(),
