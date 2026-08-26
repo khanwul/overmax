@@ -19,11 +19,13 @@ const RATE_CHECKSUM_CHANGE_THRESHOLD: u64 = 50;
 #[derive(Clone, Copy, Debug, Eq)]
 struct RateInputChecksums {
     score: u64,
+    badge: u64,
 }
 
 impl PartialEq for RateInputChecksums {
     fn eq(&self, other: &Self) -> bool {
         self.score.abs_diff(other.score) <= RATE_CHECKSUM_CHANGE_THRESHOLD
+            && self.badge.abs_diff(other.badge) <= RATE_CHECKSUM_CHANGE_THRESHOLD
     }
 }
 
@@ -173,7 +175,11 @@ impl PlayStateDetector {
                 rois.get_roi("rate")
                     .and_then(|roi| compute_pixel_checksum(frame, roi))
             })?;
-        Some(RateInputChecksums { score })
+        let badge = rois
+            .get_roi("max_combo_badge")
+            .and_then(|roi| compute_pixel_checksum(frame, roi))
+            .unwrap_or(0);
+        Some(RateInputChecksums { score, badge })
     }
 
     fn process_rate_detection(
@@ -212,9 +218,10 @@ impl PlayStateDetector {
                     if let Some(r) = detected_rate {
                         self.push_result_rate_sample(r);
                         if let Some(median_r) = self.median_result_rate() {
+                            let is_max_combo = detect_max_combo_result(frame, rois);
                             let record = PatternRecord::Played {
                                 rate: median_r,
-                                is_max_combo: false,
+                                is_max_combo,
                             };
                             self.rate_cache.set(Some(record), checksums, now);
                         }
@@ -237,17 +244,19 @@ impl PlayStateDetector {
                             score_val,
                             calc_rate
                         );
+                        let is_max_combo = detect_max_combo(frame, rois);
                         return Some(PatternRecord::Played {
                             rate: calc_rate,
-                            is_max_combo: false,
+                            is_max_combo,
                         });
                     }
                 } else if let Some(rate_res) =
                     rois.and_then_roi(frame, "rate", |img| templates::detect_rate(img))
                 {
+                    let is_max_combo = detect_max_combo(frame, rois);
                     return Some(PatternRecord::Played {
                         rate: rate_res,
-                        is_max_combo: false,
+                        is_max_combo,
                     });
                 }
                 Some(PatternRecord::Unplayed)
@@ -400,16 +409,14 @@ impl PlayStateDetector {
     ) -> Option<PlayContext> {
         let is_result = scene.is_result();
 
-        // 1-1. 모드 / 난이도 / 콤보 판독
-        let (mode, diff, confident, is_max_combo) = if is_result {
+        // 1-1. 모드 / 난이도 판독
+        let (mode, diff, confident) = if is_result {
             let (m, d) = self.resolve_result_mode_diff(scene, frame, rois);
-            let combo = detect_max_combo_result(frame, rois);
-            (m, d, true, combo)
+            (m, d, true)
         } else {
             self.result_mode_diff.clear();
             let (m, d, conf) = self.process_mode_diff_detection(frame, rois, now);
-            let combo = detect_max_combo(frame, rois);
-            (m, d, conf, combo)
+            (m, d, conf)
         };
 
         let sid = song_id?;
@@ -432,7 +439,7 @@ impl PlayStateDetector {
             confident
         );
 
-        // 1-2. 점수 / Rate 판독
+        // 1-2. 점수 / Rate / MAX COMBO 판독
         let record = self.process_rate_detection(frame, rois, scene, is_result, now);
         let rate = record.rate();
         let rate_valid = !is_result || rate >= MIN_VALID_RATE;
@@ -443,7 +450,7 @@ impl PlayStateDetector {
             diff: d,
             rate: if rate_valid { rate } else { 0.0 },
             is_max_combo: if rate_valid && rate > 0.0 {
-                is_max_combo
+                record.is_max_combo()
             } else {
                 false
             },
@@ -792,10 +799,32 @@ mod tests {
 
     #[test]
     fn rate_checksum_cache_only_refreshes_on_meaningful_input_change() {
-        let previous = RateInputChecksums { score: 2_000 };
+        let previous = RateInputChecksums {
+            score: 2_000,
+            badge: 500,
+        };
 
-        assert_eq!(previous, RateInputChecksums { score: 2_049 });
-        assert_ne!(previous, RateInputChecksums { score: 2_051 });
+        assert_eq!(
+            previous,
+            RateInputChecksums {
+                score: 2_049,
+                badge: 549,
+            }
+        );
+        assert_ne!(
+            previous,
+            RateInputChecksums {
+                score: 2_051,
+                badge: 500,
+            }
+        );
+        assert_ne!(
+            previous,
+            RateInputChecksums {
+                score: 2_000,
+                badge: 551,
+            }
+        );
     }
 
     #[test]
@@ -1019,7 +1048,10 @@ mod tests {
                 rate: 95.0,
                 is_max_combo: false,
             }),
-            Some(RateInputChecksums { score: 100 }),
+            Some(RateInputChecksums {
+                score: 100,
+                badge: 0,
+            }),
             0.0,
         );
 
@@ -1051,7 +1083,7 @@ mod tests {
         let mut rois = RoiManager::new(1920, 1080);
         rois.set_scene(SceneType::Freestyle);
 
-        // 곡 1에 대해 99.63% 점수 주입
+        // 곡 1에 대해 99.63% (MC=true) 점수 주입
         let checksums = PlayStateDetector::rate_input_checksums(&frame, &rois);
         detector
             .rate_cache
@@ -1084,8 +1116,8 @@ mod tests {
         assert_eq!(event.diff, super::Difficulty::NM);
         assert_eq!(event.rate, 99.63);
         assert!(
-            !event.is_max_combo,
-            "빈 프레임에서는 맥스 콤보 뱃지가 없으므로 false"
+            event.is_max_combo,
+            "주입된 맥스 콤보 상태가 정상 보존되어야 함"
         );
         assert!(
             !event.is_result_screen,
