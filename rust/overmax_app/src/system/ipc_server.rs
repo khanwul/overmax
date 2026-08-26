@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{sync_channel, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -58,6 +58,13 @@ impl IpcServerHandle {
 /// 현재 바인딩 상태. `None` = IPC 비활성 (설정 OFF 또는 바인딩 실패).
 pub type BoundPortSlot = Arc<Mutex<Option<u16>>>;
 
+/// IPC → GUI 제어 명령 (읽기 우선, 제어 최소 1개 — §5.4)
+#[derive(Clone, Debug)]
+pub enum IpcCommand {
+    /// 오버레이 가시성 토글
+    SetOverlayVisibility(bool),
+}
+
 /// IPC 매니저 기동 (매니저 스레드 1개 + 허브 스레드 1개 + 접속별 단기 스레드).
 ///
 /// - 허브는 앱 수명 내내 유지되어 `IpcPublisher`가 항상 유효하다.
@@ -65,10 +72,13 @@ pub type BoundPortSlot = Arc<Mutex<Option<u16>>>;
 ///   따라 런타임에 바인딩/해제/재바인딩한다 (§6.1).
 /// - 바인딩 실패 시 대역 내 순차 재시도 후 전부 실패하면 fail-closed로
 ///   비활성 상태를 유지하고 다음 틱에 재시도한다 (게임/오버레이 무영향).
+/// - `cmd_tx`는 RPC `set_overlay_visibility` 등 제어 명령을 GUI 스레드로
+///   전달하기 위한 채널이다 (논블로킹 try_send, 가득 차면 drop).
 pub fn spawn_ipc_manager(
     root: PathBuf,
     settings: Arc<Mutex<Value>>,
     app_version: &'static str,
+    cmd_tx: Sender<IpcCommand>,
 ) -> (IpcPublisher, IpcServerHandle, BoundPortSlot) {
     let shutdown = Arc::new(AtomicBool::new(false));
     let bound_slot: BoundPortSlot = Arc::new(Mutex::new(None));
@@ -95,7 +105,7 @@ pub fn spawn_ipc_manager(
         std::thread::Builder::new()
             .name("ipc-manager".into())
             .spawn(move || {
-                manager_loop(root, settings, new_client_tx, bound_slot, shutdown);
+                manager_loop(root, settings, new_client_tx, bound_slot, shutdown, cmd_tx);
             })
             .expect("ipc-manager thread");
     }
@@ -319,6 +329,7 @@ fn manager_loop(
     new_client_tx: std::sync::mpsc::Sender<TcpStream>,
     bound_slot: BoundPortSlot,
     shutdown: Arc<AtomicBool>,
+    cmd_tx: Sender<IpcCommand>,
 ) {
     let mut running: Option<RunningListener> = None;
     let tick = Duration::from_millis(POLL_MS);
@@ -375,10 +386,11 @@ fn manager_loop(
                         // 핸드셰이크는 단기 스레드에서 — 느린 클라이언트가
                         // accept 루프 전체를 막지 않도록 한다.
                         let tx = new_client_tx.clone();
+                        let cmd_tx = cmd_tx.clone();
                         std::thread::Builder::new()
                             .name("ipc-handshake".into())
                             .spawn(move || {
-                                handshake(stream, &tx);
+                                handshake(stream, &tx, &cmd_tx);
                             })
                             .ok();
                     }
@@ -462,7 +474,11 @@ fn bind_with_fallback(preferred: u16) -> Option<(TcpListener, u16)> {
 // HTTP 핸드셰이크 + 라우팅 (/events, /rpc, /)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn handshake(mut stream: TcpStream, new_client_tx: &std::sync::mpsc::Sender<TcpStream>) {
+fn handshake(
+    mut stream: TcpStream,
+    new_client_tx: &std::sync::mpsc::Sender<TcpStream>,
+    cmd_tx: &Sender<IpcCommand>,
+) {
     stream.set_nodelay(true).ok();
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
 
@@ -562,7 +578,7 @@ fn handshake(mut stream: TcpStream, new_client_tx: &std::sync::mpsc::Sender<TcpS
                 );
                 return;
             }
-            handle_rpc(&mut reader, &mut stream, content_length);
+            handle_rpc(&mut reader, &mut stream, content_length, cmd_tx);
         }
         _ => {
             respond_json(
@@ -602,7 +618,12 @@ fn respond_json(
 // RPC (JSON-RPC 2.0 서브셋 §5.4)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn handle_rpc<R: Read>(reader: &mut BufReader<R>, stream: &mut TcpStream, content_length: usize) {
+fn handle_rpc<R: Read>(
+    reader: &mut BufReader<R>,
+    stream: &mut TcpStream,
+    content_length: usize,
+    cmd_tx: &Sender<IpcCommand>,
+) {
     if content_length == 0 || content_length > MAX_RPC_BODY {
         respond_json(
             stream,
@@ -618,7 +639,7 @@ fn handle_rpc<R: Read>(reader: &mut BufReader<R>, stream: &mut TcpStream, conten
     if reader.read_exact(&mut body).is_err() {
         return;
     }
-    let outcome = dispatch_rpc(&String::from_utf8_lossy(&body));
+    let outcome = dispatch_rpc(&String::from_utf8_lossy(&body), cmd_tx);
     let (status, reason) = if outcome.is_error {
         (500, "Internal Server Error")
     } else {
@@ -641,8 +662,10 @@ fn rpc_error(id: Value, code: i32, message: &str) -> RpcOutcome {
 
 /// JSON-RPC 2.0 디스패치. v1 메서드:
 /// - `get_current_context`: 최근 세션 상태 조회 (스냅샷 캐시 기반)
+/// - `get_recommendations`: 최근 추천 결과 조회 (스냅샷 캐시 기반)
+/// - `set_overlay_visibility`: 오버레이 가시성 토글 (GUI 제어 명령)
 /// - `list_methods`: 지원 메서드 목록 (발견용)
-fn dispatch_rpc(body: &str) -> RpcOutcome {
+fn dispatch_rpc(body: &str, cmd_tx: &Sender<IpcCommand>) -> RpcOutcome {
     let Ok(req) = serde_json::from_str::<Value>(body) else {
         return rpc_error(Value::Null, -32700, "Parse error");
     };
@@ -656,7 +679,7 @@ fn dispatch_rpc(body: &str) -> RpcOutcome {
         "list_methods" => RpcOutcome {
             body: json!({
                 "jsonrpc":"2.0","id":id,
-                "result": {"methods": ["get_current_context", "list_methods"],
+                "result": {"methods": ["get_current_context", "get_recommendations", "set_overlay_visibility", "list_methods"],
                            "protocol": PROTOCOL_ID}
             }),
             is_error: false,
@@ -668,6 +691,26 @@ fn dispatch_rpc(body: &str) -> RpcOutcome {
             },
             None => rpc_error(id, -32001, "no session snapshot available"),
         },
+        "get_recommendations" => match latest_recommendations() {
+            Some(recs) => RpcOutcome {
+                body: json!({"jsonrpc":"2.0","id":id,"result":recs}),
+                is_error: false,
+            },
+            None => rpc_error(id, -32001, "no recommendations available"),
+        },
+        "set_overlay_visibility" => {
+            let params = req.get("params").and_then(|p| p.as_array());
+            let visible = params
+                .and_then(|arr| arr.first())
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            // 무한(unbounded) 채널의 send는 논블로킹 — 원칙 ① 유지
+            let _ = cmd_tx.send(IpcCommand::SetOverlayVisibility(visible));
+            RpcOutcome {
+                body: json!({"jsonrpc":"2.0","id":id,"result":null}),
+                is_error: false,
+            }
+        }
         other => rpc_error(id, -32601, &format!("method not found: {other}")),
     }
 }
@@ -705,6 +748,23 @@ fn snapshot_json(state: &GameSessionState) -> Value {
         "fullscreen": state.is_fullscreen,
         "context": context,
     })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 최신 추천 결과 캐시 (get_recommendations 원천)
+// ─────────────────────────────────────────────────────────────────────────────
+
+static LATEST_RECOMMENDATIONS: Mutex<Option<Value>> = Mutex::new(None);
+
+/// GUI drain 루프가 추천 결과 갱신 시 호출 (논블로킹 try_lock — 원칙 ①)
+pub fn update_latest_recommendations(recs: Value) {
+    if let Ok(mut slot) = LATEST_RECOMMENDATIONS.try_lock() {
+        *slot = Some(recs);
+    }
+}
+
+fn latest_recommendations() -> Option<Value> {
+    LATEST_RECOMMENDATIONS.lock().ok().and_then(|r| r.clone())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

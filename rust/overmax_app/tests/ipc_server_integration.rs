@@ -7,7 +7,7 @@
 //! - JSON-RPC 2.0 get_current_context (§5.4)
 
 use overmax_app::system::ipc_server::{
-    spawn_ipc_manager, update_latest_state, BoundPortSlot, IpcEvent,
+    spawn_ipc_manager, update_latest_recommendations, update_latest_state, BoundPortSlot, IpcEvent,
 };
 use overmax_core::{GameSessionState, PlayContext, SceneType};
 use serde_json::{json, Value};
@@ -93,7 +93,9 @@ fn ipc_sse_stream_and_rpc_end_to_end() {
     let root = tempfile::tempdir().expect("tempdir");
     let settings = test_settings(TEST_PORT, true);
 
-    let (publisher, handle, slot) = spawn_ipc_manager(root.path().to_path_buf(), settings, "test");
+    let (ipc_cmd_tx, ipc_cmd_rx) = std::sync::mpsc::channel();
+    let (publisher, handle, slot) =
+        spawn_ipc_manager(root.path().to_path_buf(), settings, "test", ipc_cmd_tx);
 
     // ── 바인딩 대기 + endpoint 파일 검증 ──
     let port =
@@ -222,6 +224,83 @@ fn ipc_sse_stream_and_rpc_end_to_end() {
         Some(1234),
         "rpc must return latest snapshot context"
     );
+
+    // ── JSON-RPC: get_recommendations (캐시 등록 후 조회) ──
+    update_latest_recommendations(json!({"entries": [], "avg_rate": -1.0}));
+    let mut rpc2 = TcpStream::connect(("127.0.0.1", port)).expect("connect rpc2");
+    let body2 = json!({"jsonrpc":"2.0","id":8,"method":"get_recommendations"});
+    let payload2 = body2.to_string();
+    write!(
+        rpc2,
+        "POST /rpc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        payload2.len(),
+        payload2
+    )
+    .unwrap();
+    let mut rpc2_reader = BufReader::new(rpc2);
+    let mut rpc2_status = String::new();
+    rpc2_reader.read_line(&mut rpc2_status).unwrap();
+    assert!(rpc2_status.contains("200"), "rpc2 failed: {rpc2_status}");
+    let mut content_len2 = 0usize;
+    loop {
+        let mut line = String::new();
+        rpc2_reader.read_line(&mut line).unwrap();
+        let lower = line.to_ascii_lowercase();
+        if let Some(v) = lower.strip_prefix("content-length:") {
+            content_len2 = v.trim().parse().unwrap_or(0);
+        }
+        if line.trim().is_empty() {
+            break;
+        }
+    }
+    let mut buf2 = vec![0u8; content_len2];
+    rpc2_reader.read_exact(&mut buf2).unwrap();
+    let resp2: Value = serde_json::from_slice(&buf2).unwrap();
+    assert_eq!(resp2.get("id").and_then(Value::as_i64), Some(8));
+    assert!(
+        resp2["result"].get("entries").is_some(),
+        "rpc must return recommendations cache"
+    );
+
+    // ── JSON-RPC: set_overlay_visibility → GUI 명령 채널 수신 확인 ──
+    let mut rpc3 = TcpStream::connect(("127.0.0.1", port)).expect("connect rpc3");
+    let body3 = json!({"jsonrpc":"2.0","id":9,"method":"set_overlay_visibility","params":[false]});
+    let payload3 = body3.to_string();
+    write!(
+        rpc3,
+        "POST /rpc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        payload3.len(),
+        payload3
+    )
+    .unwrap();
+    let mut rpc3_reader = BufReader::new(rpc3);
+    let mut rpc3_status = String::new();
+    rpc3_reader.read_line(&mut rpc3_status).unwrap();
+    assert!(rpc3_status.contains("200"), "rpc3 failed: {rpc3_status}");
+    let mut content_len3 = 0usize;
+    loop {
+        let mut line = String::new();
+        rpc3_reader.read_line(&mut line).unwrap();
+        let lower = line.to_ascii_lowercase();
+        if let Some(v) = lower.strip_prefix("content-length:") {
+            content_len3 = v.trim().parse().unwrap_or(0);
+        }
+        if line.trim().is_empty() {
+            break;
+        }
+    }
+    let mut buf3 = vec![0u8; content_len3];
+    rpc3_reader.read_exact(&mut buf3).unwrap();
+    let resp3: Value = serde_json::from_slice(&buf3).unwrap();
+    assert_eq!(resp3.get("id").and_then(Value::as_i64), Some(9));
+    let cmd = ipc_cmd_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("GUI command not delivered");
+    match cmd {
+        overmax_app::system::ipc_server::IpcCommand::SetOverlayVisibility(visible) => {
+            assert!(!visible, "visibility param must be false");
+        }
+    }
 
     // ── Content-Type 강제 가드: text/plain POST는 415 ──
     let mut plain = TcpStream::connect(("127.0.0.1", port)).expect("connect plain");

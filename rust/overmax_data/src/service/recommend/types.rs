@@ -65,7 +65,7 @@ impl RecommendEntry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecommendResult {
     pub entries: Vec<RecommendEntry>,
     pub avg_rate: f64,

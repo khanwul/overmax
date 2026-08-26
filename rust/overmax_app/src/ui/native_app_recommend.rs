@@ -74,6 +74,9 @@ impl NativeApp {
 
         if changed {
             self.refresh_overlay_data();
+            if let Ok(recs) = serde_json::to_value(&self.recommendations) {
+                crate::system::ipc_server::update_latest_recommendations(recs);
+            }
             self.log_overlay_state();
             ctx.request_repaint();
         }
