@@ -7,9 +7,11 @@
 //! - JSON-RPC 2.0 get_current_context (§5.4)
 
 use overmax_app::system::ipc_server::{
-    spawn_ipc_manager, update_latest_recommendations, update_latest_state, BoundPortSlot, IpcEvent,
+    spawn_ipc_manager, update_latest_recommendations, update_latest_state, BoundPortSlot,
+    IpcDataSources, IpcEvent,
 };
 use overmax_core::{GameSessionState, PlayContext, SceneType};
+use overmax_data::{RecordDB, RecordManager, VArchiveDB};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -22,6 +24,21 @@ fn test_settings(port: u16, enabled: bool) -> Arc<Mutex<Value>> {
     Arc::new(Mutex::new(json!({
         "ipc": { "enabled": enabled, "port": port }
     })))
+}
+
+fn test_data_sources() -> IpcDataSources {
+    let dir = tempfile::tempdir().expect("tempdir for db");
+    // tempdir은 함수 종료 시 해제되지만 테스트 수명 동안 DB 파일이 유지되면 충분하다.
+    // 실제 경로를 유지하기 위해 tempdir을 leak한다 (테스트 전용, 프로세스 종료 시 정리).
+    let path = dir.path().to_path_buf();
+    std::mem::forget(dir);
+    let mut db = RecordDB::new(path.join("test_records.db"), None);
+    db.initialize();
+    let record_db = Arc::new(db);
+    IpcDataSources {
+        varchive_db: Arc::new(VArchiveDB::new()),
+        record_manager: Arc::new(RecordManager::new(record_db)),
+    }
 }
 
 fn wait_bound_port(slot: &BoundPortSlot, timeout: Duration) -> Option<u16> {
@@ -94,8 +111,13 @@ fn ipc_sse_stream_and_rpc_end_to_end() {
     let settings = test_settings(TEST_PORT, true);
 
     let (ipc_cmd_tx, ipc_cmd_rx) = std::sync::mpsc::channel();
-    let (publisher, handle, slot) =
-        spawn_ipc_manager(root.path().to_path_buf(), settings, "test", ipc_cmd_tx);
+    let (publisher, handle, slot) = spawn_ipc_manager(
+        root.path().to_path_buf(),
+        settings,
+        "test",
+        ipc_cmd_tx,
+        test_data_sources(),
+    );
 
     // ── 바인딩 대기 + endpoint 파일 검증 ──
     let port =
@@ -317,6 +339,57 @@ fn ipc_sse_stream_and_rpc_end_to_end() {
         "content-type guard failed: {plain_status}"
     );
 
+    // ── JSON-RPC: get_recent_plays (mode 생략 → 세션 스냅샷에서 추론) ──
+    let resp4 = post_rpc(port, 10, "get_recent_plays", json!([null, 5]));
+    assert!(
+        resp4["result"].get("plays").is_some(),
+        "get_recent_plays must return plays array"
+    );
+    assert!(resp4["result"]["plays"].is_array());
+
+    // ── JSON-RPC: get_song_info (없는 곡은 -32001) ──
+    let resp5 = post_rpc(port, 11, "get_song_info", json!([999999]));
+    assert!(
+        resp5.get("error").is_some(),
+        "unknown song must return error"
+    );
+
     // ── 종료 처리: shutdown 플래그 설정이 오류 없이 완료되는지 확인 ──
     handle.shutdown();
+}
+
+/// POST /rpc 헬퍼 — 요청 전송 후 JSON 응답 본문을 반환한다.
+fn post_rpc(port: u16, id: i64, method: &str, params: Value) -> Value {
+    let mut rpc = TcpStream::connect(("127.0.0.1", port)).expect("connect rpc");
+    let body = json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
+    let payload = body.to_string();
+    write!(
+        rpc,
+        "POST /rpc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        payload.len(),
+        payload
+    )
+    .unwrap();
+    let mut reader = BufReader::new(rpc);
+    let mut status = String::new();
+    reader.read_line(&mut status).unwrap();
+    assert!(
+        status.contains("200") || status.contains("500"),
+        "{method} unexpected status: {status}"
+    );
+    let mut content_len = 0usize;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        let lower = line.to_ascii_lowercase();
+        if let Some(v) = lower.strip_prefix("content-length:") {
+            content_len = v.trim().parse().unwrap_or(0);
+        }
+        if line.trim().is_empty() {
+            break;
+        }
+    }
+    let mut buf = vec![0u8; content_len];
+    reader.read_exact(&mut buf).unwrap();
+    serde_json::from_slice(&buf).expect("rpc response parse")
 }

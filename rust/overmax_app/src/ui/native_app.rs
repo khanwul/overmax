@@ -421,12 +421,17 @@ impl NativeApp {
 
         // IPC 서버 매니저 (설정 OFF가 기본 — enabled 시에만 바인딩됨)
         let (ipc_cmd_tx, ipc_cmd_rx) = mpsc::channel();
+        let ipc_data = crate::system::ipc_server::IpcDataSources {
+            varchive_db: varchive_db.clone(),
+            record_manager: record_manager.clone(),
+        };
         let (ipc_publisher, ipc_handle, ipc_bound_port) =
             crate::system::ipc_server::spawn_ipc_manager(
                 root.as_ref().clone(),
                 merged_settings.clone(),
                 env!("CARGO_PKG_VERSION"),
                 ipc_cmd_tx,
+                ipc_data,
             );
 
         let settings = SharedSettings {

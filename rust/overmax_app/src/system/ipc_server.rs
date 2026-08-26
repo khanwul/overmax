@@ -1,4 +1,5 @@
 use overmax_core::GameSessionState;
+use overmax_data::{RecordManager, VArchiveDB};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -69,6 +70,14 @@ pub enum IpcCommand {
     SetOverlayVisibility(bool),
 }
 
+/// IPC → 데이터 계층 읽기 핸들. 모두 Arc 공유 참조라 IPC 스레드에서의
+/// 질의가 GUI/디텍션 경로와 리소스를 안전하게 나눠 쓴다 (원칙 ①·②).
+#[derive(Clone)]
+pub struct IpcDataSources {
+    pub varchive_db: Arc<VArchiveDB>,
+    pub record_manager: Arc<RecordManager>,
+}
+
 /// IPC 매니저 기동 (매니저 스레드 1개 + 허브 스레드 1개 + 접속별 단기 스레드).
 ///
 /// - 허브는 앱 수명 내내 유지되어 `IpcPublisher`가 항상 유효하다.
@@ -78,11 +87,13 @@ pub enum IpcCommand {
 ///   비활성 상태를 유지하고 다음 틱에 재시도한다 (게임/오버레이 무영향).
 /// - `cmd_tx`는 RPC `set_overlay_visibility` 등 제어 명령을 GUI 스레드로
 ///   전달하기 위한 채널이다 (논블로킹 try_send, 가득 차면 drop).
+/// - `data`는 읽기 전용 RPC(`get_song_info`, `get_recent_plays`)의 원천이다.
 pub fn spawn_ipc_manager(
     root: PathBuf,
     settings: Arc<Mutex<Value>>,
     app_version: &'static str,
     cmd_tx: Sender<IpcCommand>,
+    data: IpcDataSources,
 ) -> (IpcPublisher, IpcServerHandle, BoundPortSlot) {
     let shutdown = Arc::new(AtomicBool::new(false));
     let bound_slot: BoundPortSlot = Arc::new(Mutex::new(None));
@@ -109,7 +120,15 @@ pub fn spawn_ipc_manager(
         std::thread::Builder::new()
             .name("ipc-manager".into())
             .spawn(move || {
-                manager_loop(root, settings, new_client_tx, bound_slot, shutdown, cmd_tx);
+                manager_loop(
+                    root,
+                    settings,
+                    new_client_tx,
+                    bound_slot,
+                    shutdown,
+                    cmd_tx,
+                    data,
+                );
             })
             .expect("ipc-manager thread");
     }
@@ -125,6 +144,15 @@ pub fn spawn_ipc_manager(
 // 이벤트 타입 (엔벨로프 §5.3)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// 곡 메타 정보 (GUI가 오버레이 렌더링에 이미 사용하는 값 — 새 조회 결합 없음)
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct SongMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub floor_name: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcEvent {
@@ -137,14 +165,23 @@ pub enum IpcEvent {
         diff: String,
         rate: f32,
         is_max_combo: bool,
+        #[serde(flatten)]
+        meta: SongMeta,
     },
     /// 결과창 플레이 확정 통지 (verified flow 용어 계승)
+    ///
+    /// `is_pb`: 결과창 진입 시점의 기존 기록(`session_initial_record`) 대비
+    /// 이번 rate가 향상되었음을 나타냄. 클립 자동화·대시보드 강조 등의
+    /// 핵심 시나리오를 클라이언트가 DB 지식 없이 소비할 수 있게 한다.
     PlayVerified {
         song_id: i32,
         mode: String,
         diff: String,
         rate: f32,
         is_max_combo: bool,
+        is_pb: bool,
+        #[serde(flatten)]
+        meta: SongMeta,
     },
     /// 접속 직후 초기 상태 선송신
     StateSnapshot { payload: Value },
@@ -161,41 +198,23 @@ impl IpcEvent {
     }
 
     fn payload(&self) -> Value {
-        match self {
-            IpcEvent::SceneDetected { scene } => json!({ "scene": scene }),
-            IpcEvent::SongDetected {
-                song_id,
-                mode,
-                diff,
-                rate,
-                is_max_combo,
-            }
-            | IpcEvent::PlayVerified {
-                song_id,
-                mode,
-                diff,
-                rate,
-                is_max_combo,
-            } => json!({
-                "song_id": song_id,
-                "mode": mode,
-                "diff": diff,
-                "rate": rate,
-                "is_max_combo": is_max_combo,
-            }),
-            IpcEvent::StateSnapshot { payload } => payload.clone(),
-        }
+        // serde_json::to_value가 #[serde(flatten)]을 포함한 전체 페이로드를
+        // 일관되게 직렬화하므로 개별 필드 조립 없이 enum 전체를 변환한다.
+        serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }
 
-fn format_sse_frame(name: &str, seq: u64, payload: Value, app_version: &str) -> String {
+fn format_sse_frame(event: &IpcEvent, seq: u64, app_version: &str) -> String {
+    let name = event.sse_name();
     let data = json!({
         "protocol": PROTOCOL_ID,
         "type": name,
         "seq": seq,
         "ts_ms": now_ms(),
         "app_version": app_version,
-        "payload": payload,
+        // payload()는 enum 전체를 serde 직렬화하므로 type 필드가 봉투와 페이로드에
+        // 중복 등장한다 → 페이로드에서 제거하여 단일 봉투 규격(§5.3) 유지
+        "payload": event.payload().get("payload").cloned().unwrap_or(Value::Null),
     });
     format!("event: {name}\ndata: {data}\n\n")
 }
@@ -293,8 +312,7 @@ fn client_writer_loop(
     loop {
         match rx.recv_timeout(Duration::from_secs(1)) {
             Ok(event) => {
-                let name = event.sse_name();
-                let frame = format_sse_frame(name, seq, event.payload(), app_version);
+                let frame = format_sse_frame(&event, seq, app_version);
                 if stream.write_all(frame.as_bytes()).is_err() || stream.flush().is_err() {
                     return; // 소켓 사망 — 허브가 try_send 실패로 정리
                 }
@@ -334,6 +352,7 @@ fn manager_loop(
     bound_slot: BoundPortSlot,
     shutdown: Arc<AtomicBool>,
     cmd_tx: Sender<IpcCommand>,
+    data: IpcDataSources,
 ) {
     let mut running: Option<RunningListener> = None;
     let tick = Duration::from_millis(POLL_MS);
@@ -391,10 +410,11 @@ fn manager_loop(
                         // accept 루프 전체를 막지 않도록 한다.
                         let tx = new_client_tx.clone();
                         let cmd_tx = cmd_tx.clone();
+                        let data = data.clone();
                         std::thread::Builder::new()
                             .name("ipc-handshake".into())
                             .spawn(move || {
-                                handshake(stream, &tx, &cmd_tx);
+                                handshake(stream, &tx, &cmd_tx, &data);
                             })
                             .ok();
                     }
@@ -482,6 +502,7 @@ fn handshake(
     mut stream: TcpStream,
     new_client_tx: &std::sync::mpsc::Sender<TcpStream>,
     cmd_tx: &Sender<IpcCommand>,
+    data: &IpcDataSources,
 ) {
     stream.set_nodelay(true).ok();
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
@@ -582,7 +603,7 @@ fn handshake(
                 );
                 return;
             }
-            handle_rpc(&mut reader, &mut stream, content_length, cmd_tx);
+            handle_rpc(&mut reader, &mut stream, content_length, cmd_tx, data);
         }
         _ => {
             respond_json(
@@ -627,6 +648,7 @@ fn handle_rpc<R: Read>(
     stream: &mut TcpStream,
     content_length: usize,
     cmd_tx: &Sender<IpcCommand>,
+    data: &IpcDataSources,
 ) {
     if content_length == 0 || content_length > MAX_RPC_BODY {
         respond_json(
@@ -643,7 +665,7 @@ fn handle_rpc<R: Read>(
     if reader.read_exact(&mut body).is_err() {
         return;
     }
-    let outcome = dispatch_rpc(&String::from_utf8_lossy(&body), cmd_tx);
+    let outcome = dispatch_rpc(&String::from_utf8_lossy(&body), cmd_tx, data);
     let (status, reason) = if outcome.is_error {
         (500, "Internal Server Error")
     } else {
@@ -668,8 +690,10 @@ fn rpc_error(id: Value, code: i32, message: &str) -> RpcOutcome {
 /// - `get_current_context`: 최근 세션 상태 조회 (스냅샷 캐시 기반)
 /// - `get_recommendations`: 최근 추천 결과 조회 (스냅샷 캐시 기반)
 /// - `set_overlay_visibility`: 오버레이 가시성 토글 (GUI 제어 명령)
+/// - `get_song_info`: 곡 메타(제목/작곡가/패턴 레벨·floor) 조회
+/// - `get_recent_plays`: 최근 완주 이력(play_events) 조회 — 세션 대시보드 원천
 /// - `list_methods`: 지원 메서드 목록 (발견용)
-fn dispatch_rpc(body: &str, cmd_tx: &Sender<IpcCommand>) -> RpcOutcome {
+fn dispatch_rpc(body: &str, cmd_tx: &Sender<IpcCommand>, data: &IpcDataSources) -> RpcOutcome {
     let Ok(req) = serde_json::from_str::<Value>(body) else {
         return rpc_error(Value::Null, -32700, "Parse error");
     };
@@ -679,11 +703,16 @@ fn dispatch_rpc(body: &str, cmd_tx: &Sender<IpcCommand>) -> RpcOutcome {
         return rpc_error(id, -32600, "Invalid Request");
     };
 
+    // params 배열에서 위치 인자를 꺼내는 헬퍼
+    let params = req.get("params").and_then(|p| p.as_array()).cloned();
+    let arg = |i: usize| -> Option<Value> { params.as_ref().and_then(|p| p.get(i).cloned()) };
+
     match method {
         "list_methods" => RpcOutcome {
             body: json!({
                 "jsonrpc":"2.0","id":id,
-                "result": {"methods": ["get_current_context", "get_recommendations", "set_overlay_visibility", "list_methods"],
+                "result": {"methods": ["get_current_context", "get_recommendations", "get_song_info",
+                                       "get_recent_plays", "set_overlay_visibility", "list_methods"],
                            "protocol": PROTOCOL_ID}
             }),
             is_error: false,
@@ -702,12 +731,83 @@ fn dispatch_rpc(body: &str, cmd_tx: &Sender<IpcCommand>) -> RpcOutcome {
             },
             None => rpc_error(id, -32001, "no recommendations available"),
         },
+        "get_song_info" => {
+            let Some(song_id) = arg(0).and_then(|v| v.as_i64().map(|n| n as i32)) else {
+                return rpc_error(id, -32602, "invalid params: song_id (number) required");
+            };
+            const MODE_NAMES: [&str; 4] = ["4B", "5B", "6B", "8B"];
+            const DIFF_NAMES: [&str; 4] = ["NM", "HD", "MX", "SC"];
+            let result = data.varchive_db.search_by_id(song_id).map(|song| {
+                let patterns: Vec<Value> = song
+                    .patterns
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(mi, per_mode)| {
+                        per_mode.iter().enumerate().filter_map(move |(di, p)| {
+                            p.as_ref().map(move |pat| {
+                                json!({
+                                    "mode": MODE_NAMES[mi],
+                                    "diff": DIFF_NAMES[di],
+                                    "level": pat.level,
+                                    "floor_name": pat.floor_name.as_deref(),
+                                })
+                            })
+                        })
+                    })
+                    .collect();
+                json!({
+                    "song_id": song_id,
+                    "title": song.name,
+                    "composer": song.composer,
+                    "dlc": song.dlc_code,
+                    "patterns": patterns,
+                })
+            });
+            match result {
+                Some(info) => RpcOutcome {
+                    body: json!({"jsonrpc":"2.0","id":id,"result":info}),
+                    is_error: false,
+                },
+                None => rpc_error(id, -32001, "song not found"),
+            }
+        }
+        "get_recent_plays" => {
+            // 선택 인자: [mode("5B"), limit(number)] — mode 생략 시 현재 세션 모드 / limit 기본 20 (1~100 clamp)
+            let mode = arg(0)
+                .and_then(|v| v.as_str().and_then(overmax_core::Mode::from_str))
+                .or_else(|| latest_snapshot().and_then(|s| s.context.map(|c| c.mode)));
+            let limit = arg(1)
+                .and_then(|v| v.as_u64())
+                .map(|n| n.clamp(1, 100) as usize)
+                .unwrap_or(20);
+            let Some(mode) = mode else {
+                return rpc_error(
+                    id,
+                    -32602,
+                    "invalid params: mode required (no active session to infer from)",
+                );
+            };
+            let plays = data.record_manager.get_recent_records(mode, limit);
+            let entries: Vec<Value> = plays
+                .iter()
+                .map(|r| {
+                    json!({
+                        "song_id": r.song_id,
+                        "mode": r.button_mode.as_str(),
+                        "diff": r.difficulty.as_str(),
+                        "rate": r.rate,
+                        "is_max_combo": r.is_max_combo,
+                        "played_at_unix": r.updated_at,
+                    })
+                })
+                .collect();
+            RpcOutcome {
+                body: json!({"jsonrpc":"2.0","id":id,"result":{"plays":entries}}),
+                is_error: false,
+            }
+        }
         "set_overlay_visibility" => {
-            let params = req.get("params").and_then(|p| p.as_array());
-            let visible = params
-                .and_then(|arr| arr.first())
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let visible = arg(0).and_then(|v| v.as_bool()).unwrap_or(false);
             // 무한(unbounded) 채널의 send는 논블로킹 — 원칙 ① 유지
             let _ = cmd_tx.send(IpcCommand::SetOverlayVisibility(visible));
             RpcOutcome {
