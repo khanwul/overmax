@@ -69,7 +69,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
    ├── Settings / Sync / Debug Windows (설정 변경, V-Archive 기록 동기화, 실시간 로그)
    ├── Channel Receiver (디텍션 결과 수신 및 UI 상태 반영)
    │      └── drain_detection_results(): IPC 이벤트 발행 관찰자 (§6.2 — 파이프라인 무변경)
-   │              └─ try_send(bounded 64) → [IPC Hub Thread] → SSE 클라이언트별 writer fan-out
+   │              └─ try_send(bounded 64) → [system::transport::sse] → SSE 클라이언트별 writer fan-out
    ├── IPC Command Receiver (set_overlay_visibility 등 GUI 제어 명령 수신)
    └── IpcPublisher / IpcServerHandle (shutdown) / BoundPortSlot (런타임 상태)
             ▲
@@ -83,9 +83,16 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
         ├── ImageIndexDb: overmax_cv (HOG + Hash 매칭 -> song_id 탐색)
         └── PlayStateDetector: (버튼 모드, 난이도, 맥스콤보 감지)
 
-[IPC Manager Thread]  ← 설정(ipc.enabled/port) 250ms 폴링, 리스너 바인딩/재바인딩
-[IPC Hub Thread]      ← GUI 발행 이벤트 fan-out + 접속 즉시 state_snapshot 선송신
-[SSE Client Threads]  ← 연결별 단조 seq 할당, 15초 하트비트, 느린 클라이언트 try_send 실패 시 정리
+[Inbound Transport Subsystem (`overmax_app::system::transport`)]
+   ├── [Loopback HTTP Manager Thread] ← std-only TCP 리스너 (30100~30199 대역), DNS Rebinding 가드, 엔드포인트 파일 동기화, 라우팅
+   ├── [SSE Hub Thread]              ← 도메인 이벤트 SSE 프레이밍 직렬화, 연결별 단조 seq 할당, 15초 하트비트
+   └── [SSE Client Threads]          ← 16개 한도, 논블로킹 fan-out, dead connection 자동 회수
+
+[Outbound Gateway Subsystem (`overmax_data::gateway`)]
+   ├── GatewayHttpClient: reqwest 커넥션 풀링, User-Agent 및 타임아웃 프로파일 일원화
+   ├── VArchiveGateway: V-Archive API 점수 업로드 및 기록 조회 Facade
+   ├── AssetDownloadGateway: 캐시/릴리즈 다운로드 Facade (BOM 제거)
+   └── RecommendProviderGateway: 외부 추천 프로바이더 Facade
 ```
 
 ---

@@ -2798,7 +2798,6 @@ dependencies = [
  "overmax_cv",
  "pollster",
  "raw-window-handle",
- "reqwest",
  "rfd",
  "rustix 1.1.4",
  "self_update",

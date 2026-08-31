@@ -1,8 +1,3 @@
-//! Startup cache refreshes matching the Python runtime policy.
-
-use reqwest::blocking::Client;
-use reqwest::header::{CACHE_CONTROL, PRAGMA, USER_AGENT};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -15,9 +10,11 @@ use crate::community::sheet_meta::{
 };
 use crate::config::compatibility::DataCompatibility;
 use crate::config::settings::Settings;
+use crate::gateway::asset_download::{
+    download_asset_bytes, download_asset_text, fetch_github_release_asset_url,
+};
 use overmax_core::Mode;
 
-const USER_AGENT_VALUE: &str = concat!("overmax-rs/", env!("CARGO_PKG_VERSION"));
 const PATTERN_META_CACHE: &str = "cache/pattern_meta.json";
 const IMAGE_DB_OWNER: &str = "orphera";
 const IMAGE_DB_REPO: &str = "overmax-image-db";
@@ -175,7 +172,7 @@ fn refresh_songs_json(root: &Path, settings: &Settings, log: LogFn<'_>) {
     }
     let url = &varchive.songs_api_url;
     let timeout = varchive.download_timeout_sec;
-    match download_bytes(url, Duration::from_secs(timeout)) {
+    match download_asset_bytes(url, Some(Duration::from_secs(timeout))) {
         Ok(bytes) => {
             if let Err(e) = write_atomic(&path, &bytes) {
                 log(format!("[Cache] songs.json 저장 실패: {e}"));
@@ -196,7 +193,7 @@ fn refresh_dlcs_json(root: &Path, settings: &Settings, log: LogFn<'_>) {
     }
     let url = &varchive.dlcs_api_url;
     let timeout = varchive.download_timeout_sec;
-    match download_bytes(url, Duration::from_secs(timeout)) {
+    match download_asset_bytes(url, Some(Duration::from_secs(timeout))) {
         Ok(bytes) => {
             if let Err(e) = write_atomic(&path, &bytes) {
                 log(format!("[Cache] dlcs.json 저장 실패: {e}"));
@@ -216,7 +213,7 @@ fn refresh_pattern_meta(root: &Path, varchive_db: &VArchiveDB, log: LogFn<'_>) {
     type Key = (String, overmax_core::Mode, overmax_core::Difficulty);
     let mut items: HashMap<Key, PatternSheetMetaItem> = HashMap::new();
     for (mode, gid) in SHEET_GIDS {
-        match download_text(&sheet_csv_url(gid), Duration::from_secs(10)) {
+        match download_asset_text(&sheet_csv_url(gid), Some(Duration::from_secs(10))) {
             Ok(csv) => merge_sheet_meta(&mut items, *mode, &csv, varchive_db),
             Err(e) => log(format!("[Cache] pattern meta {mode} 갱신 실패: {e}")),
         }
@@ -242,7 +239,9 @@ fn refresh_pattern_meta(root: &Path, varchive_db: &VArchiveDB, log: LogFn<'_>) {
 
 fn refresh_image_index(root: &Path, settings: &Settings, log: LogFn<'_>) {
     let path = root.join(&settings.jacket_matcher().db_path);
-    let Ok((tag, url)) = latest_release_asset(IMAGE_DB_OWNER, IMAGE_DB_REPO, IMAGE_DB_ASSET) else {
+    let Ok((tag, url)) =
+        fetch_github_release_asset_url(IMAGE_DB_OWNER, IMAGE_DB_REPO, IMAGE_DB_ASSET)
+    else {
         log("[ImageDBUpdater] 릴리즈 정보 조회 실패".into());
         return;
     };
@@ -250,81 +249,15 @@ fn refresh_image_index(root: &Path, settings: &Settings, log: LogFn<'_>) {
         log(format!("[ImageDBUpdater] 최신 버전 유지 중: {tag}"));
         return;
     }
-    match download_bytes(&url, Duration::from_secs(60)).and_then(|b| write_atomic(&path, &b)) {
+    match download_asset_bytes(&url, Some(Duration::from_secs(60)))
+        .and_then(|b| write_atomic(&path, &b))
+    {
         Ok(()) => {
             let _ = std::fs::write(version_path(&path), &tag);
             log(format!("[ImageDBUpdater] 업데이트 완료: {tag}"));
         }
         Err(e) => log(format!("[ImageDBUpdater] 다운로드 실패: {e}")),
     }
-}
-
-fn latest_release_asset(
-    owner: &str,
-    repo: &str,
-    asset_name: &str,
-) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/releases/latest");
-    let client = client(Duration::from_secs(10));
-    let data: Value = no_cache_get(&client, &url)
-        .send()?
-        .error_for_status()?
-        .json()?;
-    let tag = data
-        .get("tag_name")
-        .and_then(Value::as_str)
-        .ok_or("tag_name 없음")?;
-    let assets = data
-        .get("assets")
-        .and_then(Value::as_array)
-        .ok_or("assets 없음")?;
-    for asset in assets {
-        if asset.get("name").and_then(Value::as_str) != Some(asset_name) {
-            continue;
-        }
-        let Some(download_url) = asset.get("browser_download_url").and_then(Value::as_str) else {
-            continue;
-        };
-        return Ok((tag.to_string(), download_url.to_string()));
-    }
-    Err(format!("asset 없음: {asset_name}").into())
-}
-
-fn client(timeout: Duration) -> Client {
-    Client::builder()
-        .timeout(timeout)
-        .build()
-        .unwrap_or_else(|_| Client::new())
-}
-
-fn download_bytes(
-    url: &str,
-    timeout: Duration,
-) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    let client = client(timeout);
-    let bytes = no_cache_get(&client, url)
-        .send()?
-        .error_for_status()?
-        .bytes()?;
-    Ok(bytes.to_vec())
-}
-
-fn download_text(
-    url: &str,
-    timeout: Duration,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let bytes = download_bytes(url, timeout)?;
-    Ok(String::from_utf8_lossy(&bytes)
-        .trim_start_matches('\u{feff}')
-        .to_string())
-}
-
-fn no_cache_get(client: &Client, url: &str) -> reqwest::blocking::RequestBuilder {
-    client
-        .get(url)
-        .header(USER_AGENT, USER_AGENT_VALUE)
-        .header(CACHE_CONTROL, "no-cache")
-        .header(PRAGMA, "no-cache")
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
