@@ -768,30 +768,32 @@ fn general_section(ui: &mut egui::Ui, draft: &mut Value) {
 }
 
 fn update_section(ui: &mut egui::Ui, draft: &mut Value) {
-    let app_update = object_section_mut(draft, "app_update");
-    let mut enabled = app_update
-        .get("enabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+    if crate::system::updater::is_self_update_supported() {
+        let app_update = object_section_mut(draft, "app_update");
+        let mut enabled = app_update
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
 
-    setting_row(
-        ui,
-        crate::t!("settings-auto-update"),
-        crate::t!("settings-auto-update-hint"),
-        |ui| {
-            if ui
-                .checkbox(
-                    &mut enabled,
-                    RichText::new(crate::t!("settings-use")).size(DialogTheme::FONT_BODY),
-                )
-                .changed()
-            {
-                app_update.insert("enabled".into(), json!(enabled));
-            }
-        },
-    );
+        setting_row(
+            ui,
+            crate::t!("settings-auto-update"),
+            crate::t!("settings-auto-update-hint"),
+            |ui| {
+                if ui
+                    .checkbox(
+                        &mut enabled,
+                        RichText::new(crate::t!("settings-use")).size(DialogTheme::FONT_BODY),
+                    )
+                    .changed()
+                {
+                    app_update.insert("enabled".into(), json!(enabled));
+                }
+            },
+        );
 
-    ui.add_space(DialogTheme::GAP_MD);
+        ui.add_space(DialogTheme::GAP_MD);
+    }
 
     setting_row(ui, crate::t!("settings-version-info"), "", |ui| {
         ui.label(
@@ -975,7 +977,7 @@ fn user_entry_mut<'a>(draft: &'a mut Value, steam_id: &str) -> &'a mut Map<Strin
 #[cfg(test)]
 mod tests {
     use super::save_settings_to_disk;
-    use overmax_data::load_merged_settings;
+    use overmax_data::{load_merged_settings, SettingsPaths};
     use serde_json::json;
     use std::fs;
 
@@ -1011,5 +1013,29 @@ mod tests {
         assert!(user_text.contains("base_opacity"));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn save_settings_to_paths_roundtrip() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join("settings.json"),
+            r#"{"overlay":{"scale":1.0,"base_opacity":0.8}}"#,
+        )
+        .unwrap();
+        fs::write(root.join("settings.user.json"), "{}").unwrap();
+
+        let paths = SettingsPaths::in_dir(root);
+        let defaults = json!({"overlay": {"scale": 1.0, "base_opacity": 0.8}});
+        let base = overmax_data::load_base_settings_from_paths(&paths, defaults.clone());
+        let mut merged = overmax_data::load_merged_settings_from_paths(&paths, defaults.clone());
+        let mut draft = merged.clone();
+        draft["overlay"]["scale"] = json!(1.5);
+
+        super::save_settings_to_paths(&paths, &defaults, &base, &mut draft, &mut merged).unwrap();
+
+        let reloaded = overmax_data::load_merged_settings_from_paths(&paths, defaults);
+        assert_eq!(reloaded["overlay"]["scale"], json!(1.5));
     }
 }

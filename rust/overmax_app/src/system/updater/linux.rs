@@ -110,6 +110,9 @@ fn show_update_error(error: &str) {
 }
 
 fn skip_auto_update_by_policy() -> bool {
+    if !super::is_self_update_supported() {
+        return true;
+    }
     cfg!(debug_assertions)
         || std::env::var("OVERMAX_SKIP_APP_UPDATE")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))

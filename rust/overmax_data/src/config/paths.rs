@@ -328,37 +328,40 @@ pub fn system_local_data_dir() -> Option<PathBuf> {
 pub fn is_running_in_msix_package() -> bool {
     #[cfg(target_os = "windows")]
     {
-        use std::ffi::c_void;
-        type GetCurrentPackageFullNameFn = unsafe extern "system" fn(
-            package_full_name_length: *mut u32,
-            package_full_name: *mut u16,
-        ) -> i32;
+        static CACHED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *CACHED.get_or_init(|| {
+            use std::ffi::c_void;
+            type GetCurrentPackageFullNameFn = unsafe extern "system" fn(
+                package_full_name_length: *mut u32,
+                package_full_name: *mut u16,
+            ) -> i32;
 
-        const APPMODEL_ERROR_NO_PACKAGE: i32 = 15700;
+            const APPMODEL_ERROR_NO_PACKAGE: i32 = 15700;
 
-        unsafe {
-            let kernel32 = windows_sys::Win32::System::LibraryLoader::GetModuleHandleA(
-                c"kernel32.dll".as_ptr().cast(),
-            );
-            if kernel32.is_null() {
-                return false;
-            }
-            let proc = windows_sys::Win32::System::LibraryLoader::GetProcAddress(
-                kernel32,
-                c"GetCurrentPackageFullName".as_ptr().cast(),
-            );
-            let Some(proc_addr) = proc else {
-                return false;
-            };
-            let get_package_full_name: GetCurrentPackageFullNameFn =
-                std::mem::transmute::<*const c_void, GetCurrentPackageFullNameFn>(
-                    proc_addr as *const _,
+            unsafe {
+                let kernel32 = windows_sys::Win32::System::LibraryLoader::GetModuleHandleA(
+                    c"kernel32.dll".as_ptr().cast(),
                 );
+                if kernel32.is_null() {
+                    return false;
+                }
+                let proc = windows_sys::Win32::System::LibraryLoader::GetProcAddress(
+                    kernel32,
+                    c"GetCurrentPackageFullName".as_ptr().cast(),
+                );
+                let Some(proc_addr) = proc else {
+                    return false;
+                };
+                let get_package_full_name: GetCurrentPackageFullNameFn =
+                    std::mem::transmute::<*const c_void, GetCurrentPackageFullNameFn>(
+                        proc_addr as *const _,
+                    );
 
-            let mut length: u32 = 0;
-            let result = get_package_full_name(&mut length, std::ptr::null_mut());
-            result != APPMODEL_ERROR_NO_PACKAGE
-        }
+                let mut length: u32 = 0;
+                let result = get_package_full_name(&mut length, std::ptr::null_mut());
+                result != APPMODEL_ERROR_NO_PACKAGE
+            }
+        })
     }
 
     #[cfg(not(target_os = "windows"))]
