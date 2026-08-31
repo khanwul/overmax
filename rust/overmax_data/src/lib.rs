@@ -1,5 +1,6 @@
 pub mod community;
 pub mod config;
+pub mod gateway;
 pub mod service;
 pub mod store;
 
