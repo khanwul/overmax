@@ -9,4 +9,5 @@ pub mod native_helpers;
 pub mod settings_writer;
 pub mod single_instance;
 pub mod steam_session;
+pub mod transport;
 pub mod updater;
