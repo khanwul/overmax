@@ -93,18 +93,19 @@ OS/캡처/Steam 등 로컬 플랫폼 연동([C])은 이미 각자 전용 모듈(
 ## 4. 단계별 실행 로드맵 (Phased Roadmap)
 
 ### Phase 1: Outbound Transport & Gateway 일원화
-- [ ] `overmax_data::gateway::http_client` (통합 HTTP 클라이언트 엔진) 신설
-- [ ] `varchive`, `asset_download`, `recommend_provider` 게이트웨이 구현
-- [ ] 기존 호출부(`varchive_api.rs`, `client.rs`, `cache_downloader.rs`, `recommend_provider_fetch.rs`) 마이그레이션 및 레거시 제거
-- [ ] `overmax_app/Cargo.toml`에서 `reqwest` 의존성 제거
+- [x] `overmax_data::gateway::http_client` (통합 HTTP 클라이언트 엔진) 신설
+- [x] `varchive`, `asset_download`, `recommend_provider` 게이트웨이 구현
+- [x] 기존 호출부(`varchive_api.rs`, `client.rs`, `cache_downloader.rs`, `recommend_provider_fetch.rs`) 마이그레이션 및 레거시 제거
+- [x] `overmax_app/Cargo.toml`에서 `reqwest` 의존성 제거
 
 ### Phase 2: Inbound Transport 격리
-- [ ] `overmax_app::system::transport::loopback_server` (순수 HTTP/SSE Transport 엔진) 분리 신설
-- [ ] `ipc_server.rs`를 순수 비즈니스 RPC/이벤트 서비스로 리팩토링
-- [ ] Transport 계층 독립 단위 테스트 작성
+- [x] `overmax_app::system::transport::loopback` & `sse` (순수 HTTP/SSE Transport 엔진) 분리 신설
+- [x] `ipc_server.rs`를 순수 비즈니스 RPC/이벤트 서비스로 리팩토링
+- [x] Transport 계층 독립 단위 테스트 및 live socket E2E 통합 테스트 검증
 
 ### Phase 3: 전체 통합 검증 및 문서화
-- [ ] `cargo test --workspace` (단위 및 통합 테스트 100% 통과)
-- [ ] `cargo clippy --all-targets` (경고 0개)
-- [ ] V-Archive 동기화, 서열표 다운로드, Provider Fetch, IPC 연동 전체 E2E 회귀 검증
-- [ ] `docs/decisions/data_and_sync.md`에 아키텍처 결정 기록 동기화
+- [x] `cargo test --workspace` (단위 및 통합 테스트 100% 통과 - 123 passed)
+- [x] `cargo clippy --all-targets` (경고 0개 - Clean)
+- [x] V-Archive 동기화, 서열표 다운로드, Provider Fetch, IPC 연동 전체 E2E 회귀 검증
+- [x] `docs/decisions/data_and_sync.md` 및 `CONTEXT.md`에 아키텍처 결정 기록 동기화
+

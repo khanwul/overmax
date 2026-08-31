@@ -239,7 +239,9 @@ fn refresh_pattern_meta(root: &Path, varchive_db: &VArchiveDB, log: LogFn<'_>) {
 
 fn refresh_image_index(root: &Path, settings: &Settings, log: LogFn<'_>) {
     let path = root.join(&settings.jacket_matcher().db_path);
-    let Ok((tag, url)) = fetch_github_release_asset_url(IMAGE_DB_OWNER, IMAGE_DB_REPO, IMAGE_DB_ASSET) else {
+    let Ok((tag, url)) =
+        fetch_github_release_asset_url(IMAGE_DB_OWNER, IMAGE_DB_REPO, IMAGE_DB_ASSET)
+    else {
         log("[ImageDBUpdater] 릴리즈 정보 조회 실패".into());
         return;
     };
@@ -247,7 +249,9 @@ fn refresh_image_index(root: &Path, settings: &Settings, log: LogFn<'_>) {
         log(format!("[ImageDBUpdater] 최신 버전 유지 중: {tag}"));
         return;
     }
-    match download_asset_bytes(&url, Some(Duration::from_secs(60))).and_then(|b| write_atomic(&path, &b)) {
+    match download_asset_bytes(&url, Some(Duration::from_secs(60)))
+        .and_then(|b| write_atomic(&path, &b))
+    {
         Ok(()) => {
             let _ = std::fs::write(version_path(&path), &tag);
             log(format!("[ImageDBUpdater] 업데이트 완료: {tag}"));

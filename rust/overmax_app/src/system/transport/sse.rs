@@ -77,11 +77,8 @@ pub fn run_sse_hub_loop<T, F, S>(
     }
 }
 
-fn client_writer_loop<T, F>(
-    rx: Receiver<T>,
-    mut stream: TcpStream,
-    formatter: Arc<F>,
-) where
+fn client_writer_loop<T, F>(rx: Receiver<T>, mut stream: TcpStream, formatter: Arc<F>)
+where
     F: Fn(&T, u64) -> String,
 {
     let mut seq: u64 = 0;

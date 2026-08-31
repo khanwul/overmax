@@ -65,7 +65,8 @@ impl AssetDownloadGateway {
             if asset.get("name").and_then(Value::as_str) != Some(asset_name) {
                 continue;
             }
-            let Some(download_url) = asset.get("browser_download_url").and_then(Value::as_str) else {
+            let Some(download_url) = asset.get("browser_download_url").and_then(Value::as_str)
+            else {
                 continue;
             };
             return Ok((tag.to_string(), download_url.to_string()));

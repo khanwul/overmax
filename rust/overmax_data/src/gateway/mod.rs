@@ -10,8 +10,7 @@ pub mod recommend_provider;
 pub mod varchive;
 
 pub use asset_download::{
-    download_asset_bytes, download_asset_text, fetch_github_release_asset_url,
-    AssetDownloadGateway,
+    download_asset_bytes, download_asset_text, fetch_github_release_asset_url, AssetDownloadGateway,
 };
 pub use error::{GatewayError, GatewayResult};
 pub use http_client::{GatewayHttpClient, DEFAULT_TIMEOUT, DOWNLOAD_TIMEOUT, FAST_TIMEOUT};

@@ -66,10 +66,7 @@ impl GatewayHttpClient {
 
     /// Prepares a POST request with standard headers and optional timeout override.
     pub fn post(&self, url: &str, timeout: Option<Duration>) -> RequestBuilder {
-        let mut req = self
-            .client
-            .post(url)
-            .header(USER_AGENT, self.user_agent);
+        let mut req = self.client.post(url).header(USER_AGENT, self.user_agent);
 
         if let Some(t) = timeout {
             req = req.timeout(t);
