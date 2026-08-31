@@ -553,9 +553,7 @@ fn debug_section(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) 
     );
 }
 
-/// 외부 연동(로컬 IPC) 섹션: enabled 토글 + 포트 입력 + 런타임 상태.
-/// 저장은 draft(Value)를 거쳐 기존 delta 디바운스 플로우로 반영되며,
-/// 서버 측(매니저 스레드)이 merged settings를 폴링하여 런타임에 반영한다.
+/// 방송 및 외부 앱 연동(로컬 IPC) 섹션: 실시간 데이터 공유 토글 + 포트 설정 + 친절한 안내.
 fn ipc_section(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
     let ipc_obj = object_section_mut(draft, "ipc");
 
@@ -564,8 +562,15 @@ fn ipc_section(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    // ── 상태 라인 (런타임 바인딩 슬롯 조회) ──
-    let bound = ctx.ipc_bound_port.lock().ok().and_then(|g| *g);
+    // ── 기능 안내 설명 문구 ──
+    ui.label(
+        RichText::new(crate::t!("settings-ipc-desc"))
+            .size(DialogTheme::FONT_BODY)
+            .color(DialogTheme::TEXT_MUTED),
+    );
+    ui.add_space(DialogTheme::GAP_SM);
+
+    // ── 데이터 공유 토글 ──
     setting_row(
         ui,
         crate::t!("settings-ipc-enable"),
@@ -576,51 +581,59 @@ fn ipc_section(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
             }
         },
     );
-    if enabled {
-        if let Some(port) = bound {
-            ui.label(
-                RichText::new(format!(
-                    "{} · 127.0.0.1:{port}",
-                    crate::t!("settings-ipc-status-running")
-                ))
-                .color(Color32::from_rgb(120, 200, 120))
-                .size(DialogTheme::FONT_BODY),
-            );
-        } else {
-            ui.label(
-                RichText::new(crate::t!("settings-ipc-status-stopped"))
-                    .color(DialogTheme::TEXT_MUTED)
-                    .size(DialogTheme::FONT_BODY),
-            );
-        }
-    }
 
-    // ── 포트 입력 (enabled 시에만 편집) ──
-    let current_port = ipc_obj.get("port").and_then(Value::as_u64).unwrap_or(30110);
-    let mut port_text = port_draft_text(ipc_obj, current_port);
-    ui.add_space(DialogTheme::GAP_SM);
-    setting_row(
-        ui,
-        crate::t!("settings-ipc-port"),
-        crate::t!("settings-ipc-port-hint"),
-        |ui| {
-            let text_edit = egui::TextEdit::singleline(&mut port_text)
-                .font(egui::FontId::new(
-                    DialogTheme::FONT_BODY,
-                    egui::FontFamily::Monospace,
-                ))
-                .vertical_align(egui::Align::Center);
-            let response = ui.add_sized(egui::vec2(90.0, DialogTheme::CONTROL_HEIGHT), text_edit);
-            if response.changed() {
-                let cleaned: String = port_text.chars().filter(|c| c.is_ascii_digit()).collect();
-                if let Ok(port) = cleaned.parse::<u16>() {
-                    if (1024..=65535).contains(&port) {
-                        ipc_obj.insert("port".to_string(), json!(port));
+    // ── 상태 뱃지 및 상세 설정 (활성화 시에만 노출) ──
+    if enabled {
+        ui.add_space(DialogTheme::GAP_SM);
+        let bound = ctx.ipc_bound_port.lock().ok().and_then(|g| *g);
+        let (status_text, status_color) = if let Some(port) = bound {
+            (
+                format!("🟢 {} · http://127.0.0.1:{port}", crate::t!("settings-ipc-status-running")),
+                Color32::from_rgb(100, 220, 100),
+            )
+        } else {
+            (
+                format!("⚪ {}", crate::t!("settings-ipc-status-stopped")),
+                DialogTheme::TEXT_MUTED,
+            )
+        };
+
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(status_text)
+                    .color(status_color)
+                    .size(DialogTheme::FONT_BODY)
+                    .strong(),
+            );
+        });
+
+        // ── 포트 설정 ──
+        let current_port = ipc_obj.get("port").and_then(Value::as_u64).unwrap_or(30110);
+        let mut port_text = port_draft_text(ipc_obj, current_port);
+        ui.add_space(DialogTheme::GAP_SM);
+        setting_row(
+            ui,
+            crate::t!("settings-ipc-port"),
+            crate::t!("settings-ipc-port-hint"),
+            |ui| {
+                let text_edit = egui::TextEdit::singleline(&mut port_text)
+                    .font(egui::FontId::new(
+                        DialogTheme::FONT_BODY,
+                        egui::FontFamily::Monospace,
+                    ))
+                    .vertical_align(egui::Align::Center);
+                let response = ui.add_sized(egui::vec2(90.0, DialogTheme::CONTROL_HEIGHT), text_edit);
+                if response.changed() {
+                    let cleaned: String = port_text.chars().filter(|c| c.is_ascii_digit()).collect();
+                    if let Ok(port) = cleaned.parse::<u16>() {
+                        if (1024..=65535).contains(&port) {
+                            ipc_obj.insert("port".to_string(), json!(port));
+                        }
                     }
                 }
-            }
-        },
-    );
+            },
+        );
+    }
 }
 
 /// 포트 임시 편집 문자열. 확정된 값과 다른 미완성 입력을 유지하기 위한 최소 장치.

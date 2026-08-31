@@ -593,51 +593,58 @@ macro_rules! t {
     };
     ("settings-ipc-section") => {
         $crate::t_select!(
-            Ko => "외부 연동 (로컬 IPC)",
-            En => "External Integration (Local IPC)",
-            Ja => "外部連携 (ローカルIPC)"
+            Ko => "방송 및 외부 앱 연동",
+            En => "Broadcasting & External Apps",
+            Ja => "配信・外部アプリ連携"
+        )
+    };
+    ("settings-ipc-desc") => {
+        $crate::t_select!(
+            Ko => "OBS 방송 화면이나 커뮤니티 위젯에서 현재 곡명과 플레이 결과를 실시간으로 띄울 수 있도록 데이터를 제공합니다.",
+            En => "Provides real-time song and result data for OBS overlays and community widgets.",
+            Ja => "OBS配信画面や外部ウィジェットで現在の曲名やプレイ結果をリアルタイム表示できるようにデータを共有します。"
         )
     };
     ("settings-ipc-enable") => {
         $crate::t_select!(
-            Ko => "IPC 서버 사용",
-            En => "Enable IPC server",
-            Ja => "IPCサーバーを使用"
+            Ko => "실시간 데이터 공유 켜기",
+            En => "Enable real-time data sharing",
+            Ja => "リアルタイムデータ共有を有効化"
         )
     };
     ("settings-ipc-enable-hint") => {
         $crate::t_select!(
-            Ko => "127.0.0.1에서만 동작하는 로컬 이벤트/RPC 서버",
-            En => "Local event/RPC server bound to 127.0.0.1 only",
-            Ja => "127.0.0.1限定のローカルイベント/RPCサーバー"
+            Ko => "내 컴퓨터(127.0.0.1) 내부에서만 안전하게 동작하며 인터넷 외부로 유출되지 않습니다",
+            En => "Runs securely on your local PC (127.0.0.1) only with zero external traffic",
+            Ja => "お使いのPC内部(127.0.0.1)でのみ安全に動作し、外部へ送信されることはありません"
         )
     };
     ("settings-ipc-port") => {
         $crate::t_select!(
-            Ko => "포트",
-            En => "Port",
-            Ja => "ポート"
+            Ko => "연결 포트",
+            En => "Connection Port",
+            Ja => "接続ポート"
         )
     };
     ("settings-ipc-port-hint") => {
         $crate::t_select!(
-            Ko => "권장 대역 30100~30199 · 충돌 시 대역 내 자동 전환",
-            En => "Recommended band 30100-30199 · auto-fallback within band",
-            Ja => "推奨帯域30100〜30199・衝突時は帯域内で自動切替"
+            Ko => "다른 프로그램과 충돌할 때만 변경하세요 (기본값: 30110)",
+            En => "Change only if conflicting with other apps (Default: 30110)",
+            Ja => "他のアプリと競合する場合のみ変更してください (デフォルト: 30110)"
         )
     };
     ("settings-ipc-status-running") => {
         $crate::t_select!(
-            Ko => "실행 중",
-            En => "Running",
-            Ja => "実行中"
+            Ko => "연결 대기 중",
+            En => "Ready for connection",
+            Ja => "接続待機中"
         )
     };
     ("settings-ipc-status-stopped") => {
         $crate::t_select!(
-            Ko => "중지",
-            En => "Stopped",
-            Ja => "停止中"
+            Ko => "꺼짐",
+            En => "Disabled",
+            Ja => "オフ"
         )
     };
     ("settings-capture-engine-hint") => {
