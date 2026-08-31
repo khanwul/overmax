@@ -21,9 +21,10 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 
 ## 2. 데이터 저장소 및 런타임 환경 분기 (Storage & Runtime Environment)
 
-- [ ] **2.1 데이터 경로 추상화 레이어 구축**
-  - [ ] Portable 모드(바이너리 상대 경로) 및 Installed/MSIX 모드(`%LOCALAPPDATA%\Overmax\`) 듀얼 경로 지원
-  - [ ] 사용자 설정(`settings.user.json`), 플레이 기록 DB(`cache/record.db`), 곡 메타 DB(`cache/songs.json`), 자켓 인덱스(`cache/image_index.db`)의 안전한 로드/마이그레이션 지원
+- [x] **2.1 데이터 경로 추상화 레이어 구축**
+  - [x] Portable 모드(바이너리 상대 경로) 및 Installed/MSIX 모드(`%LOCALAPPDATA%\Overmax\`) 듀얼 경로 지원
+  - [x] 사용자 설정(`settings.user.json`), 플레이 기록 DB(`cache/record.db`), 곡 메타 DB(`cache/songs.json`), 자켓 인덱스(`cache/image_index.db`)의 안전한 로드/마이그레이션 지원
+
 - [ ] **2.2 스토어 환경 자가 업데이터 분기 처리**
   - [ ] MSIX 패키지 런타임 환경 감지(Win32 `GetCurrentPackageFullName` 또는 `store` feature flag)
   - [ ] 스토어 패키지 실행 시 인앱 자가 업데이터(GitHub Releases 바이너리 교체) 비활성화 및 UI 처리

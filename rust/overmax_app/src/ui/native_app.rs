@@ -2,9 +2,9 @@
 
 use overmax_core::{Changed, GameSessionState};
 use overmax_data::{
-    build_candidates, load_base_settings, load_merged_settings, normalize_settings,
-    DataCompatibility, PatternSheetMeta, RecommendResult, Recommender, RecordDB, RecordManager,
-    SyncCandidate, VArchiveDB,
+    build_candidates, load_base_settings_from_paths, load_merged_settings_from_paths,
+    normalize_settings, AppPaths, PatternSheetMeta, RecommendResult, Recommender, RecordDB,
+    RecordManager, SyncCandidate, VArchiveDB,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -37,16 +37,17 @@ pub fn run_native_app() -> eframe::Result<()> {
         ))));
     }
 
-    let root = std::env::current_dir().unwrap_or_else(|e| {
-        eprintln!("cwd: {e}");
-        std::process::exit(1);
-    });
+    let paths = Arc::new(AppPaths::resolve());
+    if let Err(e) = paths.ensure_dirs_and_seed() {
+        eprintln!("[AppPaths] 디렉터리 생성 및 시딩 실패: {e}");
+    }
+
     let defaults: Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../settings.json"
     )))
     .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
-    let mut merged = load_merged_settings(root.as_path(), defaults);
+    let mut merged = load_merged_settings_from_paths(&paths.settings_paths(), defaults);
     normalize_settings(&mut merged);
     crate::ui::i18n::set_locale_from_settings(&merged);
 
@@ -57,14 +58,14 @@ pub fn run_native_app() -> eframe::Result<()> {
     let app_settings: overmax_data::Settings =
         serde_json::from_value(merged.clone()).unwrap_or_default();
     let upd_cfg = AppUpdateConfig::from_settings(&app_settings);
-    let ok_notify = updater::notify_previous_update(root.as_path()).unwrap_or_else(|e| {
+    let ok_notify = updater::notify_previous_update(paths.data_dir()).unwrap_or_else(|e| {
         eprintln!("[AppUpdater] notify: {e}");
         true
     });
     if !ok_notify {
         return Ok(());
     }
-    match updater::check_and_apply_update_blocking(root.as_path(), &upd_cfg) {
+    match updater::check_and_apply_update_blocking(paths.data_dir(), &upd_cfg) {
         Ok(true) => {}
         Ok(false) => {
             drop(_single);
@@ -85,10 +86,11 @@ pub fn run_native_app() -> eframe::Result<()> {
 
     let options = platform::native_options(&app_settings);
 
+    let app_paths = paths.clone();
     eframe::run_native(
         "Overmax",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             let initial_hwnd = platform::init_overlay_window_immediate();
             let mut visuals = eframe::egui::Visuals::dark();
             visuals.panel_fill = eframe::egui::Color32::TRANSPARENT;
@@ -98,7 +100,7 @@ pub fn run_native_app() -> eframe::Result<()> {
             visuals.widgets.noninteractive.bg_stroke = eframe::egui::Stroke::NONE;
             cc.egui_ctx.set_visuals(visuals);
             let _ = overlay_ui::install_cjk_fonts(&cc.egui_ctx);
-            NativeApp::new(cc.egui_ctx.clone(), initial_hwnd)
+            NativeApp::new(cc.egui_ctx.clone(), initial_hwnd, app_paths.clone())
                 .map(|app| Box::new(app) as Box<dyn eframe::App>)
                 .map_err(|e| {
                     eprintln!("native app init: {e}");
@@ -116,6 +118,7 @@ pub struct SharedSettings {
     pub merged: Arc<Mutex<Value>>,
     pub draft: Arc<Mutex<Value>>,
     pub writer: Arc<crate::system::settings_writer::SettingsDebounceWriter>,
+    pub paths: Arc<AppPaths>,
 }
 
 impl SharedSettings {
@@ -127,11 +130,7 @@ impl SharedSettings {
         serde_json::from_value(val).unwrap_or_default()
     }
 
-    pub fn update_sync_filter(
-        &self,
-        root: &std::path::Path,
-        filter: &overmax_data::SyncFilterSettings,
-    ) {
+    pub fn update_sync_filter(&self, filter: &overmax_data::SyncFilterSettings) {
         let base_g = match self.base.lock() {
             Ok(g) => g.clone(),
             Err(e) => e.into_inner().clone(),
@@ -152,10 +151,14 @@ impl SharedSettings {
                 *g = draft_g.clone();
             }
             if let Ok(mut m) = self.merged.lock() {
-                *m = overmax_data::load_merged_settings(root, (*self.defaults).clone());
+                *m = overmax_data::load_merged_settings_from_paths(
+                    &self.paths.settings_paths(),
+                    (*self.defaults).clone(),
+                );
             }
 
-            self.writer.queue_save(root, diff);
+            self.writer
+                .queue_save(self.paths.settings_user_json(), diff);
         }
     }
 }
@@ -257,6 +260,7 @@ impl AppStateTracker {
 }
 
 pub struct NativeApp {
+    pub(crate) paths: Arc<AppPaths>,
     pub(crate) root: Arc<std::path::PathBuf>,
     pub(crate) settings: SharedSettings,
     pub(crate) ui_state: SharedUiState,
@@ -300,9 +304,12 @@ pub struct NativeApp {
 }
 
 impl NativeApp {
-    fn new(initial_ctx: egui::Context, initial_hwnd: Option<isize>) -> Result<Self, String> {
-        let root = std::env::current_dir().map_err(|e| e.to_string())?;
-        let root = Arc::new(root);
+    fn new(
+        initial_ctx: egui::Context,
+        initial_hwnd: Option<isize>,
+        paths: Arc<AppPaths>,
+    ) -> Result<Self, String> {
+        let root = Arc::new(paths.data_dir().to_path_buf());
         let defaults: Value = serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../settings.json"
@@ -310,11 +317,13 @@ impl NativeApp {
         .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
         let defaults = Arc::new(defaults);
 
-        let base_settings = Arc::new(Mutex::new(load_base_settings(
-            root.as_ref(),
+        let base_settings = Arc::new(Mutex::new(load_base_settings_from_paths(
+            &paths.settings_paths(),
             (*defaults).clone(),
         )));
-        let mut merged = load_merged_settings(root.as_ref(), (*defaults).clone());
+        let mut merged =
+            load_merged_settings_from_paths(&paths.settings_paths(), (*defaults).clone());
+
         normalize_settings(&mut merged);
         crate::ui::i18n::set_locale_from_settings(&merged);
 
@@ -326,20 +335,22 @@ impl NativeApp {
         let app_settings: overmax_data::Settings =
             serde_json::from_value(merged.clone()).unwrap_or_default();
 
-        let startup_cache_manager =
-            cache_update::StartupCacheManager::init(root.as_ref(), &app_settings, log_tx.clone());
+        let startup_cache_manager = cache_update::StartupCacheManager::init(
+            paths.data_dir(),
+            &app_settings,
+            log_tx.clone(),
+        );
 
         let merged_settings = Arc::new(Mutex::new(merged.clone()));
         let settings_draft = Arc::new(Mutex::new(merged.clone()));
 
-        let compat = DataCompatibility::current();
         let recent_steam = steam_session::most_recent_steam_id();
-        let mut record_db = RecordDB::new(root.join(compat.record_db), recent_steam.as_deref());
+        let mut record_db = RecordDB::new(paths.record_db(), recent_steam.as_deref());
         record_db.initialize();
         let record_db = Arc::new(record_db);
 
         // JSON 캐시 파일이 있다면 SQLite DB로 마이그레이션 실행
-        let cache_root = root.join("cache").join("varchive");
+        let cache_root = paths.varchive_cache_dir();
         if let Err(e) = record_db.migrate_json_cache_to_db(&cache_root) {
             let _ = log_tx.send(format!("[VArchive] 캐시 마이그레이션 실패: {e}"));
         }
@@ -348,10 +359,10 @@ impl NativeApp {
         record_manager.refresh();
 
         let mut varchive_db = VArchiveDB::new();
-        let dlcs_path = root.join(compat.dlcs_json);
+        let dlcs_path = paths.dlcs_json();
         let _ = varchive_db.load_dlcs_from_file(&dlcs_path);
 
-        let songs_path = root.join(compat.songs_json);
+        let songs_path = paths.songs_json();
         if let Err(e) = varchive_db.load_from_file(&songs_path) {
             let _ = log_tx.send(format!("[VArchive] songs load failed: {e}"));
         }
@@ -363,7 +374,7 @@ impl NativeApp {
         ));
 
         let sheet_meta = Arc::new(PatternSheetMeta::load_cache(
-            root.join("cache").join("pattern_meta.json"),
+            paths.pattern_meta_json(),
             &varchive_db,
         ));
 
@@ -400,7 +411,7 @@ impl NativeApp {
         });
 
         detection_worker::spawn(
-            (*root).clone(),
+            paths.data_dir().to_path_buf(),
             app_settings.clone(),
             merged_settings.clone(),
             log_tx.clone(),
@@ -427,7 +438,7 @@ impl NativeApp {
         };
         let (ipc_publisher, ipc_handle, ipc_bound_port) =
             crate::system::ipc_server::spawn_ipc_manager(
-                root.as_ref().clone(),
+                paths.data_dir().to_path_buf(),
                 merged_settings.clone(),
                 env!("CARGO_PKG_VERSION"),
                 ipc_cmd_tx,
@@ -440,6 +451,7 @@ impl NativeApp {
             merged: merged_settings.clone(),
             draft: settings_draft.clone(),
             writer: settings_writer,
+            paths: paths.clone(),
         };
 
         let ui_state = SharedUiState {
@@ -468,6 +480,7 @@ impl NativeApp {
         };
 
         let mut app = Self {
+            paths,
             root,
             settings,
             ui_state,
@@ -690,6 +703,11 @@ impl NativeApp {
         }
     }
 
+    #[inline]
+    pub fn paths(&self) -> &AppPaths {
+        &self.paths
+    }
+
     fn spawn_scan(&self, ctx: egui::Context) {
         let steam = self
             .sync_state
@@ -698,11 +716,9 @@ impl NativeApp {
             .map(|g| g.clone())
             .unwrap_or_default();
         let tx = self.sync_channels.sync_tx.clone();
-        let root = self.root.clone();
+        let songs_path = self.paths.songs_json();
         let rdb = self.record_db.clone();
         std::thread::spawn(move || {
-            let compat = DataCompatibility::current();
-            let songs_path = root.join(compat.songs_json);
             let mut db = VArchiveDB::new();
             if let Err(e) = db.load_from_file(&songs_path) {
                 let _ = tx.send(Err(format!("songs.json: {e}")));

@@ -41,6 +41,14 @@ impl SettingsDebounceWriter {
         });
     }
 
+    fn flush_payload(payload: &SavePayload) {
+        if payload.root.extension().is_some_and(|ext| ext == "json") {
+            let _ = overmax_data::save_user_settings_to_path(&payload.root, &payload.diff);
+        } else {
+            let _ = overmax_data::save_user_settings(&payload.root, &payload.diff);
+        }
+    }
+
     fn run_worker(rx: Receiver<SavePayload>) {
         let mut pending: Option<SavePayload> = None;
         let mut last_activity = Instant::now();
@@ -59,16 +67,16 @@ impl SettingsDebounceWriter {
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             // Debounce duration elapsed without new incoming payloads, write now
-                            let _ = overmax_data::save_user_settings(&payload.root, &payload.diff);
+                            Self::flush_payload(&payload);
                         }
                         Err(mpsc::RecvTimeoutError::Disconnected) => {
                             // Flush final payload on shutdown
-                            let _ = overmax_data::save_user_settings(&payload.root, &payload.diff);
+                            Self::flush_payload(&payload);
                             break;
                         }
                     }
                 } else {
-                    let _ = overmax_data::save_user_settings(&payload.root, &payload.diff);
+                    Self::flush_payload(&payload);
                 }
             } else {
                 match rx.recv() {

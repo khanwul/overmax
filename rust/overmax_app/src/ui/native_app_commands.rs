@@ -87,13 +87,14 @@ impl NativeApp {
             return;
         }
 
-        let result = crate::ui::settings_ui::save_settings_to_disk(
-            self.root.as_ref(),
+        let result = crate::ui::settings_ui::save_settings_to_paths(
+            &self.paths.settings_paths(),
             self.settings.defaults.as_ref(),
             &base,
             &mut updated,
             &mut merged,
         );
+
         if result.is_err() {
             let _ = set_overlay_position(&mut merged, x, y);
         }
