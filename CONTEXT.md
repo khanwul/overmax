@@ -16,6 +16,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
   - 전체화면 포커스 차단 및 DWM 비클라이언트 테두리/캡션 제거: 게임 윈도우 최소화 방지를 위해 `WS_EX_NOACTIVATE` 및 `WS_EX_TOOLWINDOW`, `WS_EX_LAYERED`, `WS_POPUP` 스타일을 적용하고, `SetWindowSubclass`로 `WM_NCCALCSIZE`를 가로채 비클라이언트 영역을 0으로 강제함으로써 Windows 11 DWM의 상단 1px 테두리 선 및 우상단 네이티브 캡션 버튼("- ㅁ X") 합성을 원천 차단함. 비활성 시 topmost 해제로 인한 깜빡임을 막기 위해 `is_active` 상태 검증 캐싱을 정밀화하고, `cached_game_hwnd`를 이용해 매 프레임 `FindWindowW` 오버헤드를 차단함.
   - 오버레이 스냅과 스크린 앵커 드래그 제어: 마우스 드래그 시 Win32 비클라이언트 메시지(`WM_NCLBUTTONDOWN`)나 비동기 뷰포트 델타를 쓰지 않고, 드래그 시작 시점의 스크린 절대 좌표와 창 위치를 앵커로 잡는 픽셀 완벽 스크린 앵커 드래그(`PlatformState::handle_screen_drag`)를 적용하여 1픽셀의 오차 없이 커서를 100% 추종하며 타이틀바 헤더 노출을 방지함. 구석 고정(Snap) 시에는 `try_lock()`으로 백그라운드 스레드와의 락 경합을 방지하고, 기하 구조 캐시(`prev_snap_geometry`)를 적용하여 좌표 변화가 없을 때는 `SetWindowPos` 호출을 생략(0회)함.
 - **데이터**: V-Archive DB (JSON) 및 로컬 기록 DB (SQLite)
+- **외부 연동 (로컬 IPC)**: `overmax_app::system::ipc_server` — std-only 최소 HTTP 서버(의존성 0) 기반 단일 loopback 포트에서 SSE 이벤트 푸시(`GET /events`)와 JSON-RPC 2.0 RPC(`POST /rpc`)를 동시 제공. 프로토콜 ID는 `overmax-ipc/1`이며 기본 OFF(`ipc.enabled=false`), 기본 포트 30110(허용 대역 30100~30199, 바인딩 실패 시 대역 내 순차 스캔 → 전부 실패하면 fail-closed 비활성). 실제 확정 포트는 `cache/ipc_endpoint.json`(원자적 교체)으로 노출.
 
 ---
 
@@ -66,10 +67,14 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 [Main GUI Thread (egui/winit)]
    ├── Overlay (Windows eframe viewport / Linux native layer-shell surface)
    ├── Settings / Sync / Debug Windows (설정 변경, V-Archive 기록 동기화, 실시간 로그)
-   └── Channel Receiver (디텍션 결과 수신 및 UI 상태 반영)
-           ▲
-           │ (mpsc channel)
-           ▼
+   ├── Channel Receiver (디텍션 결과 수신 및 UI 상태 반영)
+   │      └── drain_detection_results(): IPC 이벤트 발행 관찰자 (§6.2 — 파이프라인 무변경)
+   │              └─ try_send(bounded 64) → [IPC Hub Thread] → SSE 클라이언트별 writer fan-out
+   ├── IPC Command Receiver (set_overlay_visibility 등 GUI 제어 명령 수신)
+   └── IpcPublisher / IpcServerHandle (shutdown) / BoundPortSlot (런타임 상태)
+            ▲
+            │ (mpsc channel)
+            ▼
 [Detection Worker Thread]
    ├── WindowTracker: Win32 또는 X11/XWayland exact-title 추적
    ├── ScreenCapture: Windows GDI/DXGI 또는 Linux XComposite + MIT-SHM
@@ -77,6 +82,10 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
         ├── OcrDetector: 1-pass OCR fallback/검증 → rate 등 제한된 텍스트 값 추출
         ├── ImageIndexDb: overmax_cv (HOG + Hash 매칭 -> song_id 탐색)
         └── PlayStateDetector: (버튼 모드, 난이도, 맥스콤보 감지)
+
+[IPC Manager Thread]  ← 설정(ipc.enabled/port) 250ms 폴링, 리스너 바인딩/재바인딩
+[IPC Hub Thread]      ← GUI 발행 이벤트 fan-out + 접속 즉시 state_snapshot 선송신
+[SSE Client Threads]  ← 연결별 단조 seq 할당, 15초 하트비트, 느린 클라이언트 try_send 실패 시 정리
 ```
 
 ---
@@ -158,8 +167,9 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 # Future Focus
 
-1. **외부 연동 및 IPC 프로토콜 고도화**:
-   - 실시간 이벤트 스트리밍, MCP(Model Context Protocol) 기반 외부 호출 RPC 및 추천 프로토콜 정리.
+1. **외부 연동 및 IPC 프로토콜 고도화** — **완료 (v0.5.0)**:
+   - SSE 이벤트 스트리밍(`scene_detected`/`song_detected`/`play_verified` + 접속 시 `state_snapshot`)과 JSON-RPC 2.0 메서드(`get_current_context`, `get_recommendations`, `set_overlay_visibility`, `list_methods`) 구현 완료.
+   - Provider 규격(`overmax-recommend/1`)과 IPC 규격(`overmax-ipc/1`)은 역할이 다른 별개 프로토콜로 유지하되, `song_id`/`mode`/`diff` 공통 와이어 어휘와 `x/1` 버저닝 문화를 공유하도록 단일화 완료 (`RecommendEntry` serde rename + 계약 고정 테스트, 프로토콜 ID 상수화).
 2. **플레이어 편의성 및 인게임 유틸리티**:
    - 글로벌 단축키(Hotkeys) 지원 및 연습용 노트 레인 임시 가림막(Lane Blind) 오버레이 구현.
 3. **기록 수집 및 V-Archive 자동 연동**:
@@ -182,4 +192,6 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 - 🎨 **UI 컴포넌트 & 다국어 (i18n)**: [docs/decisions/ui_and_i18n.md](docs/decisions/ui_and_i18n.md)
   - 0-Cost 단일 `t!` i18n 매크로, Auto-Fit 레이아웃, 오버레이 테마/투명도, 모듈형 컴포넌트 등
 - 🐧 **Linux 플랫폼 지원**: [docs/decisions/linux_support.md](docs/decisions/linux_support.md) ([사용자 가이드: docs/guides/linux-support.md](docs/guides/linux-support.md))
+- 🔌 **외부 연동 & IPC 서비스**: [docs/plans/2026-08-26-ipc-service-architecture.md](docs/plans/2026-08-26-ipc-service-architecture.md)
+  - SSE + JSON-RPC 2.0 트랜스포트, 포트 대역 정책, 이벤트 봉투 규격, 스레드 모델 등
 

@@ -97,7 +97,8 @@ impl NativeApp {
         let cap_settings = settings_merged.screen_capture();
 
         let overlay_on = game_found
-            && (ovs.always_visible || self.session.scene != overmax_core::SceneType::Unknown);
+            && (ovs.always_visible || self.session.scene != overmax_core::SceneType::Unknown)
+            && self.overlay_visible_override.unwrap_or(true);
 
         #[cfg(target_os = "windows")]
         let game_hwnd = self.platform.win_cache.cached_game_hwnd;
@@ -209,6 +210,7 @@ impl NativeApp {
             sync_steam_id: self.sync_state.steam_id.clone(),
             fetch_tx: self.sync_channels.fetch_req_tx.clone(),
             steam_users: self.sync_state.steam_users.clone(),
+            ipc_bound_port: self.ipc_bound_port.clone(),
         };
         ctx.show_viewport_deferred(
             native_helpers::vp_settings(),
@@ -467,6 +469,7 @@ impl eframe::App for NativeApp {
             self.ui_state.settings_open.store(false, Ordering::Relaxed);
             self.ui_state.sync_open.store(false, Ordering::Relaxed);
             self.ui_state.debug_open.store(false, Ordering::Relaxed);
+            self.ipc_handle.shutdown();
             ctx.send_viewport_cmd(ViewportCommand::Close);
             return;
         }
@@ -512,7 +515,8 @@ impl NativeApp {
         let game_rect_val = *overmax_core::lock_or_recover(&self.game_rect);
         let game_found = game_rect_val.is_some();
         let overlay_on = game_found
-            && (ovs.always_visible || self.session.scene != overmax_core::SceneType::Unknown);
+            && (ovs.always_visible || self.session.scene != overmax_core::SceneType::Unknown)
+            && self.overlay_visible_override.unwrap_or(true);
 
         let overlay_on_changed = self.state_tracker.prev_overlay_on.update(overlay_on);
 
@@ -630,6 +634,9 @@ impl NativeApp {
         ctx.request_repaint_after(std::time::Duration::from_secs(1));
         self.drain_detection_results(ctx);
         if self.drain_ui_commands() {
+            ctx.request_repaint();
+        }
+        if self.drain_ipc_commands() {
             ctx.request_repaint();
         }
         self.poll_scan_requests(ctx);

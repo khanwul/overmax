@@ -54,5 +54,9 @@
   "recommend": {
     "smart_recommend": true,
     "target_rate": 99.0
+  },
+  "ipc": {
+    "enabled": false,
+    "port": 30110
   }
 }

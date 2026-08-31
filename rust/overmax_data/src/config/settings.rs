@@ -193,6 +193,16 @@ pub fn normalize_settings(settings: &mut Value) {
             recommend.insert("target_rate".to_string(), json!(99.0));
         }
     }
+
+    if let Some(Value::Object(ipc)) = map.get_mut("ipc") {
+        if let Some(port) = ipc.get("port").and_then(|v| v.as_u64()) {
+            if !(1024..=65535).contains(&port) {
+                ipc.insert("port".to_string(), json!(default_ipc_port()));
+            }
+        } else if ipc.contains_key("port") {
+            ipc.insert("port".to_string(), json!(default_ipc_port()));
+        }
+    }
 }
 
 pub fn diff_settings(base: &Value, current: &Value) -> Value {
@@ -380,6 +390,9 @@ mod tests {
             },
             "recommend": {
                 "target_rate": 99.6 // should snap to 99.5 or 99.7 => (99.6-99.5)=0.1 vs (99.7-99.6)=0.1 => 99.5
+            },
+            "ipc": {
+                "port": 99999 // out of 1024..=65535, should fall back to 30110
             }
         });
 
@@ -394,6 +407,7 @@ mod tests {
             json!({"v_id": "some_v_id", "account_path": ""})
         );
         assert_eq!(settings["recommend"]["target_rate"], json!(99.5));
+        assert_eq!(settings["ipc"]["port"], json!(30110));
     }
 
     #[test]
@@ -774,6 +788,31 @@ impl Default for RecommendSettings {
     }
 }
 
+/// 외부 연동(IPC) 서버 설정. 기본 OFF (원칙: 명시적 동의).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct IpcSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_ipc_port")]
+    pub port: u16,
+}
+
+fn default_ipc_port() -> u16 {
+    30110
+}
+
+/// 권장 포트 대역 (양 OS 임시 포트 범위 밖 안전 구간)
+pub const IPC_PORT_BAND: std::ops::RangeInclusive<u16> = 30100..=30199;
+
+impl Default for IpcSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: default_ipc_port(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
 pub struct Settings {
     #[serde(default)]
@@ -796,6 +835,8 @@ pub struct Settings {
     pub recommend_provider: Option<RecommendProviderSettings>,
     #[serde(default)]
     pub recommend: Option<RecommendSettings>,
+    #[serde(default)]
+    pub ipc: Option<IpcSettings>,
 }
 
 impl Settings {
@@ -828,5 +869,8 @@ impl Settings {
     }
     pub fn recommend(&self) -> RecommendSettings {
         self.recommend.clone().unwrap_or_default()
+    }
+    pub fn ipc(&self) -> IpcSettings {
+        self.ipc.unwrap_or_default()
     }
 }

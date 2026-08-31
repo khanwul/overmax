@@ -35,6 +35,28 @@ impl NativeApp {
         handled
     }
 
+    pub(crate) fn drain_ipc_commands(&mut self) -> bool {
+        let mut handled = false;
+        while let Ok(command) = self.ipc_cmd_rx.try_recv() {
+            self.handle_ipc_command(command);
+            handled = true;
+        }
+        handled
+    }
+
+    pub(crate) fn handle_ipc_command(&mut self, command: crate::system::ipc_server::IpcCommand) {
+        match command {
+            crate::system::ipc_server::IpcCommand::SetOverlayVisibility(visible) => {
+                self.overlay_visible_override = Some(visible);
+                debug_ui::push_log(
+                    &self.debug_state.log_lines,
+                    self.max_log_lines(),
+                    format!("[IPC] overlay visibility set to {visible}"),
+                );
+            }
+        }
+    }
+
     pub(crate) fn handle_ui_command(&self, command: UiCommand) {
         match command {
             UiCommand::OpenSettings => self.open_settings(),
