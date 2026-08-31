@@ -193,6 +193,16 @@ pub fn normalize_settings(settings: &mut Value) {
             recommend.insert("target_rate".to_string(), json!(99.0));
         }
     }
+
+    if let Some(Value::Object(ipc)) = map.get_mut("ipc") {
+        if let Some(port) = ipc.get("port").and_then(|v| v.as_u64()) {
+            if !(1024..=65535).contains(&port) {
+                ipc.insert("port".to_string(), json!(default_ipc_port()));
+            }
+        } else if ipc.contains_key("port") {
+            ipc.insert("port".to_string(), json!(default_ipc_port()));
+        }
+    }
 }
 
 pub fn diff_settings(base: &Value, current: &Value) -> Value {
@@ -380,6 +390,9 @@ mod tests {
             },
             "recommend": {
                 "target_rate": 99.6 // should snap to 99.5 or 99.7 => (99.6-99.5)=0.1 vs (99.7-99.6)=0.1 => 99.5
+            },
+            "ipc": {
+                "port": 99999 // out of 1024..=65535, should fall back to 30110
             }
         });
 
@@ -394,6 +407,7 @@ mod tests {
             json!({"v_id": "some_v_id", "account_path": ""})
         );
         assert_eq!(settings["recommend"]["target_rate"], json!(99.5));
+        assert_eq!(settings["ipc"]["port"], json!(30110));
     }
 
     #[test]

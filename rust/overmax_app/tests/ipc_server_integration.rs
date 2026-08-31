@@ -193,6 +193,56 @@ fn ipc_sse_stream_and_rpc_end_to_end() {
         pushed.get("type").and_then(Value::as_str),
         Some("scene_detected")
     );
+    assert_eq!(
+        pushed["payload"]["scene"].as_str(),
+        Some("Freestyle"),
+        "scene_detected payload must contain scene string"
+    );
+
+    // 라이브 이벤트 푸시 검증 (song_detected)
+    publisher.publish(IpcEvent::SongDetected {
+        song_id: 1234,
+        mode: "5B".into(),
+        diff: "SC".into(),
+        rate: 99.23,
+        is_max_combo: false,
+        meta: overmax_app::system::ipc_server::SongMeta {
+            title: Some("Test Song".into()),
+            floor_name: Some("SC 15".into()),
+        },
+    });
+    let song_pushed = read_until_data(&mut reader).expect("no song_detected frame");
+    assert_eq!(
+        song_pushed.get("type").and_then(Value::as_str),
+        Some("song_detected")
+    );
+    assert_eq!(song_pushed["payload"]["song_id"].as_i64(), Some(1234));
+    assert_eq!(song_pushed["payload"]["mode"].as_str(), Some("5B"));
+    assert_eq!(song_pushed["payload"]["diff"].as_str(), Some("SC"));
+    assert_eq!(song_pushed["payload"]["title"].as_str(), Some("Test Song"));
+    assert_eq!(song_pushed["payload"]["floor_name"].as_str(), Some("SC 15"));
+
+    // 라이브 이벤트 푸시 검증 (play_verified)
+    publisher.publish(IpcEvent::PlayVerified {
+        song_id: 1234,
+        mode: "5B".into(),
+        diff: "SC".into(),
+        rate: 99.50,
+        is_max_combo: true,
+        is_pb: true,
+        meta: overmax_app::system::ipc_server::SongMeta {
+            title: Some("Test Song".into()),
+            floor_name: Some("SC 15".into()),
+        },
+    });
+    let play_pushed = read_until_data(&mut reader).expect("no play_verified frame");
+    assert_eq!(
+        play_pushed.get("type").and_then(Value::as_str),
+        Some("play_verified")
+    );
+    assert_eq!(play_pushed["payload"]["song_id"].as_i64(), Some(1234));
+    assert_eq!(play_pushed["payload"]["is_max_combo"].as_bool(), Some(true));
+    assert_eq!(play_pushed["payload"]["is_pb"].as_bool(), Some(true));
 
     drop(reader);
     drop(stream);

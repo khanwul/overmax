@@ -198,9 +198,16 @@ impl IpcEvent {
     }
 
     fn payload(&self) -> Value {
-        // serde_json::to_value가 #[serde(flatten)]을 포함한 전체 페이로드를
-        // 일관되게 직렬화하므로 개별 필드 조립 없이 enum 전체를 변환한다.
-        serde_json::to_value(self).unwrap_or(Value::Null)
+        match self {
+            IpcEvent::StateSnapshot { payload } => payload.clone(),
+            _ => {
+                let mut val = serde_json::to_value(self).unwrap_or(Value::Null);
+                if let Value::Object(ref mut map) = val {
+                    map.remove("type");
+                }
+                val
+            }
+        }
     }
 }
 
@@ -212,9 +219,7 @@ fn format_sse_frame(event: &IpcEvent, seq: u64, app_version: &str) -> String {
         "seq": seq,
         "ts_ms": now_ms(),
         "app_version": app_version,
-        // payload()는 enum 전체를 serde 직렬화하므로 type 필드가 봉투와 페이로드에
-        // 중복 등장한다 → 페이로드에서 제거하여 단일 봉투 규격(§5.3) 유지
-        "payload": event.payload().get("payload").cloned().unwrap_or(Value::Null),
+        "payload": event.payload(),
     });
     format!("event: {name}\ndata: {data}\n\n")
 }
