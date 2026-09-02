@@ -14,7 +14,7 @@ use raw_window_handle::{
 };
 use rustix::event::{poll, PollFd, PollFlags, Timespec};
 use smithay_client_toolkit::{
-    compositor::{CompositorHandler, CompositorState},
+    compositor::{CompositorHandler, CompositorState, Region},
     delegate_compositor, delegate_layer, delegate_output, delegate_pointer, delegate_registry,
     delegate_seat,
     output::{OutputHandler, OutputInfo, OutputState},
@@ -428,6 +428,31 @@ fn unique_matching_toplevel<'a>(
     matches.next().is_none().then_some(target)
 }
 
+fn select_committed_output<'a, T: PartialEq>(
+    outputs: &'a [T],
+    current: Option<&T>,
+) -> Option<&'a T> {
+    match outputs {
+        [output] => Some(output),
+        outputs => current.and_then(|current| outputs.iter().find(|output| *output == current)),
+    }
+}
+
+fn output_render_scale(
+    current: f64,
+    estimated: Option<f64>,
+    has_viewporter: bool,
+    preferred_received: bool,
+) -> f64 {
+    if preferred_received {
+        current
+    } else if has_viewporter {
+        estimated.unwrap_or(1.0)
+    } else {
+        estimated.unwrap_or(1.0).round().max(1.0)
+    }
+}
+
 struct Backend {
     registry_state: RegistryState,
     seat_state: SeatState,
@@ -447,7 +472,10 @@ struct Backend {
     fractional_scale: Option<WpFractionalScaleV1>,
     target_output: Option<wl_output::WlOutput>,
     surface_output: Option<wl_output::WlOutput>,
-    output_origin: (i32, i32),
+    output_logical_size: Option<(i32, i32)>,
+    preferred_scale_received: bool,
+    empty_input_region: Region,
+    input_passthrough: bool,
     pointer: Option<wl_pointer::WlPointer>,
     pointer_position: Option<egui::Pos2>,
     recreate_on_output: bool,
@@ -509,6 +537,7 @@ impl Backend {
         }
         let compositor = CompositorState::bind(&globals, &qh)
             .map_err(|_| "wl_compositor is unavailable".to_string())?;
+        let empty_input_region = Region::new(&compositor).map_err(|error| error.to_string())?;
         let layer_shell = LayerShell::bind(&globals, &qh)
             .map_err(|_| "zwlr_layer_shell_v1 is unavailable".to_string())?;
         let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok();
@@ -531,6 +560,7 @@ impl Backend {
             1,
             None,
         );
+        layer.commit();
         let viewport = viewporter
             .as_ref()
             .map(|manager| create_viewport(manager, &layer, &qh, requested_size));
@@ -589,7 +619,10 @@ impl Backend {
                 fractional_scale,
                 target_output: None,
                 surface_output: None,
-                output_origin: (0, 0),
+                output_logical_size: None,
+                preferred_scale_received: false,
+                empty_input_region,
+                input_passthrough: false,
                 pointer: None,
                 pointer_position: None,
                 recreate_on_output: false,
@@ -693,24 +726,24 @@ impl Backend {
         }
     }
 
-    fn apply_snapshot(&mut self, snapshot: Arc<LinuxOverlaySnapshot>, qh: &QueueHandle<Self>) {
+    fn apply_snapshot(&mut self, snapshot: Arc<LinuxOverlaySnapshot>, _qh: &QueueHandle<Self>) {
         #[cfg(any(debug_assertions, feature = "telemetry"))]
         if let (Some(telemetry), Some(delivery)) =
             (&self.runtime_telemetry, &snapshot.delivery_telemetry)
         {
             telemetry.record_snapshot_applied(delivery);
         }
-        let size = panel_size(Some(&snapshot));
+        let hidden = is_hidden(&snapshot);
+        let size = retained_panel_size(self.requested_size, &snapshot);
         let size_changed = self.requested_size != size;
-        let output_changed = self.select_output(snapshot.window_snapshot.map(|window| window.rect));
         let reposition = self.snapshot.as_ref().is_none_or(|previous| {
             previous.snap != snapshot.snap
                 || previous.position != snapshot.position
                 || previous.window_snapshot != snapshot.window_snapshot
                 || size_changed
-        }) || output_changed;
+        });
         let margin = if reposition {
-            panel_margin(&snapshot, size, self.output_origin)
+            panel_margin(&snapshot, size, self.output_logical_size)
         } else {
             self.margin
         };
@@ -720,14 +753,7 @@ impl Backend {
         if reposition && self.dragging {
             self.reset_pointer_state();
         }
-        if output_changed {
-            self.drop_surface();
-            self.create_surface(qh).unwrap_or_else(|error| {
-                self.recreate_on_output = true;
-                eprintln!("[LinuxOverlay] output switch failed: {error}");
-            });
-            return;
-        }
+        self.set_input_passthrough(hidden);
         if let Some(layer) = &self.layer {
             if size_changed {
                 self.configured = false;
@@ -742,102 +768,69 @@ impl Backend {
         self.needs_redraw = true;
     }
 
-    fn select_output(&mut self, game_rect: Option<WindowRect>) -> bool {
-        let Some(rect) = game_rect else {
+    fn select_target_output(&mut self) -> bool {
+        let target = unique_matching_toplevel(
+            &self.game_window_title,
+            self.foreign_toplevels
+                .iter()
+                .map(|toplevel| &toplevel.state),
+        )
+        .and_then(|target| {
+            select_committed_output(&target.outputs, self.target_output.as_ref()).cloned()
+        });
+        if self.target_output == target {
             return false;
-        };
-        let selected = self
-            .output_state
-            .outputs()
-            .filter_map(|output| {
-                let info = self.output_state.info(&output)?;
-                let geometry = output_geometry(&info)?;
-                Some((output, geometry, intersection_area(rect, geometry.rect)))
-            })
-            .max_by_key(|(_, _, overlap)| *overlap)
-            .filter(|(_, _, overlap)| *overlap > 0);
-        let Some((output, info, _)) = selected else {
-            return false;
-        };
-        let target = Some(output);
-        let origin = (info.rect.left, info.rect.top);
-        let mut scale = info.scale;
-        if self.viewporter.is_none() {
-            scale = scale.round().max(1.0);
-        }
-        let changed = self.target_output != target
-            || self.output_origin != origin
-            || (self.render_scale - scale).abs() > f64::EPSILON;
-        if changed {
-            let output_info = target
-                .as_ref()
-                .and_then(|output| self.output_state.info(output));
-            let name = output_info
-                .as_ref()
-                .and_then(|info| info.name.as_deref())
-                .unwrap_or("compositor-default");
-            eprintln!(
-                "[LinuxOverlay] output={name} origin={},{} scale={scale:.3}",
-                origin.0, origin.1
-            );
-            #[cfg(any(debug_assertions, feature = "telemetry"))]
-            if let Some(output) = target.as_ref() {
-                self.record_output_environment(output);
-            }
         }
         self.target_output = target;
-        self.output_origin = origin;
-        if (self.render_scale - scale).abs() > f64::EPSILON {
-            self.render_scale = scale;
-            self.configure_surface();
-        }
-        changed
+        true
     }
 
     fn refresh_output(&mut self, qh: &QueueHandle<Self>) {
-        let game_rect = self
-            .snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.window_snapshot.map(|window| window.rect));
-        if !self.select_output(game_rect) {
+        if self.select_target_output() {
+            self.drop_surface();
+            if let Err(error) = self.create_surface(qh) {
+                self.recreate_on_output = true;
+                eprintln!("[LinuxOverlay] output switch failed: {error}");
+            }
+            return;
+        }
+        if !self.update_output_geometry() {
             return;
         }
         if let Some(snapshot) = &self.snapshot {
-            self.margin = panel_margin(snapshot, self.requested_size, self.output_origin);
+            self.margin = panel_margin(snapshot, self.requested_size, self.output_logical_size);
         }
-        self.drop_surface();
-        if let Err(error) = self.create_surface(qh) {
-            self.recreate_on_output = true;
-            eprintln!("[LinuxOverlay] output refresh failed: {error}");
+        if let Some(layer) = &self.layer {
+            layer.wl_surface().set_buffer_scale(fallback_buffer_scale(
+                self.render_scale,
+                self.viewport.is_some(),
+            ));
+            layer.set_margin(self.margin.1, 0, 0, self.margin.0);
+            layer.commit();
         }
+        self.needs_redraw = true;
     }
 
-    fn update_surface_scale(&mut self, output: &wl_output::WlOutput) {
-        if self.target_output.is_some() || self.fractional_scale.is_some() {
-            return;
-        }
-        let Some(info) = self.output_state.info(output) else {
-            return;
-        };
-        let Some(geometry) = output_geometry(&info) else {
-            return;
-        };
-        let scale = if self.viewporter.is_some() {
-            geometry.scale
-        } else {
-            geometry.scale.round().max(1.0)
-        };
-        if (self.render_scale - scale).abs() <= f64::EPSILON {
-            return;
-        }
-        self.render_scale = scale;
-        self.configure_surface();
-        self.needs_redraw = true;
-        eprintln!(
-            "[LinuxOverlay] entered output={} logical={:?} scale={scale:.3}",
-            info.name.as_deref().unwrap_or("unknown"),
-            info.logical_size,
+    fn update_output_geometry(&mut self) -> bool {
+        let output = self.target_output.as_ref().or(self.surface_output.as_ref());
+        let geometry = output
+            .and_then(|output| self.output_state.info(output))
+            .and_then(|info| output_geometry(&info));
+        let logical_size = geometry.map(|geometry| (geometry.rect.width, geometry.rect.height));
+        let mut changed = self.output_logical_size != logical_size;
+        self.output_logical_size = logical_size;
+        let scale = output_render_scale(
+            self.render_scale,
+            geometry.map(|geometry| geometry.scale),
+            self.viewporter.is_some(),
+            self.preferred_scale_received,
         );
+        if (self.render_scale - scale).abs() > f64::EPSILON {
+            self.render_scale = scale;
+            self.configure_surface();
+            changed = true;
+        }
+        changed
     }
 
     #[cfg(any(debug_assertions, feature = "telemetry"))]
@@ -864,6 +857,11 @@ impl Backend {
     }
 
     fn create_surface(&mut self, qh: &QueueHandle<Self>) -> Result<(), String> {
+        self.update_output_geometry();
+        if let Some(snapshot) = &self.snapshot {
+            self.margin = panel_margin(snapshot, self.requested_size, self.output_logical_size);
+        }
+        let input_passthrough = self.snapshot.as_deref().is_some_and(is_hidden);
         let layer = create_layer(
             &self.compositor,
             &self.layer_shell,
@@ -873,6 +871,10 @@ impl Backend {
             fallback_buffer_scale(self.render_scale, self.viewporter.is_some()),
             self.target_output.as_ref(),
         );
+        layer
+            .wl_surface()
+            .set_input_region(input_passthrough.then_some(self.empty_input_region.wl_region()));
+        layer.commit();
         self.viewport = self
             .viewporter
             .as_ref()
@@ -900,6 +902,7 @@ impl Backend {
         self.configured = false;
         self.needs_redraw = true;
         self.recreate_on_output = false;
+        self.input_passthrough = input_passthrough;
         Ok(())
     }
 
@@ -915,6 +918,9 @@ impl Backend {
         self.surface_config = None;
         self.layer = None;
         self.surface_output = None;
+        self.output_logical_size = None;
+        self.preferred_scale_received = false;
+        self.input_passthrough = false;
         self.configured = false;
         self.needs_redraw = false;
         self.next_repaint = None;
@@ -938,6 +944,22 @@ impl Backend {
             }
         }
         self.events.push(egui::Event::PointerGone);
+    }
+
+    fn set_input_passthrough(&mut self, passthrough: bool) {
+        if self.input_passthrough == passthrough {
+            return;
+        }
+        if passthrough {
+            self.reset_pointer_state();
+        }
+        if let Some(layer) = &self.layer {
+            layer
+                .wl_surface()
+                .set_input_region(passthrough.then_some(self.empty_input_region.wl_region()));
+            layer.commit();
+        }
+        self.input_passthrough = passthrough;
     }
 
     fn configure_surface(&mut self) {
@@ -1202,7 +1224,6 @@ fn create_layer(
     layer.set_size(size.0, size.1);
     layer.set_keyboard_interactivity(KeyboardInteractivity::None);
     layer.set_exclusive_zone(-1);
-    layer.commit();
     layer
 }
 
@@ -1308,12 +1329,6 @@ fn output_geometry(info: &OutputInfo) -> Option<OutputGeometry> {
     })
 }
 
-fn intersection_area(a: WindowRect, b: WindowRect) -> i64 {
-    let width = (a.left + a.width).min(b.left + b.width) - a.left.max(b.left);
-    let height = (a.top + a.height).min(b.top + b.height) - a.top.max(b.top);
-    i64::from(width.max(0)) * i64::from(height.max(0))
-}
-
 fn physical_size(logical: (u32, u32), scale: f64) -> (u32, u32) {
     (
         (f64::from(logical.0) * scale).ceil().max(1.0) as u32,
@@ -1412,9 +1427,6 @@ fn panel_size(snapshot: Option<&LinuxOverlaySnapshot>) -> (u32, u32) {
     let Some(snapshot) = snapshot else {
         return (DEGRADED_WIDTH as u32, DEGRADED_HEIGHT as u32);
     };
-    if is_hidden(snapshot) {
-        return (1, 1);
-    }
     if is_degraded(snapshot) {
         return (DEGRADED_WIDTH as u32, DEGRADED_HEIGHT as u32);
     }
@@ -1431,6 +1443,14 @@ fn panel_size(snapshot: Option<&LinuxOverlaySnapshot>) -> (u32, u32) {
     )
 }
 
+fn retained_panel_size(current: (u32, u32), snapshot: &LinuxOverlaySnapshot) -> (u32, u32) {
+    if is_hidden(snapshot) {
+        current
+    } else {
+        panel_size(Some(snapshot))
+    }
+}
+
 fn uses_manual_position(snapshot: &LinuxOverlaySnapshot) -> bool {
     snapshot.snap == "manual"
         || snapshot
@@ -1441,7 +1461,7 @@ fn uses_manual_position(snapshot: &LinuxOverlaySnapshot) -> bool {
 fn panel_margin(
     snapshot: &LinuxOverlaySnapshot,
     size: (u32, u32),
-    output_origin: (i32, i32),
+    output_logical_size: Option<(i32, i32)>,
 ) -> (i32, i32) {
     let snap = if uses_manual_position(snapshot) {
         "manual"
@@ -1451,18 +1471,21 @@ fn panel_margin(
     calculate_margin(
         snap,
         snapshot.position,
-        snapshot.window_snapshot.map(|window| window.rect),
+        output_logical_size.map(|(width, height)| WindowRect {
+            left: 0,
+            top: 0,
+            width,
+            height,
+        }),
         size,
-        output_origin,
     )
 }
 
 fn calculate_margin(
     snap: &str,
     position: Option<(i32, i32)>,
-    game_rect: Option<WindowRect>,
+    anchor_rect: Option<WindowRect>,
     size: (u32, u32),
-    output_origin: (i32, i32),
 ) -> (i32, i32) {
     let manual = || {
         let (x, y) = position.unwrap_or((DEFAULT_MARGIN, DEFAULT_MARGIN));
@@ -1471,11 +1494,9 @@ fn calculate_margin(
     if snap == "manual" {
         return manual();
     }
-    let Some(mut rect) = game_rect else {
+    let Some(rect) = anchor_rect else {
         return manual();
     };
-    rect.left -= output_origin.0;
-    rect.top -= output_origin.1;
     let right = (rect.left + rect.width - size.0 as i32 - SNAP_MARGIN).max(0);
     let bottom = (rect.top + rect.height - size.1 as i32 - SNAP_MARGIN).max(0);
     match snap {
@@ -1505,7 +1526,7 @@ impl CompositorHandler for Backend {
         {
             return;
         }
-        if self.target_output.is_none() && self.viewport.is_none() {
+        if self.viewport.is_none() {
             self.render_scale = f64::from(factor.max(1));
         }
         surface.set_buffer_scale(fallback_buffer_scale(
@@ -1544,26 +1565,25 @@ impl CompositorHandler for Backend {
     fn surface_enter(
         &mut self,
         _connection: &Connection,
-        _qh: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         surface: &wl_surface::WlSurface,
         output: &wl_output::WlOutput,
     ) {
-        if self.target_output.is_some()
-            || !self
-                .layer
-                .as_ref()
-                .is_some_and(|layer| layer.wl_surface() == surface)
+        if !self
+            .layer
+            .as_ref()
+            .is_some_and(|layer| layer.wl_surface() == surface)
         {
             return;
         }
         self.surface_output = Some(output.clone());
-        self.update_surface_scale(output);
+        self.refresh_output(qh);
     }
 
     fn surface_leave(
         &mut self,
         _connection: &Connection,
-        _qh: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         surface: &wl_surface::WlSurface,
         output: &wl_output::WlOutput,
     ) {
@@ -1574,6 +1594,7 @@ impl CompositorHandler for Backend {
             && self.surface_output.as_ref() == Some(output)
         {
             self.surface_output = None;
+            self.refresh_output(qh);
         }
     }
 }
@@ -1721,13 +1742,10 @@ impl OutputHandler for Backend {
         &mut self,
         _connection: &Connection,
         qh: &QueueHandle<Self>,
-        output: wl_output::WlOutput,
+        _output: wl_output::WlOutput,
     ) {
         #[cfg(any(debug_assertions, feature = "telemetry"))]
-        self.record_output_environment(&output);
-        if self.surface_output.as_ref() == Some(&output) {
-            self.update_surface_scale(&output);
-        }
+        self.record_output_environment(&_output);
         self.refresh_output(qh);
     }
 
@@ -1738,16 +1756,10 @@ impl OutputHandler for Backend {
         output: wl_output::WlOutput,
     ) {
         self.remove_toplevel_output(&output);
-        if self.target_output.as_ref() == Some(&output) {
-            self.target_output = None;
-            self.output_origin = (0, 0);
-            self.render_scale = 1.0;
-            self.drop_surface();
-            if let Err(error) = self.create_surface(qh) {
-                self.recreate_on_output = true;
-                eprintln!("[LinuxOverlay] output removal fallback failed: {error}");
-            }
+        if self.surface_output.as_ref() == Some(&output) {
+            self.surface_output = None;
         }
+        self.refresh_output(qh);
     }
 }
 
@@ -1794,8 +1806,10 @@ impl Dispatch<WpFractionalScaleV1, ()> for Backend {
         };
         let scale = f64::from(scale) / 120.0;
         if (state.render_scale - scale).abs() <= f64::EPSILON {
+            state.preferred_scale_received = true;
             return;
         }
+        state.preferred_scale_received = true;
         state.render_scale = scale;
         state.configure_surface();
         state.needs_redraw = true;
@@ -1823,7 +1837,7 @@ impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for Backend {
         event: zwlr_foreign_toplevel_manager_v1::Event,
         _: &(),
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
         match event {
             zwlr_foreign_toplevel_manager_v1::Event::Toplevel { toplevel } => {
@@ -1838,6 +1852,7 @@ impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for Backend {
                 }
                 state.foreign_toplevels.clear();
                 state.publish_presentation_observation();
+                state.refresh_output(qh);
             }
             _ => {}
         }
@@ -1855,7 +1870,7 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for Backend {
         event: zwlr_foreign_toplevel_handle_v1::Event,
         _: &(),
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
         let Some(index) = state
             .foreign_toplevels
@@ -1900,8 +1915,10 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for Backend {
             let toplevel = state.foreign_toplevels.remove(index);
             toplevel.handle.destroy();
             state.publish_presentation_observation();
+            state.refresh_output(qh);
         } else if publish {
             state.publish_presentation_observation();
+            state.refresh_output(qh);
         }
     }
 }
@@ -1924,10 +1941,10 @@ impl ProvidesRegistryState for Backend {
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_margin, intersection_area, overlay_props, panel_margin, panel_size,
-        parse_foreign_toplevel_states, physical_size, unique_matching_toplevel,
-        uses_manual_position, ForeignToplevelState, LinuxLayerOverlayHandle, LinuxOverlaySnapshot,
-        PublishedSnapshots,
+        calculate_margin, output_render_scale, overlay_props, panel_margin, panel_size,
+        parse_foreign_toplevel_states, physical_size, retained_panel_size, select_committed_output,
+        unique_matching_toplevel, uses_manual_position, ForeignToplevelState,
+        LinuxLayerOverlayHandle, LinuxOverlaySnapshot, PublishedSnapshots,
     };
     use overmax_core::{GameSessionState, SceneType};
     use overmax_data::{RecommendResult, RecordDB, RecordManager};
@@ -1947,46 +1964,43 @@ mod tests {
             height: 1080,
         };
         assert_eq!(
-            calculate_margin("bottom_right", None, Some(rect), (360, 380), (0, 0)),
+            calculate_margin("bottom_right", None, Some(rect), (360, 380)),
             (1544, 684)
         );
         assert_eq!(
             calculate_margin(
                 "bottom_right",
                 None,
-                Some(WindowRect { left: 1920, ..rect }),
+                Some(WindowRect {
+                    left: 0,
+                    top: 0,
+                    width: 2560,
+                    height: 1440,
+                }),
                 (360, 380),
-                (1920, 0),
             ),
-            (1544, 684)
+            (2184, 1044)
         );
         assert_eq!(
-            calculate_margin("manual", Some((-20, 30)), Some(rect), (360, 380), (0, 0)),
+            calculate_margin("manual", Some((-20, 30)), Some(rect), (360, 380)),
             (0, 30)
         );
         assert_eq!(panel_size(None), (320, 116));
     }
 
     #[test]
-    fn scales_fractional_buffers_and_selects_by_overlap() {
+    fn scales_fractional_buffers() {
         assert_eq!(physical_size((360, 380), 1.25), (450, 475));
-        assert_eq!(
-            intersection_area(
-                WindowRect {
-                    left: 1800,
-                    top: 0,
-                    width: 400,
-                    height: 300,
-                },
-                WindowRect {
-                    left: 1920,
-                    top: 0,
-                    width: 2560,
-                    height: 1440,
-                },
-            ),
-            84_000
-        );
+        assert_eq!(output_render_scale(1.0, Some(1.25), true, false), 1.25);
+        assert_eq!(output_render_scale(1.5, Some(1.25), true, true), 1.5);
+    }
+
+    #[test]
+    fn selects_only_unambiguous_committed_output() {
+        assert_eq!(select_committed_output(&[1], None), Some(&1));
+        assert_eq!(select_committed_output(&[1, 2], Some(&2)), Some(&2));
+        assert_eq!(select_committed_output(&[1, 2], Some(&3)), None);
+        assert_eq!(select_committed_output::<i32>(&[], Some(&1)), None);
     }
 
     #[test]
@@ -2071,17 +2085,18 @@ mod tests {
         background.window_snapshot = Some(WindowSnapshot {
             window: 7,
             rect: WindowRect {
-                left: 0,
-                top: 0,
+                left: -1920,
+                top: -200,
                 width: 1920,
                 height: 1080,
             },
             foreground: false,
             fullscreen: true,
         });
-        assert_eq!(panel_size(Some(&background)), (1, 1));
+        assert_eq!(panel_size(Some(&background)), (360, 406));
+        assert_eq!(retained_panel_size((420, 240), &background), (420, 240));
         background.window_snapshot.as_mut().unwrap().foreground = true;
-        assert_eq!(panel_size(Some(&background)), (1, 1));
+        assert_eq!(retained_panel_size((420, 240), &background), (420, 240));
         background.state.scene = SceneType::Freestyle;
         assert_eq!(panel_size(Some(&background)), (360, 406));
         background.window_snapshot.as_mut().unwrap().fullscreen = false;
@@ -2090,10 +2105,13 @@ mod tests {
         assert_eq!(panel_size(Some(&background)), (360, 406));
         assert!(uses_manual_position(&background));
         assert!(overlay_props(&background).is_snap_manual);
-        assert_eq!(panel_margin(&background, (360, 406), (0, 0)), (25, 35));
+        assert_eq!(panel_margin(&background, (360, 406), None), (25, 35));
         background.window_snapshot.as_mut().unwrap().fullscreen = true;
         assert!(!uses_manual_position(&background));
-        assert_eq!(panel_margin(&background, (360, 406), (0, 0)), (1544, 658));
+        assert_eq!(
+            panel_margin(&background, (360, 406), Some((1920, 1080))),
+            (1544, 658)
+        );
 
         let (mut reader, writer) = UnixStream::pair().expect("UnixStream pair");
         reader
