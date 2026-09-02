@@ -9,6 +9,7 @@ pub struct DetectionDeliveryTelemetry {
     pub generation: u64,
     pub generated_at: Instant,
     pub drained_at: Option<Instant>,
+    pub published_at: Option<Instant>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -61,6 +62,13 @@ struct RuntimeTelemetryState {
     publish_accepted: u32,
     last_published_generation: u64,
     drain_to_publish: TimingAggregator,
+    snapshots_applied: u32,
+    last_applied_generation: u64,
+    publish_to_apply: TimingAggregator,
+    last_applied: Option<(u64, Instant)>,
+    snapshots_presented: u32,
+    last_presented_generation: u64,
+    apply_to_present: TimingAggregator,
     window: Option<WindowObservation>,
 }
 
@@ -77,6 +85,10 @@ impl RuntimeTelemetryState {
         self.publish_calls = 0;
         self.publish_accepted = 0;
         self.drain_to_publish.reset();
+        self.snapshots_applied = 0;
+        self.publish_to_apply.reset();
+        self.snapshots_presented = 0;
+        self.apply_to_present.reset();
     }
 
     fn start_session(&mut self, now: Instant) {
@@ -133,6 +145,13 @@ impl RuntimeTelemetry {
                 publish_accepted: 0,
                 last_published_generation: 0,
                 drain_to_publish: TimingAggregator::default(),
+                snapshots_applied: 0,
+                last_applied_generation: 0,
+                publish_to_apply: TimingAggregator::default(),
+                last_applied: None,
+                snapshots_presented: 0,
+                last_presented_generation: 0,
+                apply_to_present: TimingAggregator::default(),
                 window: None,
             }),
         }
@@ -244,6 +263,7 @@ impl RuntimeTelemetry {
             generation,
             generated_at: now,
             drained_at: None,
+            published_at: None,
         }
     }
 
@@ -259,17 +279,46 @@ impl RuntimeTelemetry {
         }
     }
 
-    pub fn record_publish(&self, delivery: &DetectionDeliveryTelemetry, accepted: bool) {
+    pub fn record_publish(&self, delivery: &mut DetectionDeliveryTelemetry, accepted: bool) {
         let now = Instant::now();
         if let Ok(mut state) = self.state.lock() {
             state.publish_calls += 1;
             if !accepted {
                 return;
             }
+            delivery.published_at = Some(now);
             state.publish_accepted += 1;
             state.last_published_generation = delivery.generation;
             if let Some(drained_at) = delivery.drained_at {
                 state.drain_to_publish.update(elapsed_us(drained_at, now));
+            }
+        }
+    }
+
+    pub fn record_snapshot_applied(&self, delivery: &DetectionDeliveryTelemetry) {
+        let now = Instant::now();
+        if let Ok(mut state) = self.state.lock() {
+            state.snapshots_applied += 1;
+            state.last_applied_generation = delivery.generation;
+            state.last_applied = Some((delivery.generation, now));
+            if let Some(published_at) = delivery.published_at {
+                state.publish_to_apply.update(elapsed_us(published_at, now));
+            }
+        }
+    }
+
+    pub fn record_snapshot_presented(&self, delivery: &DetectionDeliveryTelemetry) {
+        let now = Instant::now();
+        if let Ok(mut state) = self.state.lock() {
+            if state.last_presented_generation == delivery.generation {
+                return;
+            }
+            state.snapshots_presented += 1;
+            state.last_presented_generation = delivery.generation;
+            if let Some((generation, applied_at)) = state.last_applied {
+                if generation == delivery.generation {
+                    state.apply_to_present.update(elapsed_us(applied_at, now));
+                }
             }
         }
     }
@@ -304,7 +353,7 @@ impl RuntimeTelemetry {
                 .as_ref()
                 .map_or_else(|| "pending".to_string(), format_output_environment);
             let line = format!(
-                "[TelemetryFlow] period={:.1}s capture={}/{}/{} time={}/{}/{} last_success_age={} generated={} last_output_gen={} drain={} last_gen={} latency={}/{} publish={}/{} last_gen={} latency={}/{} window={} output={}",
+                "[TelemetryFlow] period={:.1}s capture={}/{}/{} time={}/{}/{} last_success_age={} generated={} last_output_gen={} drain={} last_gen={} latency={}/{} publish={}/{} last_gen={} latency={}/{} apply={} last_gen={} latency={}/{} present={} last_gen={} latency={}/{} window={} output={}",
                 period.as_secs_f32(),
                 state.capture_attempts,
                 state.capture_successes,
@@ -324,6 +373,14 @@ impl RuntimeTelemetry {
                 state.last_published_generation,
                 format_duration_us(state.drain_to_publish.avg_us()),
                 format_duration_us(state.drain_to_publish.max_us),
+                state.snapshots_applied,
+                state.last_applied_generation,
+                format_duration_us(state.publish_to_apply.avg_us()),
+                format_duration_us(state.publish_to_apply.max_us),
+                state.snapshots_presented,
+                state.last_presented_generation,
+                format_duration_us(state.apply_to_present.avg_us()),
+                format_duration_us(state.apply_to_present.max_us),
                 window,
                 output,
             );
@@ -660,7 +717,10 @@ mod tests {
             .start_session(Instant::now());
         let mut delivery = telemetry.record_output_generated();
         telemetry.record_output_drained(&mut delivery);
-        telemetry.record_publish(&delivery, true);
+        telemetry.record_publish(&mut delivery, true);
+        telemetry.record_snapshot_applied(&delivery);
+        telemetry.record_snapshot_presented(&delivery);
+        telemetry.record_snapshot_presented(&delivery);
 
         let state = telemetry.state.lock().unwrap();
         assert_eq!(first.generation, 1);
@@ -668,6 +728,9 @@ mod tests {
         assert_eq!(state.outputs_generated, 1);
         assert_eq!(state.last_drained_generation, 2);
         assert_eq!(state.last_published_generation, 2);
+        assert_eq!(state.last_applied_generation, 2);
+        assert_eq!(state.last_presented_generation, 2);
+        assert_eq!(state.snapshots_presented, 1);
         assert_eq!(percentile_95(&[10, 20, 30, 40, 50]), 50);
     }
 

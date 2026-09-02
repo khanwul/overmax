@@ -163,13 +163,29 @@ fn initialize_winrt(_log_tx: &Sender<String>) {}
 
 #[derive(Clone, PartialEq)]
 struct RepaintFingerprint {
+    state: GameSessionState,
     game_rect: Option<crate::capture::window_tracker::WindowRect>,
-    is_fullscreen: bool,
+    window_snapshot: Option<crate::capture::window_tracker::WindowSnapshot>,
     current_song_id: Option<i32>,
     is_song_select: bool,
     scene_detected: bool,
     jacket_status: JacketMatchStatus,
     capture_fatal: Option<String>,
+}
+
+impl From<&DetectionOutput> for RepaintFingerprint {
+    fn from(output: &DetectionOutput) -> Self {
+        Self {
+            state: output.state.clone(),
+            game_rect: output.game_rect,
+            window_snapshot: output.window_snapshot,
+            current_song_id: output.current_song_id,
+            is_song_select: output.is_song_select,
+            scene_detected: output.scene_detected,
+            jacket_status: output.jacket_status.clone(),
+            capture_fatal: output.capture_fatal.clone(),
+        }
+    }
 }
 
 struct DetectionWorker {
@@ -415,15 +431,7 @@ impl DetectionWorker {
                 self.log_detection_summary(&out);
                 self.check_and_log_scene_transition(&out);
 
-                let fingerprint = RepaintFingerprint {
-                    game_rect: out.game_rect,
-                    is_fullscreen: out.state.is_fullscreen,
-                    current_song_id: out.current_song_id,
-                    is_song_select: out.is_song_select,
-                    scene_detected: out.scene_detected,
-                    jacket_status: out.jacket_status.clone(),
-                    capture_fatal: out.capture_fatal.clone(),
-                };
+                let fingerprint = RepaintFingerprint::from(&out);
 
                 let state_changed = self.last_fingerprint.as_ref() != Some(&fingerprint);
                 if state_changed {
@@ -590,15 +598,7 @@ impl DetectionWorker {
                 out.state.is_fullscreen = snapshot.fullscreen;
                 self.log_detection_summary(&out);
 
-                let fingerprint = RepaintFingerprint {
-                    game_rect: out.game_rect,
-                    is_fullscreen: out.state.is_fullscreen,
-                    current_song_id: out.current_song_id,
-                    is_song_select: out.is_song_select,
-                    scene_detected: out.scene_detected,
-                    jacket_status: out.jacket_status.clone(),
-                    capture_fatal: out.capture_fatal.clone(),
-                };
+                let fingerprint = RepaintFingerprint::from(&out);
 
                 let state_changed = self.last_fingerprint.as_ref() != Some(&fingerprint);
                 if state_changed {
@@ -1059,7 +1059,7 @@ impl WindowQueryScheduler {
 mod tests {
     use super::{
         capture_target_resized, effective_focus, DetectionPipeline, DetectionWorker,
-        LinuxFocusLoss, LinuxFocusPolicy, LinuxTickResult,
+        JacketMatchStatus, LinuxFocusLoss, LinuxFocusPolicy, LinuxTickResult, RepaintFingerprint,
     };
     use crate::capture::capture_engine::{CaptureEngine, CaptureErrorAction};
     use crate::capture::frame::CapturedFrame;
@@ -1067,6 +1067,7 @@ mod tests {
         FocusObservation, FocusSource, FocusState, PresentationObservation, WindowRect,
         WindowSnapshot,
     };
+    use overmax_core::{Difficulty, GameSessionState, Mode, PlayContext, SceneType};
     use overmax_data::{ImageIndexDb, Settings};
     use std::sync::mpsc;
 
@@ -1105,6 +1106,56 @@ mod tests {
         fn error_action(&self) -> CaptureErrorAction {
             self.0
         }
+    }
+
+    #[test]
+    fn repaint_fingerprint_tracks_session_context_without_heartbeats() {
+        let base = RepaintFingerprint {
+            state: GameSessionState {
+                scene: SceneType::Freestyle,
+                context: Some(PlayContext {
+                    song_id: 1,
+                    mode: Mode::B4,
+                    diff: Difficulty::NM,
+                    rate: 99.0,
+                    is_max_combo: false,
+                }),
+                is_stable: false,
+                is_fullscreen: false,
+            },
+            game_rect: None,
+            window_snapshot: None,
+            current_song_id: Some(1),
+            is_song_select: true,
+            scene_detected: true,
+            jacket_status: JacketMatchStatus::NotSongSelect,
+            capture_fatal: None,
+        };
+        assert!(base == base.clone());
+
+        let mut variants = std::array::from_fn::<_, 6, _>(|_| base.state.clone());
+        variants[0].scene = SceneType::Online;
+        variants[1].is_stable = true;
+        variants[2].context.as_mut().unwrap().mode = Mode::B5;
+        variants[3].context.as_mut().unwrap().diff = Difficulty::HD;
+        variants[4].context.as_mut().unwrap().rate = 99.5;
+        variants[5].context.as_mut().unwrap().is_max_combo = true;
+
+        assert!(variants.into_iter().all(|state| RepaintFingerprint {
+            state,
+            ..base.clone()
+        } != base));
+
+        let mut foreground = base;
+        foreground.window_snapshot = Some(snapshot(WindowRect {
+            left: 0,
+            top: 0,
+            width: 1920,
+            height: 1080,
+        }));
+        let mut background = foreground.clone();
+        background.window_snapshot.as_mut().unwrap().foreground = false;
+        assert!(foreground != background);
     }
 
     #[test]

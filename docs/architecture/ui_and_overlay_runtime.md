@@ -125,3 +125,6 @@ Linux 환경에서는 표준 X11 창 띄우기 방식 대신 Wayland 네이티�
 3. **Optional foreign-toplevel 표시 상태**:
    * 동일한 Wayland 연결에서 `zwlr_foreign_toplevel_manager_v1`을 capability 기반으로 bind하고, 설정된 게임 제목과 완전 일치하는 단일 handle의 `done` 단위 activated/fullscreen 상태만 commit한다.
    * primitive 관찰값만 detection worker와 공유한다. protocol 부재, 중복 title, target close, manager 종료는 오류가 아니라 기존 X11/EWMH 3-state fallback으로 처리하며 Wayland proxy와 output 집합은 layer 스레드 밖으로 전달하지 않는다.
+4. **상태 변경 wake와 latest-snapshot 전달**:
+   * detection worker는 전체 `GameSessionState`와 engine-owned 표시 상태가 바뀔 때만 hidden eframe root를 깨운다. app은 기존 `same_display_snapshot` 비교를 거친 최신 snapshot만 non-blocking `UnixStream`으로 layer 스레드에 알린다.
+   * debug/telemetry 빌드에서는 detection generation을 app drain, accepted publish, layer apply, present까지 이어 기록한다. 일반 release 빌드에는 이 계측 호출이 포함되지 않는다.

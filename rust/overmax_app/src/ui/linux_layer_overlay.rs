@@ -116,7 +116,8 @@ struct LastPublishedSnapshot {
 }
 
 impl LinuxLayerOverlayHandle {
-    pub fn publish(&self, snapshot: LinuxOverlaySnapshot) {
+    #[allow(unused_mut)]
+    pub fn publish(&self, mut snapshot: LinuxOverlaySnapshot) {
         let settings_open = snapshot.settings_open.load(Ordering::Relaxed);
         let sync_open = snapshot.sync_open.load(Ordering::Relaxed);
         let Ok(mut published) = self.published.lock() else {
@@ -146,7 +147,7 @@ impl LinuxLayerOverlayHandle {
             #[cfg(any(debug_assertions, feature = "telemetry"))]
             if new_delivery {
                 if let (Some(telemetry), Some(delivery)) =
-                    (&self.runtime_telemetry, &snapshot.delivery_telemetry)
+                    (&self.runtime_telemetry, &mut snapshot.delivery_telemetry)
                 {
                     telemetry.record_publish(delivery, false);
                 }
@@ -154,9 +155,13 @@ impl LinuxLayerOverlayHandle {
             return;
         }
         #[cfg(any(debug_assertions, feature = "telemetry"))]
+        if !new_delivery {
+            snapshot.delivery_telemetry = None;
+        }
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
         if new_delivery {
             if let (Some(telemetry), Some(delivery)) =
-                (&self.runtime_telemetry, &snapshot.delivery_telemetry)
+                (&self.runtime_telemetry, &mut snapshot.delivery_telemetry)
             {
                 telemetry.record_publish(delivery, true);
             }
@@ -689,6 +694,12 @@ impl Backend {
     }
 
     fn apply_snapshot(&mut self, snapshot: Arc<LinuxOverlaySnapshot>, qh: &QueueHandle<Self>) {
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        if let (Some(telemetry), Some(delivery)) =
+            (&self.runtime_telemetry, &snapshot.delivery_telemetry)
+        {
+            telemetry.record_snapshot_applied(delivery);
+        }
         let size = panel_size(Some(&snapshot));
         let size_changed = self.requested_size != size;
         let output_changed = self.select_output(snapshot.window_snapshot.map(|window| window.rect));
@@ -1075,6 +1086,15 @@ impl Backend {
                 .chain(std::iter::once(encoder.finish())),
         );
         self.queue.present(frame);
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        if let (Some(telemetry), Some(delivery)) = (
+            &self.runtime_telemetry,
+            self.snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.delivery_telemetry.as_ref()),
+        ) {
+            telemetry.record_snapshot_presented(delivery);
+        }
         Ok(())
     }
 
