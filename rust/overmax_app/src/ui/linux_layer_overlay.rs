@@ -754,10 +754,11 @@ impl Backend {
             self.reset_pointer_state();
         }
         self.set_input_passthrough(hidden);
+        if size_changed {
+            self.logical_size = size;
+            self.configure_surface();
+        }
         if let Some(layer) = &self.layer {
-            if size_changed {
-                self.configured = false;
-            }
             layer.set_size(size.0, size.1);
             if let Some(viewport) = &self.viewport {
                 viewport.set_destination(size.0 as i32, size.1 as i32);
@@ -2099,6 +2100,7 @@ mod tests {
         assert_eq!(retained_panel_size((420, 240), &background), (420, 240));
         background.state.scene = SceneType::Freestyle;
         assert_eq!(panel_size(Some(&background)), (360, 406));
+        assert_eq!(retained_panel_size((420, 240), &background), (360, 406));
         background.window_snapshot.as_mut().unwrap().fullscreen = false;
         background.snap = "bottom_right".to_string();
         background.position = Some((25, 35));
