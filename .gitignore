@@ -111,3 +111,10 @@ test/.csv_cache/
 # Profiling outputs
 profile.json.gz
 
+# Certificates & Packages
+*.pfx
+*.cer
+*.msix
+*.appx
+*.msixbundle
+
