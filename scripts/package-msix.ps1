@@ -130,8 +130,9 @@ try {
         throw "Failed to extract version from Cargo.toml"
     }
     $rawVersion = $versionMatch.Matches.Groups[1].Value
-    # Convert semver (e.g. 0.4.0) to 4-part MSIX version (0.4.0.0)
-    $versionParts = $rawVersion.Split('.')
+    # Convert semver (e.g. 0.4.0 or 0.4.1-preview1) to 4-part MSIX version (0.4.1.0)
+    $cleanVersion = ($rawVersion -split '-')[0]
+    $versionParts = $cleanVersion.Split('.')
     while ($versionParts.Count -lt 4) {
         $versionParts += "0"
     }

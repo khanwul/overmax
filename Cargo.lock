@@ -2786,7 +2786,7 @@ dependencies = [
 
 [[package]]
 name = "overmax-app"
-version = "0.4.0"
+version = "0.4.1-preview1"
 dependencies = [
  "eframe",
  "egui",
@@ -2818,7 +2818,7 @@ dependencies = [
 
 [[package]]
 name = "overmax-core"
-version = "0.4.0"
+version = "0.4.1-preview1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2826,7 +2826,7 @@ dependencies = [
 
 [[package]]
 name = "overmax-data"
-version = "0.4.0"
+version = "0.4.1-preview1"
 dependencies = [
  "clap",
  "image",
@@ -2846,7 +2846,7 @@ dependencies = [
 
 [[package]]
 name = "overmax-engine"
-version = "0.4.0"
+version = "0.4.1-preview1"
 dependencies = [
  "image",
  "memmap2",
@@ -2862,7 +2862,7 @@ dependencies = [
 
 [[package]]
 name = "overmax_cv"
-version = "0.4.0"
+version = "0.4.1-preview1"
 
 [[package]]
 name = "parking"
