@@ -21,6 +21,19 @@ Overmax의 Microsoft Store(Windows App Store) 등록, 심사 통과(Certificatio
      .\scripts\package-msix.ps1 -PackageName "<Your-Package-Name>" -Publisher "<Your-Publisher-ID>" -PublisherDisplayName "<Your-PublisherDisplayName>"
      ```
 
+### 💡 MSIX 패키지 버전 번호 매핑 규격 (Version Mapping Policy)
+
+Windows AppX / MSIX의 `<Identity Version="Major.Minor.Build.Revision"/>` 스펙은 **정수 4자리(0~65535)**만 허용하며, 인앱 및 스토어 업데이트는 이전 버전보다 숫자가 더 커야만 승인/적용됩니다.
+따라서 Overmax의 SemVer와 MSIX 패키지 버전은 다음과 같이 매핑합니다:
+
+| 빌드 유형 | SemVer (`Cargo.toml`) | MSIX 버전 (`Identity Version`) | 비고 |
+| :--- | :--- | :--- | :--- |
+| **프리뷰 빌드** | `X.Y.Z-preview<N>` (예: `0.4.1-preview1`) | `X.Y.Z.<N>` (예: `0.4.1.1`) | Revision 자리에 프리뷰 번호 `<N>` 반영 |
+| **정식 릴리즈** | `X.Y.Z` (예: `0.4.1`) | `X.Y.Z.100` (예: `0.4.1.100`) | 정식 배포 시 Revision을 `.100`으로 고정 |
+
+- **업데이트 흐름**: `0.4.1.1` (preview1) ➔ `0.4.1.2` (preview2) ➔ `0.4.1.100` (정식 v0.4.1). 정식 릴리즈의 Revision(100)이 항상 프리뷰 번호보다 크므로, 프리뷰를 설치했던 플레이어도 정식 버전 출시 시 매끄럽게 자동 업그레이드됩니다.
+- 이 변환은 [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1)에서 자동 처리됩니다.
+
 ---
 
 ## 2. 스토어 등록 메타데이터 (Store Listings)
