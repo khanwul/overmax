@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Overmax MSIX Packaging & Local Sideloading Script
 
@@ -187,12 +187,18 @@ try {
     }
 
     $manifest = Get-Content -Path $templatePath -Raw -Encoding UTF8
-    $manifest = $manifest.Replace("{{PACKAGE_NAME}}", $PackageName)
-    $manifest = $manifest.Replace("{{PACKAGE_PUBLISHER}}", $Publisher)
-    $manifest = $manifest.Replace("{{PACKAGE_VERSION}}", $msixVersion)
-    $manifest = $manifest.Replace("{{PACKAGE_DISPLAY_NAME}}", $PackageDisplayName)
-    $manifest = $manifest.Replace("{{PUBLISHER_DISPLAY_NAME}}", $PublisherDisplayName)
-    $manifest = $manifest.Replace("{{PACKAGE_DESCRIPTION}}", $PackageDescription)
+    
+    function Escape-XmlText([string]$str) {
+        if (-not $str) { return "" }
+        return [System.Security.SecurityElement]::Escape($str)
+    }
+
+    $manifest = $manifest.Replace("{{PACKAGE_NAME}}", (Escape-XmlText $PackageName))
+    $manifest = $manifest.Replace("{{PACKAGE_PUBLISHER}}", (Escape-XmlText $Publisher))
+    $manifest = $manifest.Replace("{{PACKAGE_VERSION}}", (Escape-XmlText $msixVersion))
+    $manifest = $manifest.Replace("{{PACKAGE_DISPLAY_NAME}}", (Escape-XmlText $PackageDisplayName))
+    $manifest = $manifest.Replace("{{PUBLISHER_DISPLAY_NAME}}", (Escape-XmlText $PublisherDisplayName))
+    $manifest = $manifest.Replace("{{PACKAGE_DESCRIPTION}}", (Escape-XmlText $PackageDescription))
 
     $manifestDest = Join-Path $stagingDir "AppxManifest.xml"
     [System.IO.File]::WriteAllText($manifestDest, $manifest, [System.Text.Encoding]::UTF8)
@@ -213,9 +219,11 @@ try {
     # 6. Signing (Optional or when Installing)
     if ($Sign -or $Install) {
         $pfxPath = $CertPath
+        $pfxDir = Join-Path $repoRoot "packaging\msix"
+        $cerPath = Join-Path $pfxDir "OvermaxDev.cer"
+
         if (-not $pfxPath) {
             # Check or create default dev certificate
-            $pfxDir = Join-Path $repoRoot "packaging\msix"
             $pfxPath = Join-Path $pfxDir "OvermaxDev.pfx"
             if (-not (Test-Path $pfxPath)) {
                 Write-Host "Creating self-signed development certificate for '$Publisher'..."
@@ -230,14 +238,29 @@ try {
                     -NotAfter (Get-Date).AddYears(5)
                 
                 Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $secPass | Out-Null
-                Write-Host "Exported dev certificate to $pfxPath"
+                Export-Certificate -Cert $cert -FilePath $cerPath -Force | Out-Null
+                Write-Host "Exported dev certificate to $pfxPath and $cerPath"
 
-                # Ensure it is trusted locally in TrustedPeople for sideloading
-                $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("TrustedPeople", "CurrentUser")
-                $store.Open("ReadWrite")
-                $store.Add($cert)
-                $store.Close()
-                Write-Host "Added dev certificate to CurrentUser\TrustedPeople store."
+                # Check if running as administrator to register in LocalMachine
+                $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+                if ($isAdmin) {
+                    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("TrustedPeople", "LocalMachine")
+                    $store.Open("ReadWrite")
+                    $store.Add($cert)
+                    $store.Close()
+                    Write-Host "Registered dev certificate to LocalMachine\TrustedPeople store."
+                } else {
+                    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("TrustedPeople", "CurrentUser")
+                    $store.Open("ReadWrite")
+                    $store.Add($cert)
+                    $store.Close()
+                    Write-Host "Registered dev certificate to CurrentUser\TrustedPeople store."
+                }
+            } elseif (-not (Test-Path $cerPath)) {
+                $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*$Publisher*" } | Select-Object -First 1
+                if ($cert) {
+                    Export-Certificate -Cert $cert -FilePath $cerPath -Force | Out-Null
+                }
             }
         }
 
@@ -258,14 +281,34 @@ try {
             Write-Host "Removing existing version $($existing.PackageFullName)..."
             Remove-AppxPackage -Package $existing.PackageFullName
         }
-        Add-AppxPackage -Path $msixOutput
-        Write-Host "Successfully sideloaded $PackageName!"
-        
-        $installed = Get-AppxPackage -Name $PackageName
-        if ($installed) {
-            Write-Host "Installed Details:"
-            Write-Host "  PackageFullName: $($installed.PackageFullName)"
-            Write-Host "  InstallLocation: $($installed.InstallLocation)"
+
+        try {
+            Add-AppxPackage -Path $msixOutput -ErrorAction Stop
+            Write-Host "Successfully sideloaded $PackageName!"
+            
+            $installed = Get-AppxPackage -Name $PackageName
+            if ($installed) {
+                Write-Host "Installed Details:"
+                Write-Host "  PackageFullName: $($installed.PackageFullName)"
+                Write-Host "  InstallLocation: $($installed.InstallLocation)"
+            }
+        } catch {
+            $err = $_
+            Write-Warning "Failed to install MSIX package: $err"
+            Write-Host ""
+            Write-Host "============================================================" -ForegroundColor Yellow
+            Write-Host " [Sideloading Note: Untrusted Root Certificate (0x800B0109)]" -ForegroundColor Yellow
+            Write-Host " Windows requires self-signed packages to be trusted in" -ForegroundColor Yellow
+            Write-Host " 'LocalMachine\TrustedPeople' before sideloading." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host " To trust this dev certificate on your system:" -ForegroundColor Yellow
+            Write-Host " 1. Run PowerShell as Administrator, then execute:" -ForegroundColor Cyan
+            Write-Host "    Import-Certificate -FilePath '$pfxDir\OvermaxDev.cer' -CertStoreLocation Cert:\LocalMachine\TrustedPeople" -ForegroundColor Cyan
+            Write-Host " 2. Re-run:" -ForegroundColor Cyan
+            Write-Host "    .\scripts\package-msix.ps1 -SkipBuild -Sign -Install" -ForegroundColor Cyan
+            Write-Host "============================================================" -ForegroundColor Yellow
+            Write-Host ""
+            throw $err
         }
     }
 
