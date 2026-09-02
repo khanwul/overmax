@@ -73,7 +73,7 @@ pub fn init_overlay_window_immediate() -> Option<isize> {
 
 pub fn native_options(settings: &overmax_data::Settings) -> eframe::NativeOptions {
     let _ = settings;
-    eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
             .with_title("Overmax")
             .with_inner_size([2.0, 1.0])
@@ -86,7 +86,13 @@ pub fn native_options(settings: &overmax_data::Settings) -> eframe::NativeOption
             .with_taskbar(false)
             .with_mouse_passthrough(true),
         ..Default::default()
-    }
+    };
+    options.event_loop_builder = Some(Box::new(|builder| {
+        use winit::platform::x11::EventLoopBuilderExtX11;
+
+        builder.with_x11();
+    }));
+    options
 }
 
 pub struct PlatformState {
