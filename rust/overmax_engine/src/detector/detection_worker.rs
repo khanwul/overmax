@@ -10,6 +10,7 @@ use crate::capture::window_tracker::WindowTracker;
 use crate::detector::detection_pipeline::{
     DetectionOutput, DetectionPipeline, JacketMatchStatus, SleepHint,
 };
+use crate::detector::telemetry::RuntimeTelemetry;
 use overmax_core::GameSessionState;
 use overmax_data::{DataCompatibility, ImageIndexDb, Settings};
 use std::path::{Path, PathBuf};
@@ -38,6 +39,7 @@ fn capture_target_resized(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn spawn(
     root: PathBuf,
     settings: Settings,
@@ -45,6 +47,7 @@ pub fn spawn(
     log_tx: Sender<String>,
     game_found_tx: Sender<()>,
     detection_tx: Sender<DetectionOutput>,
+    runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
     repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
 ) {
     std::thread::spawn(move || {
@@ -56,6 +59,7 @@ pub fn spawn(
             log_tx,
             game_found_tx,
             detection_tx,
+            runtime_telemetry,
             repaint_callback,
         );
         worker.run();
@@ -73,24 +77,6 @@ fn initialize_winrt(log_tx: &Sender<String>) {
 
 #[cfg(not(target_os = "windows"))]
 fn initialize_winrt(_log_tx: &Sender<String>) {}
-
-fn current_timestamp_str() -> String {
-    let now = std::time::SystemTime::now();
-    let duration = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = duration.as_secs();
-    let millis = duration.subsec_millis();
-
-    // UTC+9 (KST) 시각 산출
-    let total_secs = secs + 9 * 3600;
-    let time_in_day = total_secs % 86400;
-    let hours = time_in_day / 3600;
-    let minutes = (time_in_day % 3600) / 60;
-    let seconds = time_in_day % 60;
-
-    format!("{hours:02}:{minutes:02}:{seconds:02}.{millis:03}")
-}
 
 #[derive(Clone, PartialEq)]
 struct RepaintFingerprint {
@@ -111,6 +97,8 @@ struct DetectionWorker {
     log_tx: Sender<String>,
     game_found_tx: Sender<()>,
     detection_tx: Sender<DetectionOutput>,
+    #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+    runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
     start: Instant,
     last_window_log: Instant,
     last_detection_log: Instant,
@@ -119,6 +107,7 @@ struct DetectionWorker {
     repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
     last_fingerprint: Option<RepaintFingerprint>,
     last_sleep_hint: SleepHint,
+    #[cfg(target_os = "windows")]
     last_scene_type: overmax_core::SceneType,
     frame_buffer: CapturedFrame,
     window_scheduler: WindowQueryScheduler,
@@ -129,6 +118,7 @@ struct DetectionWorker {
 }
 
 impl DetectionWorker {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         root: PathBuf,
         settings: Settings,
@@ -136,6 +126,7 @@ impl DetectionWorker {
         log_tx: Sender<String>,
         game_found_tx: Sender<()>,
         detection_tx: Sender<DetectionOutput>,
+        runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
         repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
     ) -> Self {
         let telemetry_log_path = root.join("cache").join("telemetry.log");
@@ -143,6 +134,8 @@ impl DetectionWorker {
         if (cfg!(debug_assertions) || cfg!(feature = "telemetry")) && telemetry_log_path.exists() {
             let _ = std::fs::rename(&telemetry_log_path, &prev_log_path);
         }
+        #[cfg(not(all(target_os = "linux", any(debug_assertions, feature = "telemetry"))))]
+        let _ = runtime_telemetry;
         Self {
             root,
             telemetry_log_path,
@@ -151,6 +144,8 @@ impl DetectionWorker {
             log_tx,
             game_found_tx,
             detection_tx,
+            #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+            runtime_telemetry,
             start: Instant::now(),
             last_window_log: Instant::now() - LOG_INTERVAL,
             last_detection_log: Instant::now() - LOG_INTERVAL,
@@ -159,6 +154,7 @@ impl DetectionWorker {
             repaint_callback,
             last_fingerprint: None,
             last_sleep_hint: SleepHint::Relaxed,
+            #[cfg(target_os = "windows")]
             last_scene_type: overmax_core::SceneType::Unknown,
             frame_buffer: CapturedFrame {
                 width: 0,
@@ -198,6 +194,10 @@ impl DetectionWorker {
         self.log("[Detection] Pure Rust Native Engine initialized".to_string());
 
         loop {
+            #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+            if let Some(telemetry) = &self.runtime_telemetry {
+                telemetry.maybe_log();
+            }
             self.sync_live_settings(&mut capturer);
             #[cfg(target_os = "windows")]
             self.tick(&tracker, &mut capturer, &mut pipeline);
@@ -354,7 +354,33 @@ impl DetectionWorker {
         let mut overlay_snapshot_changed = false;
         if self.window_scheduler.should_query() {
             let previous_snapshot = self.window_snapshot;
-            let snapshot = match tracker.game_snapshot() {
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
+            let snapshot_result =
+                tracker
+                    .game_snapshot_with_telemetry()
+                    .map(|(snapshot, focus_telemetry)| {
+                        if let (Some(telemetry), Some(snapshot), Some(focus)) =
+                            (&self.runtime_telemetry, snapshot, focus_telemetry)
+                        {
+                            telemetry.record_window_observation(
+                                focus.target_xid,
+                                focus.active_xid,
+                                focus.active_in_client_list,
+                                (
+                                    snapshot.rect.left,
+                                    snapshot.rect.top,
+                                    snapshot.rect.width,
+                                    snapshot.rect.height,
+                                ),
+                                snapshot.foreground,
+                                snapshot.fullscreen,
+                            );
+                        }
+                        snapshot
+                    });
+            #[cfg(not(any(debug_assertions, feature = "telemetry")))]
+            let snapshot_result = tracker.game_snapshot();
+            let snapshot = match snapshot_result {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     self.on_capture_fatal(pipeline, format!("window tracking failed: {error}"));
@@ -376,6 +402,13 @@ impl DetectionWorker {
                 snapshot.is_some_and(|s| s.foreground),
             );
             self.window_snapshot = snapshot;
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
+            if snapshot.is_some() && !self.was_found {
+                self.roll_telemetry_log();
+                if let Some(telemetry) = &self.runtime_telemetry {
+                    telemetry.start_session();
+                }
+            }
 
             if capture_state_changed {
                 self.capture_failure_active = false;
@@ -401,6 +434,10 @@ impl DetectionWorker {
         if !self.on_window_found(snapshot.rect, snapshot.foreground) {
             return LinuxTickResult::Continue;
         }
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        if let Some(telemetry) = &self.runtime_telemetry {
+            telemetry.record_capture_attempt();
+        }
         let cap_start = Instant::now();
         let cap_res = capturer.capture_bgra_inplace(snapshot.rect, &mut self.frame_buffer);
         let cap_elapsed = cap_start.elapsed().as_micros() as u64;
@@ -408,6 +445,10 @@ impl DetectionWorker {
 
         match cap_res {
             Ok(()) => {
+                #[cfg(any(debug_assertions, feature = "telemetry"))]
+                if let Some(telemetry) = &self.runtime_telemetry {
+                    telemetry.record_capture_success(cap_elapsed);
+                }
                 self.capture_failure_active = false;
                 let detect_start = Instant::now();
                 let mut out =
@@ -440,12 +481,16 @@ impl DetectionWorker {
                 }
 
                 self.last_sleep_hint = out.sleep_hint;
-                let _ = self.detection_tx.send(out);
+                self.send_detection_output(out);
                 if state_changed || overlay_snapshot_changed {
                     self.request_repaint();
                 }
             }
             Err(error) => {
+                #[cfg(any(debug_assertions, feature = "telemetry"))]
+                if let Some(telemetry) = &self.runtime_telemetry {
+                    telemetry.record_capture_failure();
+                }
                 return self.handle_linux_capture_error(capturer.as_ref(), pipeline, error);
             }
         }
@@ -500,6 +545,8 @@ impl DetectionWorker {
             stable_hits: 0,
             sleep_hint: SleepHint::Relaxed,
             telemetry_snapshot: None,
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
+            delivery_telemetry: None,
         }
     }
 
@@ -510,7 +557,7 @@ impl DetectionWorker {
             return;
         }
         self.capture_failure_active = true;
-        let _ = self.detection_tx.send(self.linux_detecting_output(None));
+        self.send_detection_output(self.linux_detecting_output(None));
         self.request_repaint();
         self.log(format!("[Detection] {reason}; state reset"));
     }
@@ -518,9 +565,7 @@ impl DetectionWorker {
     #[cfg(target_os = "linux")]
     fn on_capture_fatal(&mut self, pipeline: &mut DetectionPipeline, error: String) {
         pipeline.reset();
-        let _ = self
-            .detection_tx
-            .send(self.linux_detecting_output(Some(error.clone())));
+        self.send_detection_output(self.linux_detecting_output(Some(error.clone())));
         self.request_repaint();
         self.log(format!("[Detection] capture unavailable: {error}"));
     }
@@ -551,6 +596,7 @@ impl DetectionWorker {
         foreground: bool,
     ) -> bool {
         if !self.was_found {
+            #[cfg(not(all(target_os = "linux", any(debug_assertions, feature = "telemetry"))))]
             self.roll_telemetry_log();
             let _ = self.game_found_tx.send(());
             self.request_repaint();
@@ -595,6 +641,8 @@ impl DetectionWorker {
                 stable_hits: 0,
                 sleep_hint: SleepHint::Relaxed,
                 telemetry_snapshot: None,
+                #[cfg(any(debug_assertions, feature = "telemetry"))]
+                delivery_telemetry: None,
             });
             self.request_repaint();
             self.log("[WindowTracker] game window lost".into());
@@ -674,6 +722,7 @@ impl DetectionWorker {
         self.append_to_telemetry_log(&msg);
     }
 
+    #[cfg(target_os = "windows")]
     fn check_and_log_scene_transition(&mut self, out: &DetectionOutput) {
         let current_scene = out.state.scene;
         if self.last_scene_type != current_scene {
@@ -713,9 +762,19 @@ impl DetectionWorker {
             .append(true)
             .open(&self.telemetry_log_path)
         {
-            let ts = current_timestamp_str();
+            let ts = crate::detector::telemetry::current_timestamp_str();
             let _ = writeln!(f, "[{ts}] {line}");
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[allow(unused_mut)]
+    fn send_detection_output(&self, mut output: DetectionOutput) {
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        if let Some(telemetry) = &self.runtime_telemetry {
+            output.delivery_telemetry = Some(telemetry.record_output_generated());
+        }
+        let _ = self.detection_tx.send(output);
     }
 
     fn log(&self, message: String) {
@@ -944,6 +1003,7 @@ mod tests {
             log_tx,
             game_tx,
             detection_tx,
+            None,
             Box::new(|| {}),
         );
         let mut pipeline = DetectionPipeline::new(ImageIndexDb::new("missing.db", 0.6));
@@ -973,6 +1033,7 @@ mod tests {
             log_tx,
             game_tx,
             detection_tx,
+            None,
             Box::new(|| {}),
         );
         let mut pipeline = DetectionPipeline::new(ImageIndexDb::new("missing.db", 0.6));

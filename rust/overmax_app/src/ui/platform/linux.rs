@@ -99,6 +99,7 @@ impl PlatformState {
         _settings: &Arc<Mutex<Value>>,
         command_tx: &Sender<UiCommand>,
         _initial_hwnd: Option<isize>,
+        runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
     ) -> Result<Self, String> {
         let ctx_holder_clone = ctx_holder.clone();
         let repaint = Arc::new(move || {
@@ -109,7 +110,8 @@ impl PlatformState {
             }
         });
 
-        let linux_overlay = crate::ui::linux_layer_overlay::spawn(command_tx.clone(), repaint)?;
+        let linux_overlay =
+            crate::ui::linux_layer_overlay::spawn(command_tx.clone(), repaint, runtime_telemetry)?;
 
         Ok(Self { linux_overlay })
     }

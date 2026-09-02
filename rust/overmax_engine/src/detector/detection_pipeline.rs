@@ -53,6 +53,8 @@ pub struct DetectionOutput {
     pub stable_hits: u32,
     pub sleep_hint: SleepHint,
     pub telemetry_snapshot: Option<PipelineTelemetrySnapshot>,
+    #[cfg(any(debug_assertions, feature = "telemetry"))]
+    pub delivery_telemetry: Option<crate::detector::telemetry::DetectionDeliveryTelemetry>,
 }
 
 /// 씬 폴링 파싱 실패 시의 원인 진단 정보 (텔레메트리 수집용)
@@ -461,6 +463,8 @@ impl DetectionPipeline {
             stable_hits: self.play_state.stable_hits(),
             sleep_hint,
             telemetry_snapshot: None,
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
+            delivery_telemetry: None,
         }
     }
 }

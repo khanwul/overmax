@@ -604,6 +604,11 @@ impl NativeApp {
                 toast: self.toast.clone(),
                 window_snapshot: self.window_snapshot,
                 capture_fatal: self.capture_fatal.clone(),
+                #[cfg(any(debug_assertions, feature = "telemetry"))]
+                delivery_telemetry: self
+                    .last_detection_output
+                    .as_ref()
+                    .and_then(|output| output.delivery_telemetry),
             });
     }
 

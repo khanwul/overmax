@@ -27,6 +27,25 @@ struct TrackerConnection {
     atoms: Atoms,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct WindowFocusTelemetry {
+    pub target_xid: u64,
+    pub active_xid: Option<u64>,
+    pub active_in_client_list: Option<bool>,
+}
+
+struct WindowSearch {
+    target: Option<Window>,
+    #[cfg_attr(not(any(debug_assertions, feature = "telemetry")), allow(dead_code))]
+    client_list: Option<Vec<Window>>,
+}
+
+struct ForegroundObservation {
+    foreground: bool,
+    #[cfg_attr(not(any(debug_assertions, feature = "telemetry")), allow(dead_code))]
+    active_window: Option<Window>,
+}
+
 pub struct WindowTracker {
     title: Vec<u8>,
     connection: Result<TrackerConnection, String>,
@@ -41,6 +60,17 @@ impl WindowTracker {
     }
 
     pub fn game_snapshot(&self) -> Result<Option<WindowSnapshot>, String> {
+        self.connection
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(|connection| connection.game_snapshot(&self.title))
+            .map(|(snapshot, _)| snapshot)
+    }
+
+    #[cfg(any(debug_assertions, feature = "telemetry"))]
+    pub(crate) fn game_snapshot_with_telemetry(
+        &self,
+    ) -> Result<(Option<WindowSnapshot>, Option<WindowFocusTelemetry>), String> {
         self.connection
             .as_ref()
             .map_err(Clone::clone)
@@ -64,9 +94,13 @@ impl TrackerConnection {
         Ok(Self { conn, root, atoms })
     }
 
-    fn game_snapshot(&self, title: &[u8]) -> Result<Option<WindowSnapshot>, String> {
-        let Some(window) = self.find_window(title)? else {
-            return Ok(None);
+    fn game_snapshot(
+        &self,
+        title: &[u8],
+    ) -> Result<(Option<WindowSnapshot>, Option<WindowFocusTelemetry>), String> {
+        let search = self.find_window(title)?;
+        let Some(window) = search.target else {
+            return Ok((None, None));
         };
         let Some(geometry) = reply_or_window_gone(
             self.conn
@@ -75,7 +109,7 @@ impl TrackerConnection {
                 .reply(),
         )?
         else {
-            return Ok(None);
+            return Ok((None, None));
         };
         let Some(position) = reply_or_window_gone(
             self.conn
@@ -84,7 +118,7 @@ impl TrackerConnection {
                 .reply(),
         )?
         else {
-            return Ok(None);
+            return Ok((None, None));
         };
         let rect = WindowRect {
             left: i32::from(position.dst_x),
@@ -93,21 +127,35 @@ impl TrackerConnection {
             height: i32::from(geometry.height),
         };
         if !rect.is_valid() {
-            return Ok(None);
+            return Ok((None, None));
         }
         let foreground = self.is_foreground(window)?;
         let Some(fullscreen) = self.is_fullscreen(window)? else {
-            return Ok(None);
+            return Ok((None, None));
         };
-        Ok(Some(WindowSnapshot {
-            window: u64::from(window),
-            rect,
-            foreground,
-            fullscreen,
-        }))
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        let focus_telemetry = Some(WindowFocusTelemetry {
+            target_xid: u64::from(window),
+            active_xid: foreground.active_window.map(u64::from),
+            active_in_client_list: active_window_membership(
+                foreground.active_window,
+                search.client_list.as_deref(),
+            ),
+        });
+        #[cfg(not(any(debug_assertions, feature = "telemetry")))]
+        let focus_telemetry = None;
+        Ok((
+            Some(WindowSnapshot {
+                window: u64::from(window),
+                rect,
+                foreground: foreground.foreground,
+                fullscreen,
+            }),
+            focus_telemetry,
+        ))
     }
 
-    fn find_window(&self, title: &[u8]) -> Result<Option<Window>, String> {
+    fn find_window(&self, title: &[u8]) -> Result<WindowSearch, String> {
         let reply = self
             .conn
             .get_property(
@@ -121,24 +169,31 @@ impl TrackerConnection {
             .map_err(|error| error.to_string())?
             .reply()
             .map_err(|error| error.to_string())?;
-        let candidates = match parse_window_list(&reply)? {
+        let client_list = parse_window_list(&reply)?;
+        let fallback_candidates;
+        let candidates = match client_list.as_deref() {
             Some(windows) => windows,
             None => {
-                self.conn
+                fallback_candidates = self
+                    .conn
                     .query_tree(self.root)
                     .map_err(|error| error.to_string())?
                     .reply()
                     .map_err(|error| error.to_string())?
-                    .children
+                    .children;
+                &fallback_candidates
             }
         };
         let mut matches = Vec::new();
-        for window in candidates {
+        for &window in candidates {
             if self.title_matches(window, title)? {
                 matches.push(window);
             }
         }
-        Ok(unique_window(&matches))
+        Ok(WindowSearch {
+            target: unique_window(&matches),
+            client_list,
+        })
     }
 
     fn title_matches(&self, window: Window, title: &[u8]) -> Result<bool, String> {
@@ -177,7 +232,7 @@ impl TrackerConnection {
             && wm_name.value == title)
     }
 
-    fn is_foreground(&self, target: Window) -> Result<bool, String> {
+    fn is_foreground(&self, target: Window) -> Result<ForegroundObservation, String> {
         let reply = self
             .conn
             .get_property(
@@ -192,22 +247,40 @@ impl TrackerConnection {
             .reply();
         let reply = match reply {
             Ok(reply) => reply,
-            Err(ReplyError::X11Error(_)) => return Ok(false),
+            Err(ReplyError::X11Error(_)) => {
+                return Ok(ForegroundObservation {
+                    foreground: false,
+                    active_window: None,
+                });
+            }
             Err(ReplyError::ConnectionError(error)) => return Err(error.to_string()),
         };
         if reply.type_ != u32::from(AtomEnum::WINDOW) || reply.format != 32 {
-            return Ok(false);
+            return Ok(ForegroundObservation {
+                foreground: false,
+                active_window: None,
+            });
         }
         let Some(mut window) = reply.value32().and_then(|mut values| values.next()) else {
-            return Ok(false);
+            return Ok(ForegroundObservation {
+                foreground: false,
+                active_window: None,
+            });
         };
+        let active_window = Some(window);
         if window == x11rb::NONE || window == POINTER_ROOT {
-            return Ok(false);
+            return Ok(ForegroundObservation {
+                foreground: false,
+                active_window,
+            });
         }
 
         for _ in 0..32 {
             if window == target {
-                return Ok(true);
+                return Ok(ForegroundObservation {
+                    foreground: true,
+                    active_window,
+                });
             }
             let tree = match self
                 .conn
@@ -216,15 +289,26 @@ impl TrackerConnection {
                 .reply()
             {
                 Ok(tree) => tree,
-                Err(ReplyError::X11Error(_)) => return Ok(false),
+                Err(ReplyError::X11Error(_)) => {
+                    return Ok(ForegroundObservation {
+                        foreground: false,
+                        active_window,
+                    });
+                }
                 Err(ReplyError::ConnectionError(error)) => return Err(error.to_string()),
             };
             if tree.parent == x11rb::NONE || tree.parent == self.root || tree.parent == window {
-                return Ok(false);
+                return Ok(ForegroundObservation {
+                    foreground: false,
+                    active_window,
+                });
             }
             window = tree.parent;
         }
-        Ok(false)
+        Ok(ForegroundObservation {
+            foreground: false,
+            active_window,
+        })
     }
 
     fn is_fullscreen(&self, window: Window) -> Result<Option<bool>, String> {
@@ -287,6 +371,14 @@ pub fn restore_foreground_by_title(title: &str) -> bool {
         .is_ok_and(|connection| connection.activate(window).is_ok())
 }
 
+#[cfg(any(debug_assertions, feature = "telemetry"))]
+fn active_window_membership(
+    active_window: Option<Window>,
+    client_list: Option<&[Window]>,
+) -> Option<bool> {
+    Some(client_list?.contains(&active_window?))
+}
+
 fn parse_window_list(reply: &GetPropertyReply) -> Result<Option<Vec<Window>>, String> {
     if reply.type_ == x11rb::NONE
         && reply.format == 0
@@ -330,8 +422,8 @@ fn reply_or_window_gone<T>(reply: Result<T, ReplyError>) -> Result<Option<T>, St
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_window_list, reply_or_window_gone, restore_foreground_by_title, unique_window, Atoms,
-        WindowTracker,
+        active_window_membership, parse_window_list, reply_or_window_gone,
+        restore_foreground_by_title, unique_window, Atoms, WindowTracker,
     };
     use std::time::{Duration, Instant};
     use x11rb::connection::Connection;
@@ -379,6 +471,24 @@ mod tests {
         assert_eq!(unique_window(&[7]), Some(7));
         assert_eq!(unique_window(&[7, 9]), None);
         assert_eq!(unique_window(&[]), None);
+    }
+
+    #[test]
+    fn mango_placeholder_active_window_fixture_is_not_a_client() {
+        // Sanitized Mango observation: target is registered, active XID is an
+        // unrelated XWayland placeholder absent from _NET_CLIENT_LIST.
+        const TARGET_XID: u32 = 0x1000;
+        const PLACEHOLDER_ACTIVE_XID: u32 = 0x2000;
+        const CLIENT_LIST: &[u32] = &[TARGET_XID, 0x3000];
+
+        assert_eq!(
+            active_window_membership(Some(TARGET_XID), Some(CLIENT_LIST)),
+            Some(true)
+        );
+        assert_eq!(
+            active_window_membership(Some(PLACEHOLDER_ACTIVE_XID), Some(CLIENT_LIST)),
+            Some(false)
+        );
     }
 
     #[test]

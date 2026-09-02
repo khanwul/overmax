@@ -81,6 +81,8 @@ pub struct LinuxOverlaySnapshot {
     pub toast: Option<ToastMessage>,
     pub window_snapshot: Option<WindowSnapshot>,
     pub capture_fatal: Option<String>,
+    #[cfg(any(debug_assertions, feature = "telemetry"))]
+    pub delivery_telemetry: Option<overmax_engine::detector::telemetry::DetectionDeliveryTelemetry>,
 }
 
 #[derive(Clone)]
@@ -88,12 +90,16 @@ pub struct LinuxLayerOverlayHandle {
     published: Arc<Mutex<PublishedSnapshots>>,
     wake_writer: Arc<UnixStream>,
     runtime_failure: Arc<Mutex<Option<String>>>,
+    #[cfg(any(debug_assertions, feature = "telemetry"))]
+    runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
 }
 
 #[derive(Default)]
 struct PublishedSnapshots {
     latest: Option<Arc<LinuxOverlaySnapshot>>,
     last: Option<LastPublishedSnapshot>,
+    #[cfg(any(debug_assertions, feature = "telemetry"))]
+    last_delivery_generation: u64,
 }
 
 struct LastPublishedSnapshot {
@@ -109,7 +115,7 @@ impl LinuxLayerOverlayHandle {
         let Ok(mut published) = self.published.lock() else {
             return;
         };
-        if published.last.as_ref().is_some_and(|last| {
+        let display_unchanged = published.last.as_ref().is_some_and(|last| {
             same_display_snapshot(
                 &last.snapshot,
                 last.settings_open,
@@ -118,8 +124,35 @@ impl LinuxLayerOverlayHandle {
                 settings_open,
                 sync_open,
             )
-        }) {
+        });
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        let new_delivery = snapshot
+            .delivery_telemetry
+            .is_some_and(|delivery| delivery.generation != published.last_delivery_generation);
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        if new_delivery {
+            published.last_delivery_generation = snapshot
+                .delivery_telemetry
+                .map_or(0, |delivery| delivery.generation);
+        }
+        if display_unchanged {
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
+            if new_delivery {
+                if let (Some(telemetry), Some(delivery)) =
+                    (&self.runtime_telemetry, &snapshot.delivery_telemetry)
+                {
+                    telemetry.record_publish(delivery, false);
+                }
+            }
             return;
+        }
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        if new_delivery {
+            if let (Some(telemetry), Some(delivery)) =
+                (&self.runtime_telemetry, &snapshot.delivery_telemetry)
+            {
+                telemetry.record_publish(delivery, true);
+            }
         }
         let snapshot = Arc::new(snapshot);
         published.latest = Some(snapshot.clone());
@@ -177,6 +210,7 @@ pub type AppRepaintCallback = Arc<dyn Fn() + Send + Sync>;
 pub fn spawn(
     command_tx: Sender<UiCommand>,
     app_repaint: AppRepaintCallback,
+    runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
 ) -> Result<LinuxLayerOverlayHandle, String> {
     let published = Arc::new(Mutex::new(PublishedSnapshots::default()));
     let runtime_failure = Arc::new(Mutex::new(None));
@@ -190,6 +224,7 @@ pub fn spawn(
     let (ready_tx, ready_rx) = mpsc::sync_channel(1);
     let thread_published = published.clone();
     let thread_failure = runtime_failure.clone();
+    let thread_telemetry = runtime_telemetry.clone();
 
     std::thread::Builder::new()
         .name("overmax-linux-overlay".to_string())
@@ -200,6 +235,7 @@ pub fn spawn(
                 thread_published,
                 wake_reader,
                 ready_tx,
+                thread_telemetry,
             );
             if let Err(error) = result {
                 eprintln!("[LinuxOverlay] {error}");
@@ -218,6 +254,8 @@ pub fn spawn(
         published,
         wake_writer: Arc::new(wake_writer),
         runtime_failure,
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        runtime_telemetry,
     })
 }
 
@@ -227,8 +265,9 @@ fn run(
     published: Arc<Mutex<PublishedSnapshots>>,
     wake_reader: UnixStream,
     ready_tx: SyncSender<Result<(), String>>,
+    runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
 ) -> Result<(), String> {
-    let initialized = Backend::new(command_tx, app_repaint, published);
+    let initialized = Backend::new(command_tx, app_repaint, published, runtime_telemetry);
     let (mut event_queue, mut backend) = match initialized {
         Ok(value) => {
             let _ = ready_tx.send(Ok(()));
@@ -356,6 +395,8 @@ struct Backend {
     dragging: bool,
     drag_origin_margin: (i32, i32),
     drag_total_delta: egui::Vec2,
+    #[cfg(any(debug_assertions, feature = "telemetry"))]
+    runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
 }
 
 impl Backend {
@@ -363,11 +404,24 @@ impl Backend {
         command_tx: Sender<UiCommand>,
         app_repaint: AppRepaintCallback,
         published: Arc<Mutex<PublishedSnapshots>>,
+        runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
     ) -> Result<(wayland_client::EventQueue<Self>, Self), String> {
+        #[cfg(not(any(debug_assertions, feature = "telemetry")))]
+        let _ = &runtime_telemetry;
         let connection = Connection::connect_to_env().map_err(|error| error.to_string())?;
         let (globals, event_queue) =
             registry_queue_init(&connection).map_err(|error| error.to_string())?;
         let qh = event_queue.handle();
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        if let Some(telemetry) = &runtime_telemetry {
+            let foreign_toplevel_version = globals.contents().with_list(|list| {
+                list.iter()
+                    .filter(|global| global.interface == "zwlr_foreign_toplevel_manager_v1")
+                    .map(|global| global.version)
+                    .max()
+            });
+            telemetry.record_wayland_capabilities(foreign_toplevel_version);
+        }
         let compositor = CompositorState::bind(&globals, &qh)
             .map_err(|_| "wl_compositor is unavailable".to_string())?;
         let layer_shell = LayerShell::bind(&globals, &qh)
@@ -471,6 +525,8 @@ impl Backend {
                 dragging: false,
                 drag_origin_margin: margin,
                 drag_total_delta: egui::Vec2::ZERO,
+                #[cfg(any(debug_assertions, feature = "telemetry"))]
+                runtime_telemetry,
             },
         ))
     }
@@ -577,15 +633,21 @@ impl Backend {
             || self.output_origin != origin
             || (self.render_scale - scale).abs() > f64::EPSILON;
         if changed {
-            let name = target
+            let output_info = target
                 .as_ref()
-                .and_then(|output| self.output_state.info(output))
-                .and_then(|info| info.name)
-                .unwrap_or_else(|| "compositor-default".to_string());
+                .and_then(|output| self.output_state.info(output));
+            let name = output_info
+                .as_ref()
+                .and_then(|info| info.name.as_deref())
+                .unwrap_or("compositor-default");
             eprintln!(
                 "[LinuxOverlay] output={name} origin={},{} scale={scale:.3}",
                 origin.0, origin.1
             );
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
+            if let Some(output) = target.as_ref() {
+                self.record_output_environment(output);
+            }
         }
         self.target_output = target;
         self.output_origin = origin;
@@ -639,6 +701,29 @@ impl Backend {
             "[LinuxOverlay] entered output={} logical={:?} scale={scale:.3}",
             info.name.as_deref().unwrap_or("unknown"),
             info.logical_size,
+        );
+    }
+
+    #[cfg(any(debug_assertions, feature = "telemetry"))]
+    fn record_output_environment(&self, output: &wl_output::WlOutput) {
+        let (Some(telemetry), Some(info)) =
+            (&self.runtime_telemetry, self.output_state.info(output))
+        else {
+            return;
+        };
+        let Some(geometry) = output_geometry(&info) else {
+            return;
+        };
+        let physical_size = info
+            .modes
+            .iter()
+            .find(|mode| mode.current)
+            .map(|mode| mode.dimensions);
+        telemetry.record_output_environment(
+            info.name.as_deref(),
+            (geometry.rect.width, geometry.rect.height),
+            physical_size,
+            geometry.scale,
         );
     }
 
@@ -1493,6 +1578,8 @@ impl OutputHandler for Backend {
         qh: &QueueHandle<Self>,
         output: wl_output::WlOutput,
     ) {
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        self.record_output_environment(&output);
         if self.surface_output.as_ref() == Some(&output) {
             self.update_surface_scale(&output);
         }
@@ -1706,6 +1793,8 @@ mod tests {
             toast: None,
             window_snapshot: None,
             capture_fatal: None,
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
+            delivery_telemetry: None,
         };
         assert_eq!(panel_size(Some(&snapshot)), (320, 116));
         let mut background = snapshot.clone();
@@ -1744,6 +1833,7 @@ mod tests {
             published: Arc::new(Mutex::new(PublishedSnapshots::default())),
             wake_writer: Arc::new(writer),
             runtime_failure: Arc::new(Mutex::new(None)),
+            runtime_telemetry: None,
         };
         let mut wake = [0u8; 8];
 

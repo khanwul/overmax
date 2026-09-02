@@ -7,7 +7,14 @@ use overmax_data::{RecommendContext, RecommendResult, RecordSource};
 impl NativeApp {
     pub(crate) fn drain_detection_results(&mut self, ctx: &egui::Context) {
         let mut changed = false;
-        while let Ok(output) = self.detection_rx.try_recv() {
+        #[allow(unused_mut)]
+        while let Ok(mut output) = self.detection_rx.try_recv() {
+            #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+            if let (Some(telemetry), Some(delivery)) =
+                (&self.runtime_telemetry, &mut output.delivery_telemetry)
+            {
+                telemetry.record_output_drained(delivery);
+            }
             if let Some(snap) = output.telemetry_snapshot {
                 self.last_telemetry_snapshot = Some(snap);
             }
