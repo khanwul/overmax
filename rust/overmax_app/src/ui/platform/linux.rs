@@ -76,9 +76,9 @@ pub fn native_options(settings: &overmax_data::Settings) -> eframe::NativeOption
     eframe::NativeOptions {
         viewport: ViewportBuilder::default()
             .with_title("Overmax")
-            .with_inner_size([1.0, 1.0])
-            .with_min_inner_size([1.0, 1.0])
-            .with_max_inner_size([1.0, 1.0])
+            .with_inner_size([2.0, 1.0])
+            .with_min_inner_size([2.0, 1.0])
+            .with_max_inner_size([2.0, 1.0])
             .with_resizable(false)
             .with_decorations(false)
             .with_transparent(true)
