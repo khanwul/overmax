@@ -15,7 +15,6 @@ use crate::detector::detection_pipeline::{
 };
 #[cfg(target_os = "linux")]
 use crate::detector::telemetry::RuntimeTelemetry;
-#[cfg(target_os = "linux")]
 use overmax_core::GameSessionState;
 use overmax_data::{DataCompatibility, ImageIndexDb, Settings};
 use std::path::{Path, PathBuf};

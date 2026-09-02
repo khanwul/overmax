@@ -122,8 +122,8 @@ Linux 환경에서는 표준 X11 창 띄우기 방식 대신 Wayland 네이티�
    * `KeyboardInteractivity::None`으로 설정하여 키보드 입력을 가로채지 않는다. 숨길 때는 surface 크기를 바꾸지 않고 투명 버퍼와 empty input region을 적용하며, 다시 표시할 때 기본 input region을 복구해 기존 드래그와 컨트롤을 유지한다.
 2. **Fractional Scale 및 다중 출력 지원**:
    * 모니터별 Fractional Scale(예: 1.25배, 1.5배) 이벤트를 수신하여 렌더 버퍼 해상도를 동적으로 보정한다.
-   * exact-title foreign-toplevel의 committed entered-output 집합에서 단일 output을 선택하고, 복수 output에서는 기존 선택만 유지한다. 선택이 불명확하면 특정 output을 추측하지 않는다.
-   * fullscreen 배치는 선택된 output의 local logical geometry를 사용하여 X11 pixel 좌표와 Wayland 좌표를 혼합하지 않는다. 실제 output 교체만 surface를 재생성하고 동일 output의 geometry/scale 변경은 기존 surface에 반영한다.
+   * exact-title foreign-toplevel의 committed entered-output 집합에서 단일 output을 선택하고, 복수 output에서는 기존 선택을 유지한다. foreign-toplevel로 확정할 수 없으면 기존 X11 창과 Wayland output의 overlap 기반 선택으로 fallback한다.
+   * output을 선택한 뒤 fullscreen 배치와 margin 계산에는 해당 output의 local logical geometry만 사용한다. 실제 output 교체만 surface를 재생성하고 동일 output의 geometry/scale 변경은 기존 surface에 반영한다.
 3. **Optional foreign-toplevel 표시 상태**:
    * 동일한 Wayland 연결에서 `zwlr_foreign_toplevel_manager_v1`을 capability 기반으로 bind하고, 설정된 게임 제목과 완전 일치하는 단일 handle의 `done` 단위 activated/fullscreen 상태만 commit한다.
    * primitive 관찰값만 detection worker와 공유한다. protocol 부재, 중복 title, target close, manager 종료는 오류가 아니라 기존 X11/EWMH 3-state fallback으로 처리하며 Wayland proxy와 output 집합은 layer 스레드 밖으로 전달하지 않는다.
