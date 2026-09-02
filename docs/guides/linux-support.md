@@ -14,6 +14,14 @@ Overmax의 Linux 지원은 초기 단계입니다. Windows와 같은 범용 지�
 - 단일 출력의 창모드 캡처와 인식
 - 창모드 오버레이는 화면 기준 수동 배치만 지원하며 게임 창을 자동으로 따라가지 않음
 
+## 검증 환경
+
+- 배포 번들: Ubuntu 22.04 / glibc 2.35
+- 캡처 lifecycle CI: Xvfb + Openbox
+- Wayland compositor: KDE Plasma(KWin), Hyprland, niri, MangoWM
+
+KDE Plasma(KWin), Hyprland, niri에서는 게임 추적·캡처·오버레이 표시를 확인했습니다. MangoWM에서는 오버레이 표시까지 확인했지만, 0.15.x~0.16.1의 layer-shell 입력 회귀가 있어 아래의 [알려진 compositor 문제](#알려진-compositor-문제)를 함께 확인해야 합니다.
+
 ## 내 환경 확인하기
 
 압축을 푼 디렉터리에서 다음 명령을 실행합니다.
