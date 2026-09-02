@@ -5,7 +5,11 @@ use crate::ui::dialog_theme::{
     setting_row, text_input_full, text_input_with_button, DialogTheme,
 };
 use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Stroke, ViewportClass};
-use overmax_data::{diff_settings, load_merged_settings, normalize_settings, save_user_settings};
+use overmax_data::{
+    diff_settings, load_merged_settings_from_paths, normalize_settings, save_user_settings_to_path,
+    SettingsPaths,
+};
+
 use serde_json::{json, Map, Value};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -588,7 +592,10 @@ fn ipc_section(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
         let bound = ctx.ipc_bound_port.lock().ok().and_then(|g| *g);
         let (status_text, status_color) = if let Some(port) = bound {
             (
-                format!("🟢 {} · http://127.0.0.1:{port}", crate::t!("settings-ipc-status-running")),
+                format!(
+                    "🟢 {} · http://127.0.0.1:{port}",
+                    crate::t!("settings-ipc-status-running")
+                ),
                 Color32::from_rgb(100, 220, 100),
             )
         } else {
@@ -622,9 +629,11 @@ fn ipc_section(ui: &mut egui::Ui, draft: &mut Value, ctx: &SettingsUiContext) {
                         egui::FontFamily::Monospace,
                     ))
                     .vertical_align(egui::Align::Center);
-                let response = ui.add_sized(egui::vec2(90.0, DialogTheme::CONTROL_HEIGHT), text_edit);
+                let response =
+                    ui.add_sized(egui::vec2(90.0, DialogTheme::CONTROL_HEIGHT), text_edit);
                 if response.changed() {
-                    let cleaned: String = port_text.chars().filter(|c| c.is_ascii_digit()).collect();
+                    let cleaned: String =
+                        port_text.chars().filter(|c| c.is_ascii_digit()).collect();
                     if let Ok(port) = cleaned.parse::<u16>() {
                         if (1024..=65535).contains(&port) {
                             ipc_obj.insert("port".to_string(), json!(port));
@@ -759,30 +768,32 @@ fn general_section(ui: &mut egui::Ui, draft: &mut Value) {
 }
 
 fn update_section(ui: &mut egui::Ui, draft: &mut Value) {
-    let app_update = object_section_mut(draft, "app_update");
-    let mut enabled = app_update
-        .get("enabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+    if crate::system::updater::is_self_update_supported() {
+        let app_update = object_section_mut(draft, "app_update");
+        let mut enabled = app_update
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
 
-    setting_row(
-        ui,
-        crate::t!("settings-auto-update"),
-        crate::t!("settings-auto-update-hint"),
-        |ui| {
-            if ui
-                .checkbox(
-                    &mut enabled,
-                    RichText::new(crate::t!("settings-use")).size(DialogTheme::FONT_BODY),
-                )
-                .changed()
-            {
-                app_update.insert("enabled".into(), json!(enabled));
-            }
-        },
-    );
+        setting_row(
+            ui,
+            crate::t!("settings-auto-update"),
+            crate::t!("settings-auto-update-hint"),
+            |ui| {
+                if ui
+                    .checkbox(
+                        &mut enabled,
+                        RichText::new(crate::t!("settings-use")).size(DialogTheme::FONT_BODY),
+                    )
+                    .changed()
+                {
+                    app_update.insert("enabled".into(), json!(enabled));
+                }
+            },
+        );
 
-    ui.add_space(DialogTheme::GAP_MD);
+        ui.add_space(DialogTheme::GAP_MD);
+    }
 
     setting_row(ui, crate::t!("settings-version-info"), "", |ui| {
         ui.label(
@@ -872,6 +883,21 @@ pub fn render_settings_deferred(
     }
 }
 
+/// Applies normalize + delta save vs `base`, reloads merged into `merged_out` using `SettingsPaths`.
+pub fn save_settings_to_paths(
+    paths: &SettingsPaths,
+    defaults: &Value,
+    base: &Value,
+    draft: &mut Value,
+    merged_out: &mut Value,
+) -> Result<(), String> {
+    normalize_settings(draft);
+    let diff = diff_settings(base, draft);
+    save_user_settings_to_path(&paths.settings_user_json, &diff).map_err(|e| e.to_string())?;
+    *merged_out = load_merged_settings_from_paths(paths, defaults.clone());
+    Ok(())
+}
+
 /// Applies normalize + delta save vs `base`, reloads merged into `merged_out`.
 pub fn save_settings_to_disk(
     root: &Path,
@@ -880,11 +906,13 @@ pub fn save_settings_to_disk(
     draft: &mut Value,
     merged_out: &mut Value,
 ) -> Result<(), String> {
-    normalize_settings(draft);
-    let diff = diff_settings(base, draft);
-    save_user_settings(root, &diff).map_err(|e| e.to_string())?;
-    *merged_out = load_merged_settings(root, defaults.clone());
-    Ok(())
+    save_settings_to_paths(
+        &SettingsPaths::in_dir(root),
+        defaults,
+        base,
+        draft,
+        merged_out,
+    )
 }
 
 pub fn close_if_requested(ctx: &egui::Context, open: &Arc<AtomicBool>) {
@@ -949,7 +977,7 @@ fn user_entry_mut<'a>(draft: &'a mut Value, steam_id: &str) -> &'a mut Map<Strin
 #[cfg(test)]
 mod tests {
     use super::save_settings_to_disk;
-    use overmax_data::load_merged_settings;
+    use overmax_data::{load_merged_settings, SettingsPaths};
     use serde_json::json;
     use std::fs;
 
@@ -985,5 +1013,29 @@ mod tests {
         assert!(user_text.contains("base_opacity"));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn save_settings_to_paths_roundtrip() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join("settings.json"),
+            r#"{"overlay":{"scale":1.0,"base_opacity":0.8}}"#,
+        )
+        .unwrap();
+        fs::write(root.join("settings.user.json"), "{}").unwrap();
+
+        let paths = SettingsPaths::in_dir(root);
+        let defaults = json!({"overlay": {"scale": 1.0, "base_opacity": 0.8}});
+        let base = overmax_data::load_base_settings_from_paths(&paths, defaults.clone());
+        let mut merged = overmax_data::load_merged_settings_from_paths(&paths, defaults.clone());
+        let mut draft = merged.clone();
+        draft["overlay"]["scale"] = json!(1.5);
+
+        super::save_settings_to_paths(&paths, &defaults, &base, &mut draft, &mut merged).unwrap();
+
+        let reloaded = overmax_data::load_merged_settings_from_paths(&paths, defaults);
+        assert_eq!(reloaded["overlay"]["scale"], json!(1.5));
     }
 }

@@ -10,6 +10,8 @@ on:
       - 'scripts/package-linux.sh'
       - 'scripts/smoke-linux-bundle.sh'
       - 'scripts/package-rust.ps1'
+      - 'scripts/package-msix.ps1'
+      - 'packaging/**'
       - '.github/**'
   push:
     branches: [main]
@@ -21,6 +23,8 @@ on:
       - 'scripts/package-linux.sh'
       - 'scripts/smoke-linux-bundle.sh'
       - 'scripts/package-rust.ps1'
+      - 'scripts/package-msix.ps1'
+      - 'packaging/**'
       - '.github/**'
   workflow_dispatch:
     inputs:
@@ -98,6 +102,18 @@ jobs:
           path: |
             dist/overmax.zip
             dist/release_manifest.json
+
+      - name: Package Windows MSIX
+        if: github.event_name == 'workflow_dispatch' && runner.os == 'Windows' && (inputs.package_target == 'all' || inputs.package_target == 'windows')
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File scripts/package-msix.ps1 -SkipBuild -Sign
+
+      - name: Upload Windows MSIX artifact
+        if: github.event_name == 'workflow_dispatch' && runner.os == 'Windows' && (inputs.package_target == 'all' || inputs.package_target == 'windows')
+        uses: actions/upload-artifact@v4
+        with:
+          name: overmax-windows-msix
+          path: dist/*.msix
 
   linux-x11-lifecycle:
     runs-on: ubuntu-24.04

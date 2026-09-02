@@ -15,12 +15,17 @@ pub use community::varchive_api::{
     upload_score_blocking, AccountInfo, UploadResult,
 };
 pub use config::compatibility::DataCompatibility;
+pub use config::paths::{
+    is_dir_writable, is_running_in_msix_package, system_local_data_dir, AppPaths, RuntimeMode,
+};
+
 pub use config::settings::{
-    diff_settings, load_base_settings, load_merged_settings, merge_settings_layers,
-    normalize_settings, save_user_settings, AppUpdateSettings, DebugWindowSettings,
-    JacketMatcherSettings, OverlayPosition, OverlaySettings, RecommendProviderSettings,
-    RecommendSettings, ScreenCaptureSettings, Settings, SettingsPaths, SyncFilterSettings,
-    VArchiveSettings, VArchiveUserMap, WindowTrackerSettings,
+    diff_settings, load_base_settings, load_base_settings_from_paths, load_merged_settings,
+    load_merged_settings_from_paths, merge_settings_layers, normalize_settings, save_user_settings,
+    save_user_settings_to_path, AppUpdateSettings, DebugWindowSettings, JacketMatcherSettings,
+    OverlayPosition, OverlaySettings, RecommendProviderSettings, RecommendSettings,
+    ScreenCaptureSettings, Settings, SettingsPaths, SyncFilterSettings, VArchiveSettings,
+    VArchiveUserMap, WindowTrackerSettings,
 };
 pub use overmax_core::{RecordKey, RecordValue};
 pub use service::jacket_matcher::{JacketMatcher, JacketMatcherConfig};

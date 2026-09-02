@@ -21,6 +21,10 @@ impl SettingsPaths {
 
 pub fn load_merged_settings(root: impl AsRef<Path>, defaults: Value) -> Value {
     let paths = SettingsPaths::in_dir(root);
+    load_merged_settings_from_paths(&paths, defaults)
+}
+
+pub fn load_merged_settings_from_paths(paths: &SettingsPaths, defaults: Value) -> Value {
     merge_settings_layers(
         defaults,
         load_json_object(&paths.settings_json),
@@ -31,6 +35,10 @@ pub fn load_merged_settings(root: impl AsRef<Path>, defaults: Value) -> Value {
 /// Packaged defaults merged with `settings.json` only (no `settings.user.json`), for delta-save base.
 pub fn load_base_settings(root: impl AsRef<Path>, defaults: Value) -> Value {
     let paths = SettingsPaths::in_dir(root);
+    load_base_settings_from_paths(&paths, defaults)
+}
+
+pub fn load_base_settings_from_paths(paths: &SettingsPaths, defaults: Value) -> Value {
     merge_settings_layers(
         defaults,
         load_json_object(&paths.settings_json),
@@ -241,17 +249,25 @@ pub fn diff_settings(base: &Value, current: &Value) -> Value {
 
 pub fn save_user_settings(root: impl AsRef<Path>, diff: &Value) -> std::io::Result<()> {
     let paths = SettingsPaths::in_dir(root);
-    if let Some(parent) = paths.settings_user_json.parent() {
+    save_user_settings_to_path(&paths.settings_user_json, diff)
+}
+
+pub fn save_user_settings_to_path(
+    settings_user_json: impl AsRef<Path>,
+    diff: &Value,
+) -> std::io::Result<()> {
+    let settings_user_json = settings_user_json.as_ref();
+    if let Some(parent) = settings_user_json.parent() {
         fs::create_dir_all(parent)?;
     }
 
     let text = serde_json::to_string_pretty(diff).unwrap_or_else(|_| "{}".to_string());
-    let tmp_path = paths.settings_user_json.with_extension("json.tmp");
+    let tmp_path = settings_user_json.with_extension("json.tmp");
     fs::write(&tmp_path, &text)?;
-    if let Err(e) = fs::rename(&tmp_path, &paths.settings_user_json) {
+    if let Err(e) = fs::rename(&tmp_path, settings_user_json) {
         // Fallback on Windows if target already exists and atomic rename fails
-        let _ = fs::remove_file(&paths.settings_user_json);
-        fs::rename(&tmp_path, &paths.settings_user_json).map_err(|_| e)?;
+        let _ = fs::remove_file(settings_user_json);
+        fs::rename(&tmp_path, settings_user_json).map_err(|_| e)?;
     }
     Ok(())
 }

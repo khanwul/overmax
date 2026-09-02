@@ -140,6 +140,9 @@ fn ask_update_confirm(current: &str, latest_tag: &str) -> bool {
 }
 
 fn skip_auto_update_by_policy() -> bool {
+    if !super::is_self_update_supported() {
+        return true;
+    }
     if cfg!(debug_assertions) {
         return true;
     }

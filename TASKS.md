@@ -21,23 +21,25 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 
 ## 2. 데이터 저장소 및 런타임 환경 분기 (Storage & Runtime Environment)
 
-- [ ] **2.1 데이터 경로 추상화 레이어 구축**
-  - [ ] Portable 모드(바이너리 상대 경로) 및 Installed/MSIX 모드(`%LOCALAPPDATA%\Overmax\`) 듀얼 경로 지원
-  - [ ] 사용자 설정(`settings.user.json`), 플레이 기록 DB(`cache/record.db`), 곡 메타 DB(`cache/songs.json`), 자켓 인덱스(`cache/image_index.db`)의 안전한 로드/마이그레이션 지원
-- [ ] **2.2 스토어 환경 자가 업데이터 분기 처리**
-  - [ ] MSIX 패키지 런타임 환경 감지(Win32 `GetCurrentPackageFullName` 또는 `store` feature flag)
-  - [ ] 스토어 패키지 실행 시 인앱 자가 업데이터(GitHub Releases 바이너리 교체) 비활성화 및 UI 처리
+- [x] **2.1 데이터 경로 추상화 레이어 구축**
+  - [x] Portable 모드(바이너리 상대 경로) 및 Installed/MSIX 모드(`%LOCALAPPDATA%\Overmax\`) 듀얼 경로 지원
+  - [x] 사용자 설정(`settings.user.json`), 플레이 기록 DB(`cache/record.db`), 곡 메타 DB(`cache/songs.json`), 자켓 인덱스(`cache/image_index.db`)의 안전한 로드/마이그레이션 지원
+
+- [x] **2.2 스토어 환경 자가 업데이터 분기 처리**
+  - [x] MSIX 패키지 런타임 환경 감지(Win32 `GetCurrentPackageFullName` 또는 `store` feature flag)
+  - [x] 스토어 패키지 실행 시 인앱 자가 업데이터(GitHub Releases 바이너리 교체) 비활성화 및 UI 처리
+
 
 ---
 
 ## 3. MSIX 패키징 및 배포 파이프라인 (MSIX Packaging & Store CI)
 
-- [ ] **3.1 Desktop Bridge 매니페스트 및 에셋 구성**
-  - [ ] `AppxManifest.xml` 작성 (`runFullTrust` 권한, 패키지 Identity, 타일/로고 44x44/150x150 에셋 매핑)
-  - [ ] MSIX 빌드/패키징 스크립트(`scripts/package-msix.ps1` 또는 `cargo-msix` / `MakeAppx` 연동) 구축 및 로컬 사이드로딩 검증
-- [ ] **3.2 Microsoft Store 등록 및 CI 자동화**
-  - [ ] Microsoft Partner Center 앱 등록 및 정책 대응 (서드파티 유틸리티 Disclaimer, 영/한 앱 설명, 스토어 스크린샷)
-  - [ ] GitHub Actions 릴리즈 워크플로우에 MSIX 패키지 생성 및 Store 업로드/검수 파이프라인 연동
+- [x] **3.1 Desktop Bridge 매니페스트 및 에셋 구성**
+  - [x] `AppxManifest.xml` 작성 (`runFullTrust` 권한, 패키지 Identity, 타일/로고 44x44/150x150 에셋 매핑)
+  - [x] MSIX 빌드/패키징 스크립트(`scripts/package-msix.ps1` 또는 `cargo-msix` / `MakeAppx` 연동) 구축 및 로컬 사이드로딩 검증
+- [x] **3.2 Microsoft Store 등록 및 CI 자동화**
+  - [x] Microsoft Partner Center 앱 등록 및 정책 대응 (서드파티 유틸리티 Disclaimer, 영/한 앱 설명, 스토어 스크린샷)
+  - [x] GitHub Actions 릴리즈 워크플로우에 MSIX 패키지 생성 및 Store 업로드/검수 파이프라인 연동
 
 ---
 

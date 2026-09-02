@@ -192,10 +192,11 @@ impl NativeApp {
         }
         let open = self.ui_state.settings_open.clone();
         let draft = self.settings.draft.clone();
-        let root = self.root.clone();
+        let paths = self.paths.clone();
         let defaults = self.settings.defaults.clone();
         let base = self.settings.base.clone();
         let merged = self.settings.merged.clone();
+
         let settings_ctx = settings_ui::SettingsUiContext {
             root: self.root.clone(),
             current_steam_id: self
@@ -255,7 +256,8 @@ impl NativeApp {
                                     ui.add_space(DialogTheme::GAP_SM);
 
                                     let save_btn = egui::Button::new(
-                                        RichText::new(crate::t!("app-save"))
+                                        egui::RichText::new(crate::t!("app-save"))
+                                            .color(egui::Color32::WHITE)
                                             .size(DialogTheme::FONT_BODY)
                                             .strong(),
                                     )
@@ -270,18 +272,20 @@ impl NativeApp {
                                             &merged_g,
                                             &settings_ctx.current_steam_id,
                                         );
-                                        let _ = settings_ui::save_settings_to_disk(
-                                            root.as_ref(),
+                                        let _ = settings_ui::save_settings_to_paths(
+                                            &paths.settings_paths(),
                                             defaults.as_ref(),
                                             &base_g,
                                             &mut local_draft,
                                             &mut merged_g,
                                         );
+
                                         crate::ui::i18n::set_locale_from_settings(&merged_g);
                                         let new_v_id = varchive_v_id(
                                             &merged_g,
                                             &settings_ctx.current_steam_id,
                                         );
+
                                         if !new_v_id.is_empty() && new_v_id != prev_v_id {
                                             let _ = settings_ctx.fetch_tx.send((
                                                 settings_ctx.current_steam_id.clone(),
@@ -321,9 +325,9 @@ impl NativeApp {
         let upload_tx = self.sync_channels.upload_req_tx.clone();
         let delete_tx = self.sync_channels.delete_req_tx.clone();
         let sync_state = self.sync_state.clone();
-        let root = self.root.clone();
         let settings = self.settings.clone();
         let app_settings = settings.get_merged();
+
         let filter = app_settings.sync_filter();
 
         ctx.show_viewport_deferred(
@@ -362,7 +366,7 @@ impl NativeApp {
                             let _ = delete_tx.send(key);
                         },
                         on_filter_change: |new_filter| {
-                            settings.update_sync_filter(&root, &new_filter);
+                            settings.update_sync_filter(&new_filter);
                         },
                     },
                 );

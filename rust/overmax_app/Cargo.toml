@@ -62,7 +62,9 @@ self_update = { version = "0.44.0", features = [
 
 [features]
 default = []
+store = []
 telemetry = ["overmax-engine/telemetry"]
+
 
 
 [target.'cfg(windows)'.dependencies]
