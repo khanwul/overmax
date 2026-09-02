@@ -40,6 +40,7 @@ OS별 구동 가이드 및 외부 연동 프로토콜 규격을 보관합니다.
 * [`linux-support.md`](guides/linux-support.md) / [`linux-support.en.md`](guides/linux-support.en.md): Linux 환경 빌드 및 실행 가이드 (한/영).
 * [`recommend-provider-protocol.md`](guides/recommend-provider-protocol.md): 외부 추천 엔진 연동 프로토콜 v1 규격.
 * [`ipc-protocol-guide.md`](guides/ipc-protocol-guide.md): 외부 도구/위젯 연동을 위한 Overmax IPC 프로토콜 (`overmax-ipc/1`) 규격 및 Python 예제 가이드.
+* [`STORE_LISTING.md`](store/STORE_LISTING.md) / [`PRIVACY.md`](store/PRIVACY.md): Microsoft Store 등록 메타데이터, 심사 정책 준수 및 개인정보처리방침.
 
 ### 4. Plans & RFCs (`docs/plans/`)
 과거 및 진행 중인 기술 기획서, 분석 보고서, 실험 결과를 보존합니다.
