@@ -4,9 +4,9 @@
 use crate::capture::capture_engine::CaptureErrorAction;
 use crate::capture::capture_engine::{AdaptiveCaptureEngine, CaptureEngine};
 use crate::capture::frame::CapturedFrame;
-#[cfg(target_os = "linux")]
-use crate::capture::window_tracker::WindowSnapshot;
 use crate::capture::window_tracker::WindowTracker;
+#[cfg(target_os = "linux")]
+use crate::capture::window_tracker::{FocusObservation, FocusState, WindowSnapshot};
 use crate::detector::detection_pipeline::{
     DetectionOutput, DetectionPipeline, JacketMatchStatus, SleepHint,
 };
@@ -19,12 +19,76 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const LOG_INTERVAL: Duration = Duration::from_secs(3);
+#[cfg(target_os = "linux")]
+const BACKGROUND_DEBOUNCE: Duration = Duration::from_millis(300);
+#[cfg(target_os = "linux")]
+const UNKNOWN_GRACE: Duration = Duration::from_secs(1);
 
 #[cfg(target_os = "linux")]
 enum LinuxTickResult {
     Continue,
     Reconnect,
     Stop,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LinuxFocusLoss {
+    Background,
+    Unknown,
+}
+
+#[cfg(target_os = "linux")]
+struct LinuxFocusPolicy {
+    observed: Option<FocusState>,
+    observed_since: Option<Instant>,
+    foreground: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxFocusPolicy {
+    fn new() -> Self {
+        Self {
+            observed: None,
+            observed_since: None,
+            foreground: false,
+        }
+    }
+
+    fn update(
+        &mut self,
+        observation: FocusObservation,
+        now: Instant,
+    ) -> (bool, Option<LinuxFocusLoss>) {
+        if self.observed != Some(observation.state) {
+            self.observed = Some(observation.state);
+            self.observed_since = Some(now);
+        }
+        if observation.state == FocusState::Focused {
+            self.foreground = true;
+            return (true, None);
+        }
+        if !self.foreground {
+            return (false, None);
+        }
+        let elapsed = now.saturating_duration_since(self.observed_since.unwrap_or(now));
+        let loss = match observation.state {
+            FocusState::Focused => None,
+            FocusState::Background if elapsed >= BACKGROUND_DEBOUNCE => {
+                Some(LinuxFocusLoss::Background)
+            }
+            FocusState::Unknown if elapsed >= UNKNOWN_GRACE => Some(LinuxFocusLoss::Unknown),
+            FocusState::Background | FocusState::Unknown => None,
+        };
+        if loss.is_some() {
+            self.foreground = false;
+        }
+        (self.foreground, loss)
+    }
+
+    fn reset(&mut self) {
+        *self = Self::new();
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -114,6 +178,10 @@ struct DetectionWorker {
     #[cfg(target_os = "linux")]
     window_snapshot: Option<WindowSnapshot>,
     #[cfg(target_os = "linux")]
+    focus_observation: Option<FocusObservation>,
+    #[cfg(target_os = "linux")]
+    focus_policy: LinuxFocusPolicy,
+    #[cfg(target_os = "linux")]
     capture_failure_active: bool,
 }
 
@@ -164,6 +232,10 @@ impl DetectionWorker {
             window_scheduler: WindowQueryScheduler::new(true),
             #[cfg(target_os = "linux")]
             window_snapshot: None,
+            #[cfg(target_os = "linux")]
+            focus_observation: None,
+            #[cfg(target_os = "linux")]
+            focus_policy: LinuxFocusPolicy::new(),
             #[cfg(target_os = "linux")]
             capture_failure_active: false,
         }
@@ -351,16 +423,18 @@ impl DetectionWorker {
         capturer: &mut Box<dyn CaptureEngine>,
         pipeline: &mut DetectionPipeline,
     ) -> LinuxTickResult {
-        let mut overlay_snapshot_changed = false;
-        if self.window_scheduler.should_query() {
-            let previous_snapshot = self.window_snapshot;
+        let previous_snapshot = self.window_snapshot;
+        let queried = self.window_scheduler.should_query();
+        let mut target_changed = false;
+        let mut target_resized = false;
+        if queried {
             #[cfg(any(debug_assertions, feature = "telemetry"))]
             let snapshot_result =
                 tracker
                     .game_snapshot_with_telemetry()
-                    .map(|(snapshot, focus_telemetry)| {
-                        if let (Some(telemetry), Some(snapshot), Some(focus)) =
-                            (&self.runtime_telemetry, snapshot, focus_telemetry)
+                    .map(|(observation, focus_telemetry)| {
+                        if let (Some(telemetry), Some((snapshot, _)), Some(focus)) =
+                            (&self.runtime_telemetry, observation, focus_telemetry)
                         {
                             telemetry.record_window_observation(
                                 focus.target_xid,
@@ -376,31 +450,24 @@ impl DetectionWorker {
                                 snapshot.fullscreen,
                             );
                         }
-                        snapshot
+                        observation
                     });
             #[cfg(not(any(debug_assertions, feature = "telemetry")))]
             let snapshot_result = tracker.game_snapshot();
-            let snapshot = match snapshot_result {
-                Ok(snapshot) => snapshot,
+            let observation = match snapshot_result {
+                Ok(observation) => observation,
                 Err(error) => {
                     self.on_capture_fatal(pipeline, format!("window tracking failed: {error}"));
                     return LinuxTickResult::Reconnect;
                 }
             };
-            let target_changed =
-                self.window_snapshot.map(|s| s.window) != snapshot.map(|s| s.window);
-            let target_resized = capture_target_resized(previous_snapshot, snapshot);
-            let capture_state_changed = previous_snapshot
-                .map(|current| (current.window, current.foreground, current.fullscreen))
-                != snapshot.map(|current| (current.window, current.foreground, current.fullscreen));
-            overlay_snapshot_changed = previous_snapshot != snapshot;
+            let snapshot = observation.map(|(snapshot, _)| snapshot);
+            self.focus_observation = observation.map(|(_, focus)| focus);
+            target_changed = self.window_snapshot.map(|s| s.window) != snapshot.map(|s| s.window);
+            target_resized = capture_target_resized(previous_snapshot, snapshot);
             if let Err(error) = capturer.set_target(snapshot) {
                 return self.handle_linux_capture_error(capturer.as_ref(), pipeline, error);
             }
-            self.window_scheduler.update(
-                snapshot.map(|s| s.rect),
-                snapshot.is_some_and(|s| s.foreground),
-            );
             self.window_snapshot = snapshot;
             #[cfg(any(debug_assertions, feature = "telemetry"))]
             if snapshot.is_some() && !self.was_found {
@@ -409,22 +476,45 @@ impl DetectionWorker {
                     telemetry.start_session();
                 }
             }
+        }
 
-            if capture_state_changed {
-                self.capture_failure_active = false;
+        let focus_loss = match (self.window_snapshot.as_mut(), self.focus_observation) {
+            (Some(snapshot), Some(observation)) => {
+                let (foreground, loss) = self.focus_policy.update(observation, Instant::now());
+                snapshot.foreground = foreground;
+                loss
             }
-            if target_changed && snapshot.is_some() && self.was_found {
-                self.on_capture_interrupted(pipeline, "capture target changed");
-            } else if snapshot.is_some_and(|current| {
-                !current.foreground
-                    && previous_snapshot.is_none_or(|previous| {
-                        previous.window != current.window || previous.foreground
-                    })
-            }) {
-                self.on_capture_interrupted(pipeline, "game window is in the background");
-            } else if target_resized {
-                self.on_capture_interrupted(pipeline, "capture target resized");
+            _ => {
+                self.focus_policy.reset();
+                None
             }
+        };
+        if queried {
+            self.window_scheduler.update(
+                self.window_snapshot.map(|snapshot| snapshot.rect),
+                self.window_snapshot
+                    .is_some_and(|snapshot| snapshot.foreground),
+            );
+        }
+        let capture_state_changed = previous_snapshot
+            .map(|current| (current.window, current.foreground, current.fullscreen))
+            != self
+                .window_snapshot
+                .map(|current| (current.window, current.foreground, current.fullscreen));
+        let overlay_snapshot_changed = previous_snapshot != self.window_snapshot;
+        if capture_state_changed {
+            self.capture_failure_active = false;
+        }
+        if target_changed && self.window_snapshot.is_some() && self.was_found {
+            self.on_capture_interrupted(pipeline, "capture target changed");
+        } else if let Some(loss) = focus_loss {
+            let reason = match loss {
+                LinuxFocusLoss::Background => "game window is in the background",
+                LinuxFocusLoss::Unknown => "game window focus is unknown",
+            };
+            self.on_capture_interrupted(pipeline, reason);
+        } else if target_resized {
+            self.on_capture_interrupted(pipeline, "capture target resized");
         }
 
         let Some(snapshot) = self.window_snapshot else {
@@ -932,10 +1022,15 @@ impl WindowQueryScheduler {
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
-    use super::{capture_target_resized, DetectionPipeline, DetectionWorker, LinuxTickResult};
+    use super::{
+        capture_target_resized, DetectionPipeline, DetectionWorker, LinuxFocusLoss,
+        LinuxFocusPolicy, LinuxTickResult,
+    };
     use crate::capture::capture_engine::{CaptureEngine, CaptureErrorAction};
     use crate::capture::frame::CapturedFrame;
-    use crate::capture::window_tracker::{WindowRect, WindowSnapshot};
+    use crate::capture::window_tracker::{
+        FocusObservation, FocusSource, FocusState, WindowRect, WindowSnapshot,
+    };
     use overmax_data::{ImageIndexDb, Settings};
     use std::sync::mpsc;
 
@@ -947,6 +1042,14 @@ mod tests {
             rect,
             foreground: true,
             fullscreen: false,
+        }
+    }
+
+    fn focus(state: FocusState, generation: u64) -> FocusObservation {
+        FocusObservation {
+            state,
+            source: FocusSource::EwmhActiveWindow,
+            generation,
         }
     }
 
@@ -989,6 +1092,77 @@ mod tests {
 
         assert!(!capture_target_resized(Some(initial), Some(moved)));
         assert!(capture_target_resized(Some(initial), Some(resized)));
+    }
+
+    #[test]
+    fn debounces_background_and_graces_unknown_once() {
+        let start = std::time::Instant::now();
+        let mut policy = LinuxFocusPolicy::new();
+
+        assert_eq!(
+            policy.update(focus(FocusState::Focused, 1), start),
+            (true, None)
+        );
+        assert_eq!(
+            policy.update(
+                focus(FocusState::Background, 2),
+                start + std::time::Duration::from_millis(299)
+            ),
+            (true, None)
+        );
+        assert_eq!(
+            policy.update(
+                focus(FocusState::Background, 2),
+                start + std::time::Duration::from_millis(599)
+            ),
+            (false, Some(LinuxFocusLoss::Background))
+        );
+        assert_eq!(
+            policy.update(
+                focus(FocusState::Background, 2),
+                start + std::time::Duration::from_secs(2)
+            ),
+            (false, None)
+        );
+
+        assert_eq!(
+            policy.update(focus(FocusState::Focused, 3), start),
+            (true, None)
+        );
+        assert_eq!(
+            policy.update(focus(FocusState::Unknown, 4), start),
+            (true, None)
+        );
+        assert_eq!(
+            policy.update(
+                focus(FocusState::Unknown, 4),
+                start + std::time::Duration::from_millis(999)
+            ),
+            (true, None)
+        );
+        assert_eq!(
+            policy.update(
+                focus(FocusState::Unknown, 4),
+                start + std::time::Duration::from_secs(1)
+            ),
+            (false, Some(LinuxFocusLoss::Unknown))
+        );
+        assert_eq!(
+            policy.update(
+                focus(FocusState::Unknown, 4),
+                start + std::time::Duration::from_secs(2)
+            ),
+            (false, None)
+        );
+    }
+
+    #[test]
+    fn cold_start_unknown_is_fail_closed() {
+        let mut policy = LinuxFocusPolicy::new();
+        assert_eq!(
+            policy.update(focus(FocusState::Unknown, 1), std::time::Instant::now()),
+            (false, None)
+        );
     }
 
     #[test]

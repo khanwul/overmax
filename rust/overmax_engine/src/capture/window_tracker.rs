@@ -7,6 +7,29 @@ pub struct WindowRect {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusState {
+    Focused,
+    Background,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusSource {
+    WaylandForeignToplevel,
+    EwmhFocusedState,
+    EwmhActiveWindow,
+    XInputFocus,
+    None,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FocusObservation {
+    pub state: FocusState,
+    pub source: FocusSource,
+    pub generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WindowSnapshot {
     pub window: u64,
     pub rect: WindowRect,
