@@ -724,6 +724,10 @@ impl DetectionWorker {
             #[cfg(not(all(target_os = "linux", any(debug_assertions, feature = "telemetry"))))]
             self.roll_telemetry_log();
             let _ = self.game_found_tx.send(());
+            #[cfg(target_os = "linux")]
+            if !foreground {
+                self.send_detection_output(self.linux_detecting_output(None));
+            }
             self.request_repaint();
             self.log("[Detection] game window found".into());
         }
@@ -1261,13 +1265,46 @@ mod tests {
     }
 
     #[test]
-    fn cold_start_unknown_is_fail_closed() {
-        let mut policy = LinuxFocusPolicy::new();
+    fn cold_start_non_foreground_is_fail_closed() {
         let now = std::time::Instant::now();
-        assert_eq!(
-            policy.update(focus(FocusState::Unknown, 1), now, now),
-            (false, None)
+        for state in [FocusState::Background, FocusState::Unknown] {
+            let mut policy = LinuxFocusPolicy::new();
+            assert_eq!(policy.update(focus(state, 1), now, now), (false, None));
+        }
+    }
+
+    #[test]
+    fn publishes_initial_non_foreground_window_once() {
+        let (log_tx, _log_rx) = mpsc::channel();
+        let (game_tx, _game_rx) = mpsc::channel();
+        let (detection_tx, detection_rx) = mpsc::channel();
+        let mut worker = DetectionWorker::new(
+            std::path::PathBuf::new(),
+            Settings::default(),
+            std::sync::Arc::new(std::sync::Mutex::new(serde_json::Value::Null)),
+            log_tx,
+            game_tx,
+            detection_tx,
+            None,
+            std::sync::Arc::new(std::sync::Mutex::new(None)),
+            Box::new(|| {}),
         );
+        let mut background = snapshot(WindowRect {
+            left: 1920,
+            top: 0,
+            width: 2560,
+            height: 1440,
+        });
+        background.foreground = false;
+        worker.window_snapshot = Some(background);
+
+        assert!(!worker.on_window_found(background.rect, background.foreground));
+        assert_eq!(
+            detection_rx.recv().unwrap().window_snapshot,
+            Some(background)
+        );
+        assert!(!worker.on_window_found(background.rect, background.foreground));
+        assert!(detection_rx.try_recv().is_err());
     }
 
     #[test]

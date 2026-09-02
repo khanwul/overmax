@@ -726,7 +726,7 @@ impl Backend {
         }
     }
 
-    fn apply_snapshot(&mut self, snapshot: Arc<LinuxOverlaySnapshot>, _qh: &QueueHandle<Self>) {
+    fn apply_snapshot(&mut self, snapshot: Arc<LinuxOverlaySnapshot>, qh: &QueueHandle<Self>) {
         #[cfg(any(debug_assertions, feature = "telemetry"))]
         if let (Some(telemetry), Some(delivery)) =
             (&self.runtime_telemetry, &snapshot.delivery_telemetry)
@@ -753,6 +753,14 @@ impl Backend {
         if reposition && self.dragging {
             self.reset_pointer_state();
         }
+        if self.select_target_output() {
+            self.drop_surface();
+            if let Err(error) = self.create_surface(qh) {
+                self.recreate_on_output = true;
+                eprintln!("[LinuxOverlay] output switch failed: {error}");
+            }
+            return;
+        }
         self.set_input_passthrough(hidden);
         if size_changed {
             self.logical_size = size;
@@ -778,6 +786,19 @@ impl Backend {
         )
         .and_then(|target| {
             select_committed_output(&target.outputs, self.target_output.as_ref()).cloned()
+        })
+        .or_else(|| {
+            let rect = self.snapshot.as_ref()?.window_snapshot?.rect;
+            select_output_by_overlap(
+                rect,
+                self.output_state.outputs().filter_map(|output| {
+                    let geometry = self
+                        .output_state
+                        .info(&output)
+                        .and_then(|info| output_geometry(&info))?;
+                    Some((output, geometry.rect))
+                }),
+            )
         });
         if self.target_output == target {
             return false;
@@ -814,6 +835,10 @@ impl Backend {
 
     fn update_output_geometry(&mut self) -> bool {
         let output = self.target_output.as_ref().or(self.surface_output.as_ref());
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        if let Some(output) = output {
+            self.record_output_environment(output);
+        }
         let geometry = output
             .and_then(|output| self.output_state.info(output))
             .and_then(|info| output_geometry(&info));
@@ -1330,6 +1355,23 @@ fn output_geometry(info: &OutputInfo) -> Option<OutputGeometry> {
     })
 }
 
+fn select_output_by_overlap<T>(
+    game_rect: WindowRect,
+    outputs: impl Iterator<Item = (T, WindowRect)>,
+) -> Option<T> {
+    outputs
+        .map(|(output, rect)| {
+            let width = (game_rect.left + game_rect.width).min(rect.left + rect.width)
+                - game_rect.left.max(rect.left);
+            let height = (game_rect.top + game_rect.height).min(rect.top + rect.height)
+                - game_rect.top.max(rect.top);
+            (output, i64::from(width.max(0)) * i64::from(height.max(0)))
+        })
+        .max_by_key(|(_, overlap)| *overlap)
+        .filter(|(_, overlap)| *overlap > 0)
+        .map(|(output, _)| output)
+}
+
 fn physical_size(logical: (u32, u32), scale: f64) -> (u32, u32) {
     (
         (f64::from(logical.0) * scale).ceil().max(1.0) as u32,
@@ -1745,8 +1787,6 @@ impl OutputHandler for Backend {
         qh: &QueueHandle<Self>,
         _output: wl_output::WlOutput,
     ) {
-        #[cfg(any(debug_assertions, feature = "telemetry"))]
-        self.record_output_environment(&_output);
         self.refresh_output(qh);
     }
 
@@ -1944,8 +1984,8 @@ mod tests {
     use super::{
         calculate_margin, output_render_scale, overlay_props, panel_margin, panel_size,
         parse_foreign_toplevel_states, physical_size, retained_panel_size, select_committed_output,
-        unique_matching_toplevel, uses_manual_position, ForeignToplevelState,
-        LinuxLayerOverlayHandle, LinuxOverlaySnapshot, PublishedSnapshots,
+        select_output_by_overlap, unique_matching_toplevel, uses_manual_position,
+        ForeignToplevelState, LinuxLayerOverlayHandle, LinuxOverlaySnapshot, PublishedSnapshots,
     };
     use overmax_core::{GameSessionState, SceneType};
     use overmax_data::{RecommendResult, RecordDB, RecordManager};
@@ -2002,6 +2042,38 @@ mod tests {
         assert_eq!(select_committed_output(&[1, 2], Some(&2)), Some(&2));
         assert_eq!(select_committed_output(&[1, 2], Some(&3)), None);
         assert_eq!(select_committed_output::<i32>(&[], Some(&1)), None);
+    }
+
+    #[test]
+    fn falls_back_to_the_output_with_the_largest_game_overlap() {
+        let left = WindowRect {
+            left: 0,
+            top: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let right = WindowRect {
+            left: 1920,
+            top: 0,
+            width: 2560,
+            height: 1440,
+        };
+        assert_eq!(
+            select_output_by_overlap(right, [("left", left), ("right", right)].into_iter()),
+            Some("right")
+        );
+        assert_eq!(
+            select_output_by_overlap(
+                WindowRect {
+                    left: -500,
+                    top: -500,
+                    width: 100,
+                    height: 100,
+                },
+                [("left", left), ("right", right)].into_iter(),
+            ),
+            None
+        );
     }
 
     #[test]
