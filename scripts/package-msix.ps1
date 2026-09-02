@@ -42,8 +42,8 @@ param(
     [switch]$Sign,
     [switch]$Install,
     [switch]$Uninstall,
-    [string]$Publisher = "CN=OvermaxDev",
-    [string]$PackageName = "Orphera.Overmax",
+    [string]$Publisher = "CN=6268B140-1A8B-44B2-9B91-F2D0875FFBB1",
+    [string]$PackageName = "hitel00000.Overmax",
     [string]$PackageDisplayName = "Overmax",
     [string]$PublisherDisplayName = "hitel00000",
     [string]$PackageDescription = "DJMAX RESPECT V In-game Overlay & Recommendation Utility",
@@ -228,6 +228,19 @@ try {
         if (-not $pfxPath) {
             # Check or create default dev certificate
             $pfxPath = Join-Path $pfxDir "OvermaxDev.pfx"
+            if (Test-Path $pfxPath) {
+                try {
+                    $existingCert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfxPath, $CertPassword)
+                    if ($existingCert.Subject -ne $Publisher) {
+                        Write-Host "Existing certificate subject '$($existingCert.Subject)' does not match publisher '$Publisher'. Recreating..."
+                        Remove-Item -Force $pfxPath -ErrorAction SilentlyContinue
+                        Remove-Item -Force $cerPath -ErrorAction SilentlyContinue
+                    }
+                } catch {
+                    Remove-Item -Force $pfxPath -ErrorAction SilentlyContinue
+                    Remove-Item -Force $cerPath -ErrorAction SilentlyContinue
+                }
+            }
             if (-not (Test-Path $pfxPath)) {
                 Write-Host "Creating self-signed development certificate for '$Publisher'..."
                 $secPass = ConvertTo-SecureString $CertPassword -AsPlainText -Force

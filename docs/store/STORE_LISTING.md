@@ -11,14 +11,14 @@ Overmax의 Microsoft Store(Windows App Store) 등록, 심사 통과(Certificatio
 2. **새 앱 예약(Reserve app name)**:
    - 앱 이름을 `Overmax`로 예약합니다.
    - 예약 완료 후 **제품 관리(Product management) ➔ 제품 ID(Product Identity)** 메뉴에서 아래 식별자들을 확인합니다:
-     - **패키지 패밀리 이름 (Package Family Name)**
-     - **패키지 ID 이름 (Package/Identity Name)** (예: `xxxx.Overmax`)
-     - **게시자 ID (Publisher ID)** (예: `CN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`)
-     - **게시자 표시 이름 (Publisher Display Name)** (예: `hitel00000`)
+     - **패키지 ID 이름 (Package/Identity Name)**: `hitel00000.Overmax`
+     - **게시자 ID (Publisher ID)**: `CN=6268B140-1A8B-44B2-9B91-F2D0875FFBB1`
+     - **패키지 패밀리 이름 (Package Family Name)**: `hitel00000.Overmax_wq716j3vc216r`
+     - **게시자 표시 이름 (Publisher Display Name)**: `hitel00000`
 3. **릴리즈 패키지 생성**:
-   - 발급된 식별자를 인자로 전달하여 공식 Store용 MSIX 패키지를 빌드합니다:
+   - 스크립트 기본값이 위 식별자로 설정되어 있으므로 인자 없이 바로 빌드 가능합니다:
      ```powershell
-     .\scripts\package-msix.ps1 -PackageName "<Your-Package-Name>" -Publisher "<Your-Publisher-ID>" -PublisherDisplayName "<Your-PublisherDisplayName>"
+     .\scripts\package-msix.ps1 -SkipBuild -Sign
      ```
 
 ### 💡 MSIX 패키지 버전 번호 매핑 규격 (Version Mapping Policy)
