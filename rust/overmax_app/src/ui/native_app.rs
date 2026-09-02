@@ -320,7 +320,7 @@ impl NativeApp {
                 env!("CARGO_PKG_VERSION"),
             ),
         ));
-        #[cfg(not(all(target_os = "linux", any(debug_assertions, feature = "telemetry"))))]
+        #[cfg(all(target_os = "linux", not(any(debug_assertions, feature = "telemetry"))))]
         let runtime_telemetry: Option<
             Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>,
         > = None;
@@ -446,6 +446,7 @@ impl NativeApp {
             log_tx.clone(),
             game_found_tx,
             detection_tx,
+            #[cfg(target_os = "linux")]
             runtime_telemetry.clone(),
             #[cfg(target_os = "linux")]
             presentation_observation,

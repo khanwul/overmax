@@ -53,7 +53,7 @@ pub struct DetectionOutput {
     pub stable_hits: u32,
     pub sleep_hint: SleepHint,
     pub telemetry_snapshot: Option<PipelineTelemetrySnapshot>,
-    #[cfg(any(debug_assertions, feature = "telemetry"))]
+    #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
     pub delivery_telemetry: Option<crate::detector::telemetry::DetectionDeliveryTelemetry>,
 }
 
@@ -463,7 +463,7 @@ impl DetectionPipeline {
             stable_hits: self.play_state.stable_hits(),
             sleep_hint,
             telemetry_snapshot: None,
-            #[cfg(any(debug_assertions, feature = "telemetry"))]
+            #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
             delivery_telemetry: None,
         }
     }

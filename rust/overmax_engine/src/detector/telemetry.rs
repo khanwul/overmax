@@ -1,9 +1,15 @@
+#[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+#[cfg(target_os = "linux")]
+use std::time::Duration;
+use std::time::Instant;
 
+#[cfg(target_os = "linux")]
 const RUNTIME_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(5);
 
+#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DetectionDeliveryTelemetry {
     pub generation: u64,
@@ -12,6 +18,7 @@ pub struct DetectionDeliveryTelemetry {
     pub published_at: Option<Instant>,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Clone, Debug, PartialEq)]
 struct RuntimeEnvironment {
     app_version: String,
@@ -25,6 +32,7 @@ struct RuntimeEnvironment {
     output: Option<OutputEnvironment>,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Clone, Debug, PartialEq)]
 struct OutputEnvironment {
     name: String,
@@ -33,6 +41,7 @@ struct OutputEnvironment {
     scale: f64,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug)]
 struct WindowObservation {
     target_xid: u64,
@@ -43,6 +52,7 @@ struct WindowObservation {
     fullscreen: bool,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 struct RuntimeTelemetryState {
     environment: RuntimeEnvironment,
@@ -72,6 +82,7 @@ struct RuntimeTelemetryState {
     window: Option<WindowObservation>,
 }
 
+#[cfg(target_os = "linux")]
 impl RuntimeTelemetryState {
     fn reset_interval(&mut self, now: Instant) {
         self.interval_started = now;
@@ -98,6 +109,7 @@ impl RuntimeTelemetryState {
     }
 }
 
+#[cfg(target_os = "linux")]
 /// Shared, local-only diagnostics for the Linux capture-to-overlay delivery path.
 /// Call sites are compiled out in non-telemetry release builds.
 #[derive(Debug)]
@@ -106,6 +118,7 @@ pub struct RuntimeTelemetry {
     state: Mutex<RuntimeTelemetryState>,
 }
 
+#[cfg(target_os = "linux")]
 impl RuntimeTelemetry {
     pub fn new(root: &Path, app_version: &str) -> Self {
         let environment = RuntimeEnvironment {
@@ -406,10 +419,12 @@ impl RuntimeTelemetry {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn environment_value(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| "unset".to_string())
 }
 
+#[cfg(target_os = "linux")]
 fn unix_time_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -417,12 +432,14 @@ fn unix_time_ms() -> u128 {
         .as_millis()
 }
 
+#[cfg(target_os = "linux")]
 fn elapsed_us(start: Instant, end: Instant) -> u64 {
     end.saturating_duration_since(start)
         .as_micros()
         .min(u128::from(u64::MAX)) as u64
 }
 
+#[cfg(target_os = "linux")]
 fn percentile_95(sorted_samples: &[u64]) -> u64 {
     if sorted_samples.is_empty() {
         return 0;
@@ -431,6 +448,7 @@ fn percentile_95(sorted_samples: &[u64]) -> u64 {
     sorted_samples[index]
 }
 
+#[cfg(target_os = "linux")]
 fn format_optional_duration(us: u64) -> String {
     if us == u64::MAX {
         "never".to_string()
@@ -439,6 +457,7 @@ fn format_optional_duration(us: u64) -> String {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn format_window_observation(window: WindowObservation) -> String {
     let active = window
         .active_xid
@@ -460,6 +479,7 @@ fn format_window_observation(window: WindowObservation) -> String {
     )
 }
 
+#[cfg(target_os = "linux")]
 fn format_output_environment(output: &OutputEnvironment) -> String {
     let physical = output.physical_size.map_or_else(
         || "unknown".to_string(),
@@ -706,6 +726,7 @@ impl PipelineStatsCollector {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn runtime_delivery_generations_and_capture_p95_are_stable() {
         let telemetry = RuntimeTelemetry::new(Path::new("unused"), "test");

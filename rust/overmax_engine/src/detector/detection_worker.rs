@@ -13,7 +13,9 @@ use crate::capture::window_tracker::{
 use crate::detector::detection_pipeline::{
     DetectionOutput, DetectionPipeline, JacketMatchStatus, SleepHint,
 };
+#[cfg(target_os = "linux")]
 use crate::detector::telemetry::RuntimeTelemetry;
+#[cfg(target_os = "linux")]
 use overmax_core::GameSessionState;
 use overmax_data::{DataCompatibility, ImageIndexDb, Settings};
 use std::path::{Path, PathBuf};
@@ -119,7 +121,7 @@ fn effective_focus(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+#[cfg_attr(target_os = "linux", allow(clippy::too_many_arguments))]
 pub fn spawn(
     root: PathBuf,
     settings: Settings,
@@ -127,7 +129,7 @@ pub fn spawn(
     log_tx: Sender<String>,
     game_found_tx: Sender<()>,
     detection_tx: Sender<DetectionOutput>,
-    runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
+    #[cfg(target_os = "linux")] runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
     #[cfg(target_os = "linux")] presentation_observation: SharedPresentationObservation,
     repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
 ) {
@@ -140,6 +142,7 @@ pub fn spawn(
             log_tx,
             game_found_tx,
             detection_tx,
+            #[cfg(target_os = "linux")]
             runtime_telemetry,
             #[cfg(target_os = "linux")]
             presentation_observation,
@@ -161,6 +164,20 @@ fn initialize_winrt(log_tx: &Sender<String>) {
 #[cfg(not(target_os = "windows"))]
 fn initialize_winrt(_log_tx: &Sender<String>) {}
 
+#[cfg(target_os = "windows")]
+#[derive(Clone, PartialEq)]
+// Keep the legacy Windows repaint trigger set independent from Linux overlay delivery.
+struct RepaintFingerprint {
+    game_rect: Option<crate::capture::window_tracker::WindowRect>,
+    is_fullscreen: bool,
+    current_song_id: Option<i32>,
+    is_song_select: bool,
+    scene_detected: bool,
+    jacket_status: JacketMatchStatus,
+    capture_fatal: Option<String>,
+}
+
+#[cfg(target_os = "linux")]
 #[derive(Clone, PartialEq)]
 struct RepaintFingerprint {
     state: GameSessionState,
@@ -173,6 +190,7 @@ struct RepaintFingerprint {
     capture_fatal: Option<String>,
 }
 
+#[cfg(target_os = "linux")]
 impl From<&DetectionOutput> for RepaintFingerprint {
     fn from(output: &DetectionOutput) -> Self {
         Self {
@@ -223,7 +241,7 @@ struct DetectionWorker {
 }
 
 impl DetectionWorker {
-    #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(target_os = "linux", allow(clippy::too_many_arguments))]
     fn new(
         root: PathBuf,
         settings: Settings,
@@ -231,7 +249,7 @@ impl DetectionWorker {
         log_tx: Sender<String>,
         game_found_tx: Sender<()>,
         detection_tx: Sender<DetectionOutput>,
-        runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
+        #[cfg(target_os = "linux")] runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
         #[cfg(target_os = "linux")] presentation_observation: SharedPresentationObservation,
         repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
     ) -> Self {
@@ -240,7 +258,7 @@ impl DetectionWorker {
         if (cfg!(debug_assertions) || cfg!(feature = "telemetry")) && telemetry_log_path.exists() {
             let _ = std::fs::rename(&telemetry_log_path, &prev_log_path);
         }
-        #[cfg(not(all(target_os = "linux", any(debug_assertions, feature = "telemetry"))))]
+        #[cfg(all(target_os = "linux", not(any(debug_assertions, feature = "telemetry"))))]
         let _ = runtime_telemetry;
         Self {
             root,
@@ -431,7 +449,15 @@ impl DetectionWorker {
                 self.log_detection_summary(&out);
                 self.check_and_log_scene_transition(&out);
 
-                let fingerprint = RepaintFingerprint::from(&out);
+                let fingerprint = RepaintFingerprint {
+                    game_rect: out.game_rect,
+                    is_fullscreen: out.state.is_fullscreen,
+                    current_song_id: out.current_song_id,
+                    is_song_select: out.is_song_select,
+                    scene_detected: out.scene_detected,
+                    jacket_status: out.jacket_status.clone(),
+                    capture_fatal: out.capture_fatal.clone(),
+                };
 
                 let state_changed = self.last_fingerprint.as_ref() != Some(&fingerprint);
                 if state_changed {
@@ -670,7 +696,7 @@ impl DetectionWorker {
             stable_hits: 0,
             sleep_hint: SleepHint::Relaxed,
             telemetry_snapshot: None,
-            #[cfg(any(debug_assertions, feature = "telemetry"))]
+            #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
             delivery_telemetry: None,
         }
     }
@@ -770,7 +796,7 @@ impl DetectionWorker {
                 stable_hits: 0,
                 sleep_hint: SleepHint::Relaxed,
                 telemetry_snapshot: None,
-                #[cfg(any(debug_assertions, feature = "telemetry"))]
+                #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
                 delivery_telemetry: None,
             });
             self.request_repaint();

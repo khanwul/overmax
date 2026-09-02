@@ -6,6 +6,7 @@ pub struct WindowRect {
     pub height: i32,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FocusState {
     Focused,
@@ -13,6 +14,7 @@ pub enum FocusState {
     Unknown,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FocusSource {
     WaylandForeignToplevel,
@@ -22,6 +24,7 @@ pub enum FocusSource {
     None,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FocusObservation {
     pub state: FocusState,
