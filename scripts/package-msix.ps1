@@ -130,25 +130,15 @@ try {
         throw "Failed to extract version from Cargo.toml"
     }
     $rawVersion = $versionMatch.Matches.Groups[1].Value
-    # SemVer -> MSIX 4-part version (Major.Minor.Build.Revision)
-    # Rule:
-    #   - Preview: X.Y.Z-preview<N> -> X.Y.Z.<N> (e.g. 0.4.1-preview1 -> 0.4.1.1)
-    #   - Release: X.Y.Z -> X.Y.Z.100 (e.g. 0.4.1 -> 0.4.1.100)
-    # Windows requires higher revision numbers for in-place upgrade (100 > N).
-    if ($rawVersion -match '^(\d+)\.(\d+)\.(\d+)-preview(\d+)$') {
-        $msixVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$($Matches[4])"
-    } elseif ($rawVersion -match '^(\d+)\.(\d+)\.(\d+)$') {
-        $msixVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).100"
-    } else {
-        # Fallback for arbitrary semver
-        $cleanVersion = ($rawVersion -split '-')[0]
-        $versionParts = $cleanVersion.Split('.')
-        while ($versionParts.Count -lt 3) {
-            $versionParts += "0"
-        }
-        $rev = if ($rawVersion -like "*-*") { "1" } else { "100" }
-        $msixVersion = "$($versionParts[0]).$($versionParts[1]).$($versionParts[2]).$rev"
+    # SemVer -> MSIX 4-part version (Major.Minor.Build.0)
+    # Microsoft Store policy strictly requires the revision number (4th digit) to be 0:
+    # "Apps cannot use version numbers that specify a non-zero revision number in the app manifest."
+    $cleanVersion = ($rawVersion -split '-')[0]
+    $versionParts = $cleanVersion.Split('.')
+    while ($versionParts.Count -lt 3) {
+        $versionParts += "0"
     }
+    $msixVersion = "$($versionParts[0]).$($versionParts[1]).$($versionParts[2]).0"
     Write-Host "Resolved MSIX Version: $msixVersion (Semver: $rawVersion)"
 
     # 4. Prepare Staging Directory

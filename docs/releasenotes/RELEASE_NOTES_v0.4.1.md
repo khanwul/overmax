@@ -1,4 +1,4 @@
-﻿# Overmax v0.4.1 릴리즈 노트
+# Overmax v0.4.1 릴리즈 노트
 
 > v0.4.0 이후 변경 사항 (v0.4.1)
 
@@ -62,11 +62,10 @@
   * Windows 10/11 SDK 도구(`MakeAppx.exe`, `SignTool.exe`) 자동 탐색.
   * 개발용 자체 서명 인증서(`OvermaxDev.pfx`, `OvermaxDev.cer`) 자동 생성 및 `LocalMachine\TrustedPeople` 신뢰 체인 안내 로직 탑재.
   * XML 특수문자(`&` 등) 자동 이스케이프 방어.
-* **[SemVer ➔ MSIX 4단위 버전 매핑 정책]**:
-  * Windows AppX의 `<Identity Version="Major.Minor.Build.Revision"/>` 정수 4자리 제약 및 단조 증가(Monotonic Increase) 업데이트 규칙 대응:
-    * **프리뷰 빌드**: `X.Y.Z-preview<N>` ➔ `X.Y.Z.<N>` (예: `0.4.1-preview1` ➔ `0.4.1.1`)
-    * **정식 릴리즈**: `X.Y.Z` ➔ `X.Y.Z.100` (예: `0.4.1` ➔ `0.4.1.100`)
-    * Revision 번호 체계($100 > N$)를 통해 프리뷰 설치 플레이어도 정식 버전 출시 시 매끄럽게 자동 상위 업데이트 보장.
+* **[SemVer ➔ MSIX 4단위 버전 규격화 (Major.Minor.Build.0)]**:
+  * Microsoft Store 패키지 승인 정책상 4번째 자리(수정 번호, Revision)는 스토어 내부 관리용으로 예약되어 있어 반드시 `0`이어야 하는 제약 반영:
+    * **프리뷰/정식 공통**: `X.Y.Z(-preview<N>)` ➔ `X.Y.Z.0` (예: `0.4.1-preview1` ➔ `0.4.1.0`)
+    * `scripts/package-msix.ps1`에서 `Major.Minor.Build.0`으로 자동 정규화.
 * **[스토어 정책 및 CI 연동]**:
   * Microsoft Partner Center 심사용 영/한 앱 설명, 서드파티 면책 조항(Disclaimer), `runFullTrust` 소명서, 오픈소스 개인정보처리방침([`docs/store/PRIVACY.md`](../store/PRIVACY.md)) 완비.
   * GitHub Actions Windows 워크플로우에 `dist/*.msix` 아티팩트 빌드 단계 연동.

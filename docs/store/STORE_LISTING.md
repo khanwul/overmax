@@ -23,15 +23,15 @@ Overmax의 Microsoft Store(Windows App Store) 등록, 심사 통과(Certificatio
 
 ### 💡 MSIX 패키지 버전 번호 매핑 규격 (Version Mapping Policy)
 
-Windows AppX / MSIX의 `<Identity Version="Major.Minor.Build.Revision"/>` 스펙은 **정수 4자리(0~65535)**만 허용하며, 인앱 및 스토어 업데이트는 이전 버전보다 숫자가 더 커야만 승인/적용됩니다.
-따라서 Overmax의 SemVer와 MSIX 패키지 버전은 다음과 같이 매핑합니다:
+Microsoft Store의 패키지 승인 정책에 따라, 매니페스트의 버전 4자리(`Major.Minor.Build.Revision`) 중 **4번째 자리(수정 번호, Revision)는 스토어 내부 관리용으로 예약되어 있으므로 반드시 `0`이어야만 승인**됩니다. (`0`이 아닐 경우 *“앱은 앱 매니페스트에서 지정한 0이 아닌 수정 번호의 버전을 사용할 수 없습니다”* 오류 발생)
+
+따라서 Overmax의 SemVer는 다음과 같이 `Major.Minor.Build.0` 형식으로 매핑됩니다:
 
 | 빌드 유형 | SemVer (`Cargo.toml`) | MSIX 버전 (`Identity Version`) | 비고 |
 | :--- | :--- | :--- | :--- |
-| **프리뷰 빌드** | `X.Y.Z-preview<N>` (예: `0.4.1-preview1`) | `X.Y.Z.<N>` (예: `0.4.1.1`) | Revision 자리에 프리뷰 번호 `<N>` 반영 |
-| **정식 릴리즈** | `X.Y.Z` (예: `0.4.1`) | `X.Y.Z.100` (예: `0.4.1.100`) | 정식 배포 시 Revision을 `.100`으로 고정 |
+| **프리뷰 빌드** | `X.Y.Z-preview<N>` (예: `0.4.1-preview1`) | `X.Y.Z.0` (예: `0.4.1.0`) | Revision은 스토어 필수 규격인 `.0`으로 고정 |
+| **정식 릴리즈** | `X.Y.Z` (예: `0.4.1`) | `X.Y.Z.0` (예: `0.4.1.0`) | `Major.Minor.Build.0` 표준 규격 |
 
-- **업데이트 흐름**: `0.4.1.1` (preview1) ➔ `0.4.1.2` (preview2) ➔ `0.4.1.100` (정식 v0.4.1). 정식 릴리즈의 Revision(100)이 항상 프리뷰 번호보다 크므로, 프리뷰를 설치했던 플레이어도 정식 버전 출시 시 매끄럽게 자동 업그레이드됩니다.
 - 이 변환은 [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1)에서 자동 처리됩니다.
 
 ---
