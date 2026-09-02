@@ -6,7 +6,9 @@ use crate::ui::overlay_ui::{self, OverlayActions, OverlayProps};
 use crate::ui::ui_command::UiCommand;
 use overmax_core::{GameSessionState, RecordValue};
 use overmax_data::{RecommendResult, RecordManager};
-use overmax_engine::capture::window_tracker::{WindowRect, WindowSnapshot};
+use overmax_engine::capture::window_tracker::{
+    FocusState, PresentationObservation, SharedPresentationObservation, WindowRect, WindowSnapshot,
+};
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
 };
@@ -25,6 +27,10 @@ use smithay_client_toolkit::{
             wp_viewport::{self, WpViewport},
             wp_viewporter::{self, WpViewporter},
         },
+    },
+    reexports::protocols_wlr::foreign_toplevel::v1::client::{
+        zwlr_foreign_toplevel_handle_v1::{self, ZwlrForeignToplevelHandleV1},
+        zwlr_foreign_toplevel_manager_v1::{self, ZwlrForeignToplevelManagerV1},
     },
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -90,6 +96,7 @@ pub struct LinuxLayerOverlayHandle {
     published: Arc<Mutex<PublishedSnapshots>>,
     wake_writer: Arc<UnixStream>,
     runtime_failure: Arc<Mutex<Option<String>>>,
+    presentation_observation: SharedPresentationObservation,
     #[cfg(any(debug_assertions, feature = "telemetry"))]
     runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
 }
@@ -174,6 +181,10 @@ impl LinuxLayerOverlayHandle {
             .ok()
             .and_then(|mut failure| failure.take())
     }
+
+    pub fn presentation_observation(&self) -> SharedPresentationObservation {
+        self.presentation_observation.clone()
+    }
 }
 
 fn same_display_snapshot(
@@ -208,12 +219,14 @@ fn same_display_snapshot(
 pub type AppRepaintCallback = Arc<dyn Fn() + Send + Sync>;
 
 pub fn spawn(
+    game_window_title: String,
     command_tx: Sender<UiCommand>,
     app_repaint: AppRepaintCallback,
     runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
 ) -> Result<LinuxLayerOverlayHandle, String> {
     let published = Arc::new(Mutex::new(PublishedSnapshots::default()));
     let runtime_failure = Arc::new(Mutex::new(None));
+    let presentation_observation = Arc::new(Mutex::new(None));
     let (wake_reader, wake_writer) = UnixStream::pair().map_err(|error| error.to_string())?;
     wake_reader
         .set_nonblocking(true)
@@ -225,17 +238,20 @@ pub fn spawn(
     let thread_published = published.clone();
     let thread_failure = runtime_failure.clone();
     let thread_telemetry = runtime_telemetry.clone();
+    let thread_presentation = presentation_observation.clone();
 
     std::thread::Builder::new()
         .name("overmax-linux-overlay".to_string())
         .spawn(move || {
             let result = run(
+                game_window_title,
                 command_tx,
                 app_repaint.clone(),
                 thread_published,
                 wake_reader,
                 ready_tx,
                 thread_telemetry,
+                thread_presentation,
             );
             if let Err(error) = result {
                 eprintln!("[LinuxOverlay] {error}");
@@ -254,20 +270,31 @@ pub fn spawn(
         published,
         wake_writer: Arc::new(wake_writer),
         runtime_failure,
+        presentation_observation,
         #[cfg(any(debug_assertions, feature = "telemetry"))]
         runtime_telemetry,
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
+    game_window_title: String,
     command_tx: Sender<UiCommand>,
     app_repaint: AppRepaintCallback,
     published: Arc<Mutex<PublishedSnapshots>>,
     wake_reader: UnixStream,
     ready_tx: SyncSender<Result<(), String>>,
     runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
+    presentation_observation: SharedPresentationObservation,
 ) -> Result<(), String> {
-    let initialized = Backend::new(command_tx, app_repaint, published, runtime_telemetry);
+    let initialized = Backend::new(
+        game_window_title,
+        command_tx,
+        app_repaint,
+        published,
+        runtime_telemetry,
+        presentation_observation,
+    );
     let (mut event_queue, mut backend) = match initialized {
         Ok(value) => {
             let _ = ready_tx.send(Ok(()));
@@ -350,6 +377,52 @@ fn drain_wake_socket(stream: &UnixStream) -> bool {
     }
 }
 
+#[derive(Clone, Default)]
+struct ForeignToplevelSnapshot {
+    title: Option<String>,
+    activated: bool,
+    fullscreen: Option<bool>,
+    outputs: Vec<wl_output::WlOutput>,
+}
+
+#[derive(Default)]
+struct ForeignToplevelState {
+    pending: ForeignToplevelSnapshot,
+    committed: Option<ForeignToplevelSnapshot>,
+}
+
+struct ForeignToplevel {
+    handle: ZwlrForeignToplevelHandleV1,
+    state: ForeignToplevelState,
+}
+
+fn parse_foreign_toplevel_states(raw: &[u8], supports_fullscreen: bool) -> (bool, Option<bool>) {
+    let mut activated = false;
+    let mut fullscreen = false;
+    for bytes in raw.chunks_exact(4) {
+        match u32::from_ne_bytes(bytes.try_into().expect("four-byte chunk")) {
+            2 => activated = true,
+            3 if supports_fullscreen => fullscreen = true,
+            _ => {}
+        }
+    }
+    (activated, supports_fullscreen.then_some(fullscreen))
+}
+
+fn unique_matching_toplevel<'a>(
+    title: &str,
+    toplevels: impl Iterator<Item = &'a ForeignToplevelState>,
+) -> Option<&'a ForeignToplevelSnapshot> {
+    let mut matches = toplevels.filter_map(|state| {
+        state
+            .committed
+            .as_ref()
+            .filter(|snapshot| snapshot.title.as_deref() == Some(title))
+    });
+    let target = matches.next()?;
+    matches.next().is_none().then_some(target)
+}
+
 struct Backend {
     registry_state: RegistryState,
     seat_state: SeatState,
@@ -358,6 +431,11 @@ struct Backend {
     layer_shell: LayerShell,
     viewporter: Option<WpViewporter>,
     fractional_scale_manager: Option<WpFractionalScaleManagerV1>,
+    foreign_toplevel_manager: Option<ZwlrForeignToplevelManagerV1>,
+    foreign_toplevels: Vec<ForeignToplevel>,
+    game_window_title: String,
+    presentation_observation: SharedPresentationObservation,
+    presentation_generation: u64,
     connection: Connection,
     layer: Option<LayerSurface>,
     viewport: Option<WpViewport>,
@@ -401,10 +479,12 @@ struct Backend {
 
 impl Backend {
     fn new(
+        game_window_title: String,
         command_tx: Sender<UiCommand>,
         app_repaint: AppRepaintCallback,
         published: Arc<Mutex<PublishedSnapshots>>,
         runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
+        presentation_observation: SharedPresentationObservation,
     ) -> Result<(wayland_client::EventQueue<Self>, Self), String> {
         #[cfg(not(any(debug_assertions, feature = "telemetry")))]
         let _ = &runtime_telemetry;
@@ -432,6 +512,9 @@ impl Backend {
                 .bind::<WpFractionalScaleManagerV1, _, _>(&qh, 1..=1, ())
                 .ok()
         });
+        let foreign_toplevel_manager = globals
+            .bind::<ZwlrForeignToplevelManagerV1, _, _>(&qh, 1..=3, ())
+            .ok();
         let requested_size = panel_size(None);
         let margin = (DEFAULT_MARGIN, DEFAULT_MARGIN);
         let layer = create_layer(
@@ -490,6 +573,11 @@ impl Backend {
                 layer_shell,
                 viewporter,
                 fractional_scale_manager,
+                foreign_toplevel_manager,
+                foreign_toplevels: Vec::new(),
+                game_window_title,
+                presentation_observation,
+                presentation_generation: 0,
                 connection,
                 layer: Some(layer),
                 viewport,
@@ -529,6 +617,43 @@ impl Backend {
                 runtime_telemetry,
             },
         ))
+    }
+
+    fn publish_presentation_observation(&mut self) {
+        let target = unique_matching_toplevel(
+            &self.game_window_title,
+            self.foreign_toplevels
+                .iter()
+                .map(|toplevel| &toplevel.state),
+        )
+        .map(|target| (target.activated, target.fullscreen));
+        self.presentation_generation = self.presentation_generation.wrapping_add(1);
+        let observation = target.map(|(activated, fullscreen)| PresentationObservation {
+            focus: if activated {
+                FocusState::Focused
+            } else {
+                FocusState::Background
+            },
+            fullscreen,
+            generation: self.presentation_generation,
+            committed_at: Instant::now(),
+        });
+        if let Ok(mut shared) = self.presentation_observation.lock() {
+            *shared = observation;
+        }
+    }
+
+    fn remove_toplevel_output(&mut self, output: &wl_output::WlOutput) {
+        for toplevel in &mut self.foreign_toplevels {
+            toplevel
+                .state
+                .pending
+                .outputs
+                .retain(|candidate| candidate != output);
+            if let Some(committed) = &mut toplevel.state.committed {
+                committed.outputs.retain(|candidate| candidate != output);
+            }
+        }
     }
 
     fn after_dispatch(&mut self, qh: &QueueHandle<Self>) -> Result<(), String> {
@@ -1592,6 +1717,7 @@ impl OutputHandler for Backend {
         qh: &QueueHandle<Self>,
         output: wl_output::WlOutput,
     ) {
+        self.remove_toplevel_output(&output);
         if self.target_output.as_ref() == Some(&output) {
             self.target_output = None;
             self.output_origin = (0, 0);
@@ -1670,6 +1796,96 @@ impl Dispatch<WpViewport, ()> for Backend {
     }
 }
 
+impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for Backend {
+    fn event(
+        state: &mut Self,
+        manager: &ZwlrForeignToplevelManagerV1,
+        event: zwlr_foreign_toplevel_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwlr_foreign_toplevel_manager_v1::Event::Toplevel { toplevel } => {
+                state.foreign_toplevels.push(ForeignToplevel {
+                    handle: toplevel,
+                    state: ForeignToplevelState::default(),
+                });
+            }
+            zwlr_foreign_toplevel_manager_v1::Event::Finished => {
+                if state.foreign_toplevel_manager.as_ref() == Some(manager) {
+                    state.foreign_toplevel_manager = None;
+                }
+                state.foreign_toplevels.clear();
+                state.publish_presentation_observation();
+            }
+            _ => {}
+        }
+    }
+
+    wayland_client::event_created_child!(Backend, ZwlrForeignToplevelManagerV1, [
+        zwlr_foreign_toplevel_manager_v1::EVT_TOPLEVEL_OPCODE => (ZwlrForeignToplevelHandleV1, ())
+    ]);
+}
+
+impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for Backend {
+    fn event(
+        state: &mut Self,
+        handle: &ZwlrForeignToplevelHandleV1,
+        event: zwlr_foreign_toplevel_handle_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let Some(index) = state
+            .foreign_toplevels
+            .iter()
+            .position(|toplevel| &toplevel.handle == handle)
+        else {
+            return;
+        };
+        let mut publish = false;
+        let mut closed = false;
+        let toplevel = &mut state.foreign_toplevels[index];
+        match event {
+            zwlr_foreign_toplevel_handle_v1::Event::Title { title } => {
+                toplevel.state.pending.title = Some(title);
+            }
+            zwlr_foreign_toplevel_handle_v1::Event::State { state: raw } => {
+                let (activated, fullscreen) =
+                    parse_foreign_toplevel_states(&raw, handle.version() >= 2);
+                toplevel.state.pending.activated = activated;
+                toplevel.state.pending.fullscreen = fullscreen;
+            }
+            zwlr_foreign_toplevel_handle_v1::Event::OutputEnter { output } => {
+                if !toplevel.state.pending.outputs.contains(&output) {
+                    toplevel.state.pending.outputs.push(output);
+                }
+            }
+            zwlr_foreign_toplevel_handle_v1::Event::OutputLeave { output } => {
+                toplevel
+                    .state
+                    .pending
+                    .outputs
+                    .retain(|candidate| candidate != &output);
+            }
+            zwlr_foreign_toplevel_handle_v1::Event::Done => {
+                toplevel.state.committed = Some(toplevel.state.pending.clone());
+                publish = true;
+            }
+            zwlr_foreign_toplevel_handle_v1::Event::Closed => closed = true,
+            _ => {}
+        }
+        if closed {
+            let toplevel = state.foreign_toplevels.remove(index);
+            toplevel.handle.destroy();
+            state.publish_presentation_observation();
+        } else if publish {
+            state.publish_presentation_observation();
+        }
+    }
+}
+
 delegate_compositor!(Backend);
 delegate_output!(Backend);
 delegate_seat!(Backend);
@@ -1689,7 +1905,8 @@ impl ProvidesRegistryState for Backend {
 mod tests {
     use super::{
         calculate_margin, intersection_area, overlay_props, panel_margin, panel_size,
-        physical_size, uses_manual_position, LinuxLayerOverlayHandle, LinuxOverlaySnapshot,
+        parse_foreign_toplevel_states, physical_size, unique_matching_toplevel,
+        uses_manual_position, ForeignToplevelState, LinuxLayerOverlayHandle, LinuxOverlaySnapshot,
         PublishedSnapshots,
     };
     use overmax_core::{GameSessionState, SceneType};
@@ -1768,6 +1985,39 @@ mod tests {
     }
 
     #[test]
+    fn commits_exact_unique_foreign_toplevel_state() {
+        let mut target = ForeignToplevelState::default();
+        target.pending.title = Some("DJMAX RESPECT V".into());
+        target.pending.activated = true;
+
+        assert!(unique_matching_toplevel("DJMAX RESPECT V", [&target].into_iter()).is_none());
+        target.committed = Some(target.pending.clone());
+        assert!(
+            unique_matching_toplevel("DJMAX RESPECT V", [&target].into_iter())
+                .is_some_and(|snapshot| snapshot.activated)
+        );
+
+        let duplicate = ForeignToplevelState {
+            committed: target.committed.clone(),
+            ..Default::default()
+        };
+        assert!(
+            unique_matching_toplevel("DJMAX RESPECT V", [&target, &duplicate].into_iter())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn parses_v1_focus_and_v2_fullscreen_states() {
+        let raw = [2u32.to_ne_bytes(), 3u32.to_ne_bytes(), 99u32.to_ne_bytes()].concat();
+        assert_eq!(parse_foreign_toplevel_states(&raw, false), (true, None));
+        assert_eq!(
+            parse_foreign_toplevel_states(&raw, true),
+            (true, Some(true))
+        );
+    }
+
+    #[test]
     fn publish_skips_equal_display_state_and_tracks_atomic_values() {
         let settings_open = Arc::new(AtomicBool::new(false));
         let sync_open = Arc::new(AtomicBool::new(false));
@@ -1833,6 +2083,7 @@ mod tests {
             published: Arc::new(Mutex::new(PublishedSnapshots::default())),
             wake_writer: Arc::new(writer),
             runtime_failure: Arc::new(Mutex::new(None)),
+            presentation_observation: Arc::new(Mutex::new(None)),
             runtime_telemetry: None,
         };
         let mut wake = [0u8; 8];

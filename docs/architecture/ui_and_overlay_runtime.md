@@ -106,7 +106,8 @@ Linux 환경에서는 표준 X11 창 띄우기 방식 대신 Wayland 네이티�
 ```
 [ Wayland Compositor (Sway, Hyprland, niri 등) ]
                       │
-           (wlr-layer-shell 프로토콜)
+       (wlr-layer-shell + optional
+        wlr-foreign-toplevel 프로토콜)
                       │
                       ▼
           [ LayerSurface: OVERLAY ]
@@ -121,3 +122,6 @@ Linux 환경에서는 표준 X11 창 띄우기 방식 대신 Wayland 네이티�
 2. **Fractional Scale 및 다중 출력 지원**:
    * 모니터별 Fractional Scale(예: 1.25배, 1.5배) 이벤트를 수신하여 렌더 버퍼 해상도를 동적으로 보정한다.
    * 게임 창이 위치한 `wl_output` 디스플레이 좌표계로 오버레이 원점을 자동 변환한다.
+3. **Optional foreign-toplevel 표시 상태**:
+   * 동일한 Wayland 연결에서 `zwlr_foreign_toplevel_manager_v1`을 capability 기반으로 bind하고, 설정된 게임 제목과 완전 일치하는 단일 handle의 `done` 단위 activated/fullscreen 상태만 commit한다.
+   * primitive 관찰값만 detection worker와 공유한다. protocol 부재, 중복 title, target close, manager 종료는 오류가 아니라 기존 X11/EWMH 3-state fallback으로 처리하며 Wayland proxy와 output 집합은 layer 스레드 밖으로 전달하지 않는다.

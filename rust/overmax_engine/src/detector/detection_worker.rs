@@ -6,7 +6,10 @@ use crate::capture::capture_engine::{AdaptiveCaptureEngine, CaptureEngine};
 use crate::capture::frame::CapturedFrame;
 use crate::capture::window_tracker::WindowTracker;
 #[cfg(target_os = "linux")]
-use crate::capture::window_tracker::{FocusObservation, FocusState, WindowSnapshot};
+use crate::capture::window_tracker::{
+    FocusObservation, FocusSource, FocusState, PresentationObservation,
+    SharedPresentationObservation, WindowSnapshot,
+};
 use crate::detector::detection_pipeline::{
     DetectionOutput, DetectionPipeline, JacketMatchStatus, SleepHint,
 };
@@ -58,11 +61,12 @@ impl LinuxFocusPolicy {
     fn update(
         &mut self,
         observation: FocusObservation,
+        committed_at: Instant,
         now: Instant,
     ) -> (bool, Option<LinuxFocusLoss>) {
         if self.observed != Some(observation.state) {
             self.observed = Some(observation.state);
-            self.observed_since = Some(now);
+            self.observed_since = Some(committed_at.min(now));
         }
         if observation.state == FocusState::Focused {
             self.foreground = true;
@@ -103,6 +107,18 @@ fn capture_target_resized(
     })
 }
 
+#[cfg(target_os = "linux")]
+fn effective_focus(
+    x11: FocusObservation,
+    presentation: Option<PresentationObservation>,
+) -> FocusObservation {
+    presentation.map_or(x11, |presentation| FocusObservation {
+        state: presentation.focus,
+        source: FocusSource::WaylandForeignToplevel,
+        generation: presentation.generation,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
     root: PathBuf,
@@ -112,6 +128,7 @@ pub fn spawn(
     game_found_tx: Sender<()>,
     detection_tx: Sender<DetectionOutput>,
     runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
+    #[cfg(target_os = "linux")] presentation_observation: SharedPresentationObservation,
     repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
 ) {
     std::thread::spawn(move || {
@@ -124,6 +141,8 @@ pub fn spawn(
             game_found_tx,
             detection_tx,
             runtime_telemetry,
+            #[cfg(target_os = "linux")]
+            presentation_observation,
             repaint_callback,
         );
         worker.run();
@@ -182,6 +201,8 @@ struct DetectionWorker {
     #[cfg(target_os = "linux")]
     focus_policy: LinuxFocusPolicy,
     #[cfg(target_os = "linux")]
+    presentation_observation: SharedPresentationObservation,
+    #[cfg(target_os = "linux")]
     capture_failure_active: bool,
 }
 
@@ -195,6 +216,7 @@ impl DetectionWorker {
         game_found_tx: Sender<()>,
         detection_tx: Sender<DetectionOutput>,
         runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
+        #[cfg(target_os = "linux")] presentation_observation: SharedPresentationObservation,
         repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
     ) -> Self {
         let telemetry_log_path = root.join("cache").join("telemetry.log");
@@ -236,6 +258,8 @@ impl DetectionWorker {
             focus_observation: None,
             #[cfg(target_os = "linux")]
             focus_policy: LinuxFocusPolicy::new(),
+            #[cfg(target_os = "linux")]
+            presentation_observation,
             #[cfg(target_os = "linux")]
             capture_failure_active: false,
         }
@@ -478,9 +502,20 @@ impl DetectionWorker {
             }
         }
 
+        let presentation = self
+            .presentation_observation
+            .lock()
+            .ok()
+            .and_then(|observation| *observation);
         let focus_loss = match (self.window_snapshot.as_mut(), self.focus_observation) {
-            (Some(snapshot), Some(observation)) => {
-                let (foreground, loss) = self.focus_policy.update(observation, Instant::now());
+            (Some(snapshot), Some(x11_observation)) => {
+                let now = Instant::now();
+                let observation = effective_focus(x11_observation, presentation);
+                let committed_at = presentation.map_or(now, |value| value.committed_at);
+                if let Some(fullscreen) = presentation.and_then(|value| value.fullscreen) {
+                    snapshot.fullscreen = fullscreen;
+                }
+                let (foreground, loss) = self.focus_policy.update(observation, committed_at, now);
                 snapshot.foreground = foreground;
                 loss
             }
@@ -1023,13 +1058,14 @@ impl WindowQueryScheduler {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::{
-        capture_target_resized, DetectionPipeline, DetectionWorker, LinuxFocusLoss,
-        LinuxFocusPolicy, LinuxTickResult,
+        capture_target_resized, effective_focus, DetectionPipeline, DetectionWorker,
+        LinuxFocusLoss, LinuxFocusPolicy, LinuxTickResult,
     };
     use crate::capture::capture_engine::{CaptureEngine, CaptureErrorAction};
     use crate::capture::frame::CapturedFrame;
     use crate::capture::window_tracker::{
-        FocusObservation, FocusSource, FocusState, WindowRect, WindowSnapshot,
+        FocusObservation, FocusSource, FocusState, PresentationObservation, WindowRect,
+        WindowSnapshot,
     };
     use overmax_data::{ImageIndexDb, Settings};
     use std::sync::mpsc;
@@ -1100,57 +1136,74 @@ mod tests {
         let mut policy = LinuxFocusPolicy::new();
 
         assert_eq!(
-            policy.update(focus(FocusState::Focused, 1), start),
+            policy.update(focus(FocusState::Focused, 1), start, start),
             (true, None)
         );
+        let background_commit = start + std::time::Duration::from_millis(100);
         assert_eq!(
             policy.update(
                 focus(FocusState::Background, 2),
-                start + std::time::Duration::from_millis(299)
+                background_commit,
+                background_commit + std::time::Duration::from_millis(299)
             ),
             (true, None)
         );
         assert_eq!(
             policy.update(
                 focus(FocusState::Background, 2),
-                start + std::time::Duration::from_millis(599)
+                background_commit,
+                background_commit + std::time::Duration::from_millis(300)
             ),
             (false, Some(LinuxFocusLoss::Background))
         );
         assert_eq!(
             policy.update(
                 focus(FocusState::Background, 2),
+                background_commit,
                 start + std::time::Duration::from_secs(2)
             ),
             (false, None)
         );
 
+        let focused_commit = start + std::time::Duration::from_secs(3);
         assert_eq!(
-            policy.update(focus(FocusState::Focused, 3), start),
+            policy.update(
+                focus(FocusState::Focused, 3),
+                focused_commit,
+                focused_commit
+            ),
             (true, None)
         );
-        assert_eq!(
-            policy.update(focus(FocusState::Unknown, 4), start),
-            (true, None)
-        );
+        let unknown_commit = focused_commit + std::time::Duration::from_millis(100);
         assert_eq!(
             policy.update(
                 focus(FocusState::Unknown, 4),
-                start + std::time::Duration::from_millis(999)
+                unknown_commit,
+                unknown_commit
             ),
             (true, None)
         );
         assert_eq!(
             policy.update(
                 focus(FocusState::Unknown, 4),
-                start + std::time::Duration::from_secs(1)
+                unknown_commit,
+                unknown_commit + std::time::Duration::from_millis(999)
+            ),
+            (true, None)
+        );
+        assert_eq!(
+            policy.update(
+                focus(FocusState::Unknown, 4),
+                unknown_commit,
+                unknown_commit + std::time::Duration::from_secs(1)
             ),
             (false, Some(LinuxFocusLoss::Unknown))
         );
         assert_eq!(
             policy.update(
                 focus(FocusState::Unknown, 4),
-                start + std::time::Duration::from_secs(2)
+                unknown_commit,
+                unknown_commit + std::time::Duration::from_secs(2)
             ),
             (false, None)
         );
@@ -1159,9 +1212,31 @@ mod tests {
     #[test]
     fn cold_start_unknown_is_fail_closed() {
         let mut policy = LinuxFocusPolicy::new();
+        let now = std::time::Instant::now();
         assert_eq!(
-            policy.update(focus(FocusState::Unknown, 1), std::time::Instant::now()),
+            policy.update(focus(FocusState::Unknown, 1), now, now),
             (false, None)
+        );
+    }
+
+    #[test]
+    fn wayland_focus_overrides_x11_fallback() {
+        let x11 = focus(FocusState::Background, 4);
+        let presentation = PresentationObservation {
+            focus: FocusState::Focused,
+            fullscreen: Some(true),
+            generation: 7,
+            committed_at: std::time::Instant::now(),
+        };
+
+        assert_eq!(effective_focus(x11, None), x11);
+        assert_eq!(
+            effective_focus(x11, Some(presentation)),
+            FocusObservation {
+                state: FocusState::Focused,
+                source: FocusSource::WaylandForeignToplevel,
+                generation: 7,
+            }
         );
     }
 
@@ -1178,6 +1253,7 @@ mod tests {
             game_tx,
             detection_tx,
             None,
+            std::sync::Arc::new(std::sync::Mutex::new(None)),
             Box::new(|| {}),
         );
         let mut pipeline = DetectionPipeline::new(ImageIndexDb::new("missing.db", 0.6));
@@ -1208,6 +1284,7 @@ mod tests {
             game_tx,
             detection_tx,
             None,
+            std::sync::Arc::new(std::sync::Mutex::new(None)),
             Box::new(|| {}),
         );
         let mut pipeline = DetectionPipeline::new(ImageIndexDb::new("missing.db", 0.6));

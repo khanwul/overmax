@@ -412,11 +412,14 @@ impl NativeApp {
         let ctx_holder: Arc<Mutex<Option<egui::Context>>> = Arc::new(Mutex::new(Some(initial_ctx)));
 
         #[cfg(target_os = "linux")]
+        let game_window_title = app_settings.window_tracker().window_title;
+        #[cfg(target_os = "linux")]
         let platform = platform::PlatformState::new(
             &ctx_holder,
             &merged_settings,
             &ui_cmd_tx,
             initial_hwnd,
+            &game_window_title,
             runtime_telemetry.clone(),
         )?;
         #[cfg(not(target_os = "linux"))]
@@ -433,6 +436,9 @@ impl NativeApp {
             }
         });
 
+        #[cfg(target_os = "linux")]
+        let presentation_observation = platform.linux_overlay.presentation_observation();
+
         detection_worker::spawn(
             paths.data_dir().to_path_buf(),
             app_settings.clone(),
@@ -441,6 +447,8 @@ impl NativeApp {
             game_found_tx,
             detection_tx,
             runtime_telemetry.clone(),
+            #[cfg(target_os = "linux")]
+            presentation_observation,
             repaint_callback,
         );
 

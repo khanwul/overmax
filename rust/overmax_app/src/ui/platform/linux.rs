@@ -99,6 +99,7 @@ impl PlatformState {
         _settings: &Arc<Mutex<Value>>,
         command_tx: &Sender<UiCommand>,
         _initial_hwnd: Option<isize>,
+        game_window_title: &str,
         runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
     ) -> Result<Self, String> {
         let ctx_holder_clone = ctx_holder.clone();
@@ -110,8 +111,12 @@ impl PlatformState {
             }
         });
 
-        let linux_overlay =
-            crate::ui::linux_layer_overlay::spawn(command_tx.clone(), repaint, runtime_telemetry)?;
+        let linux_overlay = crate::ui::linux_layer_overlay::spawn(
+            game_window_title.to_string(),
+            command_tx.clone(),
+            repaint,
+            runtime_telemetry,
+        )?;
 
         Ok(Self { linux_overlay })
     }
