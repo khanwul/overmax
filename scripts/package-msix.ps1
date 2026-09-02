@@ -45,7 +45,7 @@ param(
     [string]$Publisher = "CN=OvermaxDev",
     [string]$PackageName = "Orphera.Overmax",
     [string]$PackageDisplayName = "Overmax",
-    [string]$PublisherDisplayName = "orphera",
+    [string]$PublisherDisplayName = "hitel00000",
     [string]$PackageDescription = "DJMAX RESPECT V In-game Overlay & Recommendation Utility",
     [string]$CertPath = "",
     [string]$CertPassword = "overmax"

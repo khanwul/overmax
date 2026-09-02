@@ -1,4 +1,4 @@
-﻿# Microsoft Store Listing & Policy Compliance Guide
+# Microsoft Store Listing & Policy Compliance Guide
 
 Overmax의 Microsoft Store(Windows App Store) 등록, 심사 통과(Certification), 정책 준수 및 메타데이터 작성 가이드입니다.
 
@@ -14,7 +14,7 @@ Overmax의 Microsoft Store(Windows App Store) 등록, 심사 통과(Certificatio
      - **패키지 패밀리 이름 (Package Family Name)**
      - **패키지 ID 이름 (Package/Identity Name)** (예: `xxxx.Overmax`)
      - **게시자 ID (Publisher ID)** (예: `CN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`)
-     - **게시자 표시 이름 (Publisher Display Name)** (예: `Orphera`)
+     - **게시자 표시 이름 (Publisher Display Name)** (예: `hitel00000`)
 3. **릴리즈 패키지 생성**:
    - 발급된 식별자를 인자로 전달하여 공식 Store용 MSIX 패키지를 빌드합니다:
      ```powershell
