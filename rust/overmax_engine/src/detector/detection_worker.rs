@@ -1,8 +1,6 @@
 //! Runtime detection worker: window tracking -> capture -> pipeline -> UI state.
 
-#[cfg(target_os = "linux")]
-use crate::capture::capture_engine::CaptureErrorAction;
-use crate::capture::capture_engine::{AdaptiveCaptureEngine, CaptureEngine};
+use crate::capture::capture_engine::{AdaptiveCaptureEngine, CaptureEngine, CaptureErrorAction};
 use crate::capture::frame::CapturedFrame;
 #[cfg(target_os = "linux")]
 use crate::capture::window_tracker::{
@@ -443,7 +441,13 @@ impl DetectionWorker {
                     self.request_repaint();
                 }
             }
-            Err(e) => self.log_detection_throttled(format!("[Detection] capture failed: {e}")),
+            Err(e) => {
+                self.log_detection_throttled(format!("[Detection] capture failed: {e}"));
+                if capturer.error_action() == CaptureErrorAction::Stop {
+                    self.send_detection_output(self.detecting_output(Some(rect), None, Some(e)));
+                    self.request_repaint();
+                }
+            }
         }
     }
 
@@ -647,8 +651,12 @@ impl DetectionWorker {
     }
 
     /// `detecting()` output that closes stale verified state after a capture failure.
-    #[cfg(target_os = "linux")]
-    fn linux_detecting_output(&self, capture_fatal: Option<String>) -> DetectionOutput {
+    fn detecting_output(
+        &self,
+        game_rect: Option<WindowRect>,
+        window_snapshot: Option<WindowSnapshot>,
+        capture_fatal: Option<String>,
+    ) -> DetectionOutput {
         DetectionOutput {
             scene_detected: false,
             is_song_select: false,
@@ -660,8 +668,8 @@ impl DetectionWorker {
             current_song_id: None,
             image_db_ready: false,
             jacket_status: JacketMatchStatus::NotSongSelect,
-            game_rect: self.window_snapshot.map(|s| s.rect),
-            window_snapshot: self.window_snapshot,
+            game_rect,
+            window_snapshot,
             capture_fatal,
             top_jacket_similarity: None,
             roi_scale: 1.0,
@@ -672,6 +680,15 @@ impl DetectionWorker {
             #[cfg(any(debug_assertions, feature = "telemetry"))]
             delivery_telemetry: None,
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_detecting_output(&self, capture_fatal: Option<String>) -> DetectionOutput {
+        self.detecting_output(
+            self.window_snapshot.map(|s| s.rect),
+            self.window_snapshot,
+            capture_fatal,
+        )
     }
 
     #[cfg(target_os = "linux")]
@@ -749,29 +766,7 @@ impl DetectionWorker {
     #[cfg(target_os = "windows")]
     fn on_window_missing(&mut self) {
         if self.was_found {
-            self.send_detection_output(DetectionOutput {
-                scene_detected: false,
-                is_song_select: false,
-                is_result: false,
-                is_leaving: false,
-                confidence: 0.0,
-                state: GameSessionState::detecting(),
-                event: None,
-                current_song_id: None,
-                image_db_ready: false,
-                jacket_status: JacketMatchStatus::NotSongSelect,
-                game_rect: None,
-                window_snapshot: None,
-                capture_fatal: None,
-                top_jacket_similarity: None,
-                roi_scale: 1.0,
-                roi_offset_y: 0,
-                stable_hits: 0,
-                sleep_hint: SleepHint::Relaxed,
-                telemetry_snapshot: None,
-                #[cfg(any(debug_assertions, feature = "telemetry"))]
-                delivery_telemetry: None,
-            });
+            self.send_detection_output(self.detecting_output(None, None, None));
             self.request_repaint();
             self.log("[WindowTracker] game window lost".into());
         }
@@ -1061,10 +1056,10 @@ impl WindowQueryScheduler {
 mod tests {
     #[cfg(target_os = "linux")]
     use super::{
-        capture_target_resized, effective_focus, DetectionPipeline, DetectionWorker,
-        LinuxFocusLoss, LinuxFocusPolicy, LinuxTickResult,
+        capture_target_resized, effective_focus, DetectionPipeline, LinuxFocusLoss,
+        LinuxFocusPolicy, LinuxTickResult,
     };
-    use super::{JacketMatchStatus, RepaintFingerprint};
+    use super::{DetectionWorker, JacketMatchStatus, RepaintFingerprint};
     #[cfg(target_os = "linux")]
     use crate::capture::capture_engine::{CaptureEngine, CaptureErrorAction};
     #[cfg(target_os = "linux")]
@@ -1076,8 +1071,8 @@ mod tests {
     use crate::capture::window_tracker::{WindowRect, WindowSnapshot};
     use overmax_core::{Difficulty, GameSessionState, Mode, PlayContext, SceneType};
     #[cfg(target_os = "linux")]
-    use overmax_data::{ImageIndexDb, Settings};
-    #[cfg(target_os = "linux")]
+    use overmax_data::ImageIndexDb;
+    use overmax_data::Settings;
     use std::sync::mpsc;
 
     #[cfg(target_os = "linux")]
@@ -1403,5 +1398,65 @@ mod tests {
             detection_rx.recv().unwrap().capture_fatal.as_deref(),
             Some("unsupported pixel format")
         );
+    }
+
+    #[test]
+    fn detecting_output_resets_session_context_and_propagates_fatal() {
+        let (log_tx, _log_rx) = mpsc::channel();
+        let (game_tx, _game_rx) = mpsc::channel();
+        let (detection_tx, _detection_rx) = mpsc::channel();
+        let worker = DetectionWorker::new(
+            std::path::PathBuf::new(),
+            Settings::default(),
+            std::sync::Arc::new(std::sync::Mutex::new(serde_json::Value::Null)),
+            log_tx,
+            game_tx,
+            detection_tx,
+            None,
+            std::sync::Arc::new(std::sync::Mutex::new(None)),
+            Box::new(|| {}),
+        );
+        let test_rect = WindowRect {
+            left: 100,
+            top: 200,
+            width: 1920,
+            height: 1080,
+        };
+        let out =
+            worker.detecting_output(Some(test_rect), None, Some("device removed".to_string()));
+
+        assert!(!out.scene_detected);
+        assert!(!out.is_song_select);
+        assert!(out.state.context.is_none());
+        assert_eq!(out.game_rect, Some(test_rect));
+        assert_eq!(out.capture_fatal.as_deref(), Some("device removed"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_window_missing_emits_detecting_output() {
+        let (log_tx, _log_rx) = mpsc::channel();
+        let (game_tx, _game_rx) = mpsc::channel();
+        let (detection_tx, detection_rx) = mpsc::channel();
+        let mut worker = DetectionWorker::new(
+            std::path::PathBuf::new(),
+            Settings::default(),
+            std::sync::Arc::new(std::sync::Mutex::new(serde_json::Value::Null)),
+            log_tx,
+            game_tx,
+            detection_tx,
+            None,
+            std::sync::Arc::new(std::sync::Mutex::new(None)),
+            Box::new(|| {}),
+        );
+        worker.was_found = true;
+        worker.on_window_missing();
+
+        assert!(!worker.was_found);
+        let out = detection_rx.recv().unwrap();
+        assert!(!out.scene_detected);
+        assert!(out.state.context.is_none());
+        assert!(out.game_rect.is_none());
+        assert!(out.capture_fatal.is_none());
     }
 }
