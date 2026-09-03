@@ -714,8 +714,6 @@ impl NativeApp {
                     (overlay_ui::BASE_WIDTH * scale).ceil(),
                     (height * scale).ceil(),
                 )));
-            } else {
-                ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(1.0, 1.0)));
             }
         }
 
