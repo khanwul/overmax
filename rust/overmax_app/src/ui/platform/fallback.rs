@@ -38,6 +38,12 @@ impl PlatformState {
     ) -> Result<Self, String> {
         Ok(Self)
     }
+
+    pub fn presentation_observation(
+        &self,
+    ) -> overmax_engine::capture::window_tracker::SharedPresentationObservation {
+        std::sync::Arc::new(std::sync::Mutex::new(None))
+    }
 }
 
 pub fn get_local_mouse_pos(_ctx: &egui::Context, _hwnd_opt: Option<isize>) -> Option<egui::Pos2> {

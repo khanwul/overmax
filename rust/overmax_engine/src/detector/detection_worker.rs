@@ -4,16 +4,16 @@
 use crate::capture::capture_engine::CaptureErrorAction;
 use crate::capture::capture_engine::{AdaptiveCaptureEngine, CaptureEngine};
 use crate::capture::frame::CapturedFrame;
-use crate::capture::window_tracker::WindowTracker;
 #[cfg(target_os = "linux")]
 use crate::capture::window_tracker::{
     FocusObservation, FocusSource, FocusState, PresentationObservation,
-    SharedPresentationObservation, WindowSnapshot,
+};
+use crate::capture::window_tracker::{
+    SharedPresentationObservation, WindowRect, WindowSnapshot, WindowTracker,
 };
 use crate::detector::detection_pipeline::{
     DetectionOutput, DetectionPipeline, JacketMatchStatus, SleepHint,
 };
-#[cfg(target_os = "linux")]
 use crate::detector::telemetry::RuntimeTelemetry;
 use overmax_core::GameSessionState;
 use overmax_data::{DataCompatibility, ImageIndexDb, Settings};
@@ -120,7 +120,7 @@ fn effective_focus(
     })
 }
 
-#[cfg_attr(target_os = "linux", allow(clippy::too_many_arguments))]
+#[allow(clippy::too_many_arguments)]
 pub fn spawn(
     root: PathBuf,
     settings: Settings,
@@ -128,8 +128,8 @@ pub fn spawn(
     log_tx: Sender<String>,
     game_found_tx: Sender<()>,
     detection_tx: Sender<DetectionOutput>,
-    #[cfg(target_os = "linux")] runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
-    #[cfg(target_os = "linux")] presentation_observation: SharedPresentationObservation,
+    runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
+    presentation_observation: SharedPresentationObservation,
     repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
 ) {
     std::thread::spawn(move || {
@@ -141,9 +141,7 @@ pub fn spawn(
             log_tx,
             game_found_tx,
             detection_tx,
-            #[cfg(target_os = "linux")]
             runtime_telemetry,
-            #[cfg(target_os = "linux")]
             presentation_observation,
             repaint_callback,
         );
@@ -166,8 +164,8 @@ fn initialize_winrt(_log_tx: &Sender<String>) {}
 #[derive(Clone, PartialEq)]
 struct RepaintFingerprint {
     state: GameSessionState,
-    game_rect: Option<crate::capture::window_tracker::WindowRect>,
-    window_snapshot: Option<crate::capture::window_tracker::WindowSnapshot>,
+    game_rect: Option<WindowRect>,
+    window_snapshot: Option<WindowSnapshot>,
     current_song_id: Option<i32>,
     is_song_select: bool,
     scene_detected: bool,
@@ -198,7 +196,7 @@ struct DetectionWorker {
     log_tx: Sender<String>,
     game_found_tx: Sender<()>,
     detection_tx: Sender<DetectionOutput>,
-    #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+    #[cfg(any(debug_assertions, feature = "telemetry"))]
     runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
     start: Instant,
     last_window_log: Instant,
@@ -218,14 +216,14 @@ struct DetectionWorker {
     focus_observation: Option<FocusObservation>,
     #[cfg(target_os = "linux")]
     focus_policy: LinuxFocusPolicy,
-    #[cfg(target_os = "linux")]
+    #[allow(dead_code)]
     presentation_observation: SharedPresentationObservation,
     #[cfg(target_os = "linux")]
     capture_failure_active: bool,
 }
 
 impl DetectionWorker {
-    #[cfg_attr(target_os = "linux", allow(clippy::too_many_arguments))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         root: PathBuf,
         settings: Settings,
@@ -233,8 +231,8 @@ impl DetectionWorker {
         log_tx: Sender<String>,
         game_found_tx: Sender<()>,
         detection_tx: Sender<DetectionOutput>,
-        #[cfg(target_os = "linux")] runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
-        #[cfg(target_os = "linux")] presentation_observation: SharedPresentationObservation,
+        runtime_telemetry: Option<Arc<RuntimeTelemetry>>,
+        presentation_observation: SharedPresentationObservation,
         repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
     ) -> Self {
         let telemetry_log_path = root.join("cache").join("telemetry.log");
@@ -242,7 +240,7 @@ impl DetectionWorker {
         if (cfg!(debug_assertions) || cfg!(feature = "telemetry")) && telemetry_log_path.exists() {
             let _ = std::fs::rename(&telemetry_log_path, &prev_log_path);
         }
-        #[cfg(all(target_os = "linux", not(any(debug_assertions, feature = "telemetry"))))]
+        #[cfg(not(any(debug_assertions, feature = "telemetry")))]
         let _ = runtime_telemetry;
         Self {
             root,
@@ -252,7 +250,7 @@ impl DetectionWorker {
             log_tx,
             game_found_tx,
             detection_tx,
-            #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
             runtime_telemetry,
             start: Instant::now(),
             last_window_log: Instant::now() - LOG_INTERVAL,
@@ -276,7 +274,6 @@ impl DetectionWorker {
             focus_observation: None,
             #[cfg(target_os = "linux")]
             focus_policy: LinuxFocusPolicy::new(),
-            #[cfg(target_os = "linux")]
             presentation_observation,
             #[cfg(target_os = "linux")]
             capture_failure_active: false,
@@ -308,7 +305,7 @@ impl DetectionWorker {
         self.log("[Detection] Pure Rust Native Engine initialized".to_string());
 
         loop {
-            #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
             if let Some(telemetry) = &self.runtime_telemetry {
                 telemetry.maybe_log();
             }
@@ -441,7 +438,7 @@ impl DetectionWorker {
                 }
 
                 self.last_sleep_hint = out.sleep_hint;
-                let _ = self.detection_tx.send(out);
+                self.send_detection_output(out);
                 if state_changed {
                     self.request_repaint();
                 }
@@ -672,7 +669,7 @@ impl DetectionWorker {
             stable_hits: 0,
             sleep_hint: SleepHint::Relaxed,
             telemetry_snapshot: None,
-            #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
             delivery_telemetry: None,
         }
     }
@@ -752,7 +749,7 @@ impl DetectionWorker {
     #[cfg(target_os = "windows")]
     fn on_window_missing(&mut self) {
         if self.was_found {
-            let _ = self.detection_tx.send(DetectionOutput {
+            self.send_detection_output(DetectionOutput {
                 scene_detected: false,
                 is_song_select: false,
                 is_result: false,
@@ -772,7 +769,7 @@ impl DetectionWorker {
                 stable_hits: 0,
                 sleep_hint: SleepHint::Relaxed,
                 telemetry_snapshot: None,
-                #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+                #[cfg(any(debug_assertions, feature = "telemetry"))]
                 delivery_telemetry: None,
             });
             self.request_repaint();
@@ -898,7 +895,6 @@ impl DetectionWorker {
         }
     }
 
-    #[cfg(target_os = "linux")]
     #[allow(unused_mut)]
     fn send_detection_output(&self, mut output: DetectionOutput) {
         #[cfg(any(debug_assertions, feature = "telemetry"))]
