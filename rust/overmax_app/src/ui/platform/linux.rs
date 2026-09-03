@@ -126,6 +126,12 @@ impl PlatformState {
 
         Ok(Self { linux_overlay })
     }
+
+    pub fn presentation_observation(
+        &self,
+    ) -> overmax_engine::capture::window_tracker::SharedPresentationObservation {
+        self.linux_overlay.presentation_observation()
+    }
 }
 
 pub fn get_local_mouse_pos(_ctx: &egui::Context, _hwnd_opt: Option<isize>) -> Option<egui::Pos2> {

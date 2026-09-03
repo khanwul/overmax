@@ -6,7 +6,6 @@ pub struct WindowRect {
     pub height: i32,
 }
 
-#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FocusState {
     Focused,
@@ -32,7 +31,6 @@ pub struct FocusObservation {
     pub generation: u64,
 }
 
-#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PresentationObservation {
     pub focus: FocusState,
@@ -41,7 +39,6 @@ pub struct PresentationObservation {
     pub committed_at: std::time::Instant,
 }
 
-#[cfg(target_os = "linux")]
 pub type SharedPresentationObservation =
     std::sync::Arc<std::sync::Mutex<Option<PresentationObservation>>>;
 
