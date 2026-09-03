@@ -204,7 +204,6 @@ struct DetectionWorker {
     repaint_callback: Box<dyn Fn() + Send + Sync + 'static>,
     last_fingerprint: Option<RepaintFingerprint>,
     last_sleep_hint: SleepHint,
-    #[cfg(target_os = "windows")]
     last_scene_type: overmax_core::SceneType,
     frame_buffer: CapturedFrame,
     window_scheduler: WindowQueryScheduler,
@@ -258,7 +257,6 @@ impl DetectionWorker {
             repaint_callback,
             last_fingerprint: None,
             last_sleep_hint: SleepHint::Relaxed,
-            #[cfg(target_os = "windows")]
             last_scene_type: overmax_core::SceneType::Unknown,
             frame_buffer: CapturedFrame {
                 width: 0,
@@ -593,6 +591,7 @@ impl DetectionWorker {
                 out.window_snapshot = Some(snapshot);
                 out.state.is_fullscreen = snapshot.fullscreen;
                 self.log_detection_summary(&out);
+                self.check_and_log_scene_transition(&out);
 
                 let fingerprint = RepaintFingerprint::from(&out);
 
@@ -843,7 +842,6 @@ impl DetectionWorker {
         self.append_to_telemetry_log(&msg);
     }
 
-    #[cfg(target_os = "windows")]
     fn check_and_log_scene_transition(&mut self, out: &DetectionOutput) {
         let current_scene = out.state.scene;
         if self.last_scene_type != current_scene {
