@@ -404,6 +404,10 @@ impl DetectionWorker {
         if !self.on_window_found(rect, foreground) {
             return;
         }
+        #[cfg(any(debug_assertions, feature = "telemetry"))]
+        if let Some(telemetry) = &self.runtime_telemetry {
+            telemetry.record_capture_attempt();
+        }
         let cap_start = Instant::now();
         let cap_res = capturer.capture_bgra_inplace(rect, &mut self.frame_buffer);
         let cap_elapsed = cap_start.elapsed().as_micros() as u64;
@@ -411,6 +415,10 @@ impl DetectionWorker {
 
         match cap_res {
             Ok(_) => {
+                #[cfg(any(debug_assertions, feature = "telemetry"))]
+                if let Some(telemetry) = &self.runtime_telemetry {
+                    telemetry.record_capture_success(cap_elapsed);
+                }
                 let detect_start = Instant::now();
                 let mut out =
                     pipeline.detect(&self.frame_buffer, self.start.elapsed().as_secs_f64());
@@ -440,6 +448,10 @@ impl DetectionWorker {
                 }
             }
             Err(e) => {
+                #[cfg(any(debug_assertions, feature = "telemetry"))]
+                if let Some(telemetry) = &self.runtime_telemetry {
+                    telemetry.record_capture_failure();
+                }
                 self.log_detection_throttled(format!("[Detection] capture failed: {e}"));
                 if capturer.error_action() == CaptureErrorAction::Stop {
                     self.send_detection_output(self.detecting_output(Some(rect), None, Some(e)));
