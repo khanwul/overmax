@@ -163,20 +163,6 @@ fn initialize_winrt(log_tx: &Sender<String>) {
 #[cfg(not(target_os = "windows"))]
 fn initialize_winrt(_log_tx: &Sender<String>) {}
 
-#[cfg(target_os = "windows")]
-#[derive(Clone, PartialEq)]
-// Keep the legacy Windows repaint trigger set independent from Linux overlay delivery.
-struct RepaintFingerprint {
-    game_rect: Option<crate::capture::window_tracker::WindowRect>,
-    is_fullscreen: bool,
-    current_song_id: Option<i32>,
-    is_song_select: bool,
-    scene_detected: bool,
-    jacket_status: JacketMatchStatus,
-    capture_fatal: Option<String>,
-}
-
-#[cfg(target_os = "linux")]
 #[derive(Clone, PartialEq)]
 struct RepaintFingerprint {
     state: GameSessionState,
@@ -189,7 +175,6 @@ struct RepaintFingerprint {
     capture_fatal: Option<String>,
 }
 
-#[cfg(target_os = "linux")]
 impl From<&DetectionOutput> for RepaintFingerprint {
     fn from(output: &DetectionOutput) -> Self {
         Self {
@@ -448,15 +433,7 @@ impl DetectionWorker {
                 self.log_detection_summary(&out);
                 self.check_and_log_scene_transition(&out);
 
-                let fingerprint = RepaintFingerprint {
-                    game_rect: out.game_rect,
-                    is_fullscreen: out.state.is_fullscreen,
-                    current_song_id: out.current_song_id,
-                    is_song_select: out.is_song_select,
-                    scene_detected: out.scene_detected,
-                    jacket_status: out.jacket_status.clone(),
-                    capture_fatal: out.capture_fatal.clone(),
-                };
+                let fingerprint = RepaintFingerprint::from(&out);
 
                 let state_changed = self.last_fingerprint.as_ref() != Some(&fingerprint);
                 if state_changed {
@@ -1084,22 +1061,30 @@ impl WindowQueryScheduler {
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
     use super::{
         capture_target_resized, effective_focus, DetectionPipeline, DetectionWorker,
-        JacketMatchStatus, LinuxFocusLoss, LinuxFocusPolicy, LinuxTickResult, RepaintFingerprint,
+        LinuxFocusLoss, LinuxFocusPolicy, LinuxTickResult,
     };
+    use super::{JacketMatchStatus, RepaintFingerprint};
+    #[cfg(target_os = "linux")]
     use crate::capture::capture_engine::{CaptureEngine, CaptureErrorAction};
+    #[cfg(target_os = "linux")]
     use crate::capture::frame::CapturedFrame;
+    #[cfg(target_os = "linux")]
     use crate::capture::window_tracker::{
-        FocusObservation, FocusSource, FocusState, PresentationObservation, WindowRect,
-        WindowSnapshot,
+        FocusObservation, FocusSource, FocusState, PresentationObservation,
     };
+    use crate::capture::window_tracker::{WindowRect, WindowSnapshot};
     use overmax_core::{Difficulty, GameSessionState, Mode, PlayContext, SceneType};
+    #[cfg(target_os = "linux")]
     use overmax_data::{ImageIndexDb, Settings};
+    #[cfg(target_os = "linux")]
     use std::sync::mpsc;
 
+    #[cfg(target_os = "linux")]
     struct FailedCapture(CaptureErrorAction);
 
     fn snapshot(rect: WindowRect) -> WindowSnapshot {
@@ -1111,6 +1096,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     fn focus(state: FocusState, generation: u64) -> FocusObservation {
         FocusObservation {
             state,
@@ -1119,6 +1105,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     impl CaptureEngine for FailedCapture {
         fn capture_bgra(&mut self, _rect: WindowRect) -> Result<CapturedFrame, String> {
             unreachable!()
@@ -1187,6 +1174,7 @@ mod tests {
         assert!(foreground != background);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn resets_only_when_the_capture_size_changes() {
         let initial = snapshot(WindowRect {
@@ -1210,6 +1198,7 @@ mod tests {
         assert!(capture_target_resized(Some(initial), Some(resized)));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn debounces_background_and_graces_unknown_once() {
         let start = std::time::Instant::now();
@@ -1289,6 +1278,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn cold_start_non_foreground_is_fail_closed() {
         let now = std::time::Instant::now();
@@ -1298,6 +1288,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn publishes_initial_non_foreground_window_once() {
         let (log_tx, _log_rx) = mpsc::channel();
@@ -1332,6 +1323,7 @@ mod tests {
         assert!(detection_rx.try_recv().is_err());
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn wayland_focus_overrides_x11_fallback() {
         let x11 = focus(FocusState::Background, 4);
@@ -1353,6 +1345,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn sends_detecting_once_per_capture_failure_streak() {
         let (log_tx, _log_rx) = mpsc::channel();
@@ -1384,6 +1377,7 @@ mod tests {
         assert_eq!(detection_rx.try_iter().count(), 1);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn permanent_capture_error_stops_instead_of_reconnecting() {
         let (log_tx, _log_rx) = mpsc::channel();
