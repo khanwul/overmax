@@ -35,6 +35,8 @@ impl PlatformState {
         _settings: &Arc<Mutex<Value>>,
         _command_tx: &Sender<UiCommand>,
         _initial_hwnd: Option<isize>,
+        _game_window_title: &str,
+        _runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
     ) -> Result<Self, String> {
         Ok(Self)
     }

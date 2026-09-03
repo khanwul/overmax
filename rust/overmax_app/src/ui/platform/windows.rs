@@ -377,6 +377,8 @@ impl PlatformState {
         settings: &Arc<Mutex<Value>>,
         command_tx: &Sender<UiCommand>,
         initial_hwnd: Option<isize>,
+        _game_window_title: &str,
+        _runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
     ) -> Result<Self, String> {
         let tray = if settings
             .lock()

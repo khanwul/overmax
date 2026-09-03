@@ -411,9 +411,7 @@ impl NativeApp {
         let _ = &ui_cmd_tx;
         let ctx_holder: Arc<Mutex<Option<egui::Context>>> = Arc::new(Mutex::new(Some(initial_ctx)));
 
-        #[cfg(target_os = "linux")]
         let game_window_title = app_settings.window_tracker().window_title;
-        #[cfg(target_os = "linux")]
         let platform = platform::PlatformState::new(
             &ctx_holder,
             &merged_settings,
@@ -422,9 +420,6 @@ impl NativeApp {
             &game_window_title,
             runtime_telemetry.clone(),
         )?;
-        #[cfg(not(target_os = "linux"))]
-        let platform =
-            platform::PlatformState::new(&ctx_holder, &merged_settings, &ui_cmd_tx, initial_hwnd)?;
 
         let ctx_holder_clone = ctx_holder.clone();
 
