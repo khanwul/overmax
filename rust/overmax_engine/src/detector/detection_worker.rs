@@ -504,13 +504,6 @@ impl DetectionWorker {
                 return self.handle_linux_capture_error(capturer.as_ref(), pipeline, error);
             }
             self.window_snapshot = snapshot;
-            #[cfg(any(debug_assertions, feature = "telemetry"))]
-            if snapshot.is_some() && !self.was_found {
-                self.roll_telemetry_log();
-                if let Some(telemetry) = &self.runtime_telemetry {
-                    telemetry.start_session();
-                }
-            }
         }
 
         let presentation = self
@@ -737,12 +730,17 @@ impl DetectionWorker {
         foreground: bool,
     ) -> bool {
         if !self.was_found {
-            #[cfg(not(all(target_os = "linux", any(debug_assertions, feature = "telemetry"))))]
             self.roll_telemetry_log();
+            #[cfg(any(debug_assertions, feature = "telemetry"))]
+            if let Some(telemetry) = &self.runtime_telemetry {
+                telemetry.start_session();
+            }
             let _ = self.game_found_tx.send(());
-            #[cfg(target_os = "linux")]
             if !foreground {
+                #[cfg(target_os = "linux")]
                 self.send_detection_output(self.linux_detecting_output(None));
+                #[cfg(not(target_os = "linux"))]
+                self.send_detection_output(self.detecting_output(Some(rect), None, None));
             }
             self.request_repaint();
             self.log("[Detection] game window found".into());
