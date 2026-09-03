@@ -73,12 +73,12 @@ pub fn init_overlay_window_immediate() -> Option<isize> {
 
 pub fn native_options(settings: &overmax_data::Settings) -> eframe::NativeOptions {
     let _ = settings;
-    eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
             .with_title("Overmax")
-            .with_inner_size([1.0, 1.0])
-            .with_min_inner_size([1.0, 1.0])
-            .with_max_inner_size([1.0, 1.0])
+            .with_inner_size([2.0, 1.0])
+            .with_min_inner_size([2.0, 1.0])
+            .with_max_inner_size([2.0, 1.0])
             .with_resizable(false)
             .with_decorations(false)
             .with_transparent(true)
@@ -86,7 +86,13 @@ pub fn native_options(settings: &overmax_data::Settings) -> eframe::NativeOption
             .with_taskbar(false)
             .with_mouse_passthrough(true),
         ..Default::default()
-    }
+    };
+    options.event_loop_builder = Some(Box::new(|builder| {
+        use winit::platform::x11::EventLoopBuilderExtX11;
+
+        builder.with_x11();
+    }));
+    options
 }
 
 pub struct PlatformState {
@@ -99,6 +105,8 @@ impl PlatformState {
         _settings: &Arc<Mutex<Value>>,
         command_tx: &Sender<UiCommand>,
         _initial_hwnd: Option<isize>,
+        game_window_title: &str,
+        runtime_telemetry: Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
     ) -> Result<Self, String> {
         let ctx_holder_clone = ctx_holder.clone();
         let repaint = Arc::new(move || {
@@ -109,7 +117,12 @@ impl PlatformState {
             }
         });
 
-        let linux_overlay = crate::ui::linux_layer_overlay::spawn(command_tx.clone(), repaint)?;
+        let linux_overlay = crate::ui::linux_layer_overlay::spawn(
+            game_window_title.to_string(),
+            command_tx.clone(),
+            repaint,
+            runtime_telemetry,
+        )?;
 
         Ok(Self { linux_overlay })
     }

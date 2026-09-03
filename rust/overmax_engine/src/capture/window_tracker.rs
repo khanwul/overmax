@@ -6,6 +6,45 @@ pub struct WindowRect {
     pub height: i32,
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusState {
+    Focused,
+    Background,
+    Unknown,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusSource {
+    WaylandForeignToplevel,
+    EwmhFocusedState,
+    EwmhActiveWindow,
+    XInputFocus,
+    None,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FocusObservation {
+    pub state: FocusState,
+    pub source: FocusSource,
+    pub generation: u64,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PresentationObservation {
+    pub focus: FocusState,
+    pub fullscreen: Option<bool>,
+    pub generation: u64,
+    pub committed_at: std::time::Instant,
+}
+
+#[cfg(target_os = "linux")]
+pub type SharedPresentationObservation =
+    std::sync::Arc<std::sync::Mutex<Option<PresentationObservation>>>;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WindowSnapshot {
     pub window: u64,

@@ -106,18 +106,27 @@ Linux 환경에서는 표준 X11 창 띄우기 방식 대신 Wayland 네이티�
 ```
 [ Wayland Compositor (Sway, Hyprland, niri 등) ]
                       │
-           (wlr-layer-shell 프로토콜)
+       (wlr-layer-shell + optional
+        wlr-foreign-toplevel 프로토콜)
                       │
                       ▼
           [ LayerSurface: OVERLAY ]
   - 게임 창 위 상위 레이어에 고정 배치
-  - Keyboard Interactivity: None (게임 입력 100% 통과)
+  - Keyboard Interactivity: None
+  - 숨김 상태: empty input region으로 pointer/touch 통과
   - Fractional Scale & 다중 출력(wl_output) 자동 매핑
 ```
 
 1. **`wlr-layer-shell` 연동**:
    * 오버레이를 `Layer::Overlay` 레벨로 생성하여 전체화면 게임 위에서도 가려지지 않고 최상단에 안정적으로 렌더링된다.
-   * `KeyboardInteractivity::None`으로 설정하여 키보드 입력을 가로채지 않는다.
+   * `KeyboardInteractivity::None`으로 설정하여 키보드 입력을 가로채지 않는다. 숨길 때는 surface 크기를 바꾸지 않고 투명 버퍼와 empty input region을 적용하며, 다시 표시할 때 기본 input region을 복구해 기존 드래그와 컨트롤을 유지한다.
 2. **Fractional Scale 및 다중 출력 지원**:
    * 모니터별 Fractional Scale(예: 1.25배, 1.5배) 이벤트를 수신하여 렌더 버퍼 해상도를 동적으로 보정한다.
-   * 게임 창이 위치한 `wl_output` 디스플레이 좌표계로 오버레이 원점을 자동 변환한다.
+   * exact-title foreign-toplevel의 committed entered-output 집합에서 단일 output을 선택하고, 복수 output에서는 기존 선택을 유지한다. foreign-toplevel로 확정할 수 없으면 기존 X11 창과 Wayland output의 overlap 기반 선택으로 fallback한다.
+   * output을 선택한 뒤 fullscreen 배치와 margin 계산에는 해당 output의 local logical geometry만 사용한다. 실제 output 교체만 surface를 재생성하고 동일 output의 geometry/scale 변경은 기존 surface에 반영한다.
+3. **Optional foreign-toplevel 표시 상태**:
+   * 동일한 Wayland 연결에서 `zwlr_foreign_toplevel_manager_v1`을 capability 기반으로 bind하고, 설정된 게임 제목과 완전 일치하는 단일 handle의 `done` 단위 activated/fullscreen 상태만 commit한다.
+   * primitive 관찰값만 detection worker와 공유한다. protocol 부재, 중복 title, target close, manager 종료는 오류가 아니라 기존 X11/EWMH 3-state fallback으로 처리하며 Wayland proxy와 output 집합은 layer 스레드 밖으로 전달하지 않는다.
+4. **상태 변경 wake와 latest-snapshot 전달**:
+   * detection worker는 전체 `GameSessionState`와 engine-owned 표시 상태가 바뀔 때만 hidden eframe root를 깨운다. app은 기존 `same_display_snapshot` 비교를 거친 최신 snapshot만 non-blocking `UnixStream`으로 layer 스레드에 알린다.
+   * debug/telemetry 빌드에서는 detection generation을 app drain, accepted publish, layer apply, present까지 이어 기록한다. 일반 release 빌드에는 이 계측 호출이 포함되지 않는다.

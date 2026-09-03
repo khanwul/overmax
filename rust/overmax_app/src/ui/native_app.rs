@@ -293,6 +293,9 @@ pub struct NativeApp {
     pub(crate) last_detection_output: Option<DetectionOutput>,
     pub(crate) last_telemetry_snapshot:
         Option<overmax_engine::detector::telemetry::PipelineTelemetrySnapshot>,
+    #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+    pub(crate) runtime_telemetry:
+        Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
     pub(crate) ipc_publisher: crate::system::ipc_server::IpcPublisher,
     pub(crate) ipc_bound_port: crate::system::ipc_server::BoundPortSlot,
     pub(crate) ipc_handle: crate::system::ipc_server::IpcServerHandle,
@@ -310,6 +313,17 @@ impl NativeApp {
         paths: Arc<AppPaths>,
     ) -> Result<Self, String> {
         let root = Arc::new(paths.data_dir().to_path_buf());
+        #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+        let runtime_telemetry = Some(Arc::new(
+            overmax_engine::detector::telemetry::RuntimeTelemetry::new(
+                paths.data_dir(),
+                env!("CARGO_PKG_VERSION"),
+            ),
+        ));
+        #[cfg(all(target_os = "linux", not(any(debug_assertions, feature = "telemetry"))))]
+        let runtime_telemetry: Option<
+            Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>,
+        > = None;
         let defaults: Value = serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../settings.json"
@@ -397,6 +411,18 @@ impl NativeApp {
         let _ = &ui_cmd_tx;
         let ctx_holder: Arc<Mutex<Option<egui::Context>>> = Arc::new(Mutex::new(Some(initial_ctx)));
 
+        #[cfg(target_os = "linux")]
+        let game_window_title = app_settings.window_tracker().window_title;
+        #[cfg(target_os = "linux")]
+        let platform = platform::PlatformState::new(
+            &ctx_holder,
+            &merged_settings,
+            &ui_cmd_tx,
+            initial_hwnd,
+            &game_window_title,
+            runtime_telemetry.clone(),
+        )?;
+        #[cfg(not(target_os = "linux"))]
         let platform =
             platform::PlatformState::new(&ctx_holder, &merged_settings, &ui_cmd_tx, initial_hwnd)?;
 
@@ -410,6 +436,9 @@ impl NativeApp {
             }
         });
 
+        #[cfg(target_os = "linux")]
+        let presentation_observation = platform.linux_overlay.presentation_observation();
+
         detection_worker::spawn(
             paths.data_dir().to_path_buf(),
             app_settings.clone(),
@@ -417,6 +446,10 @@ impl NativeApp {
             log_tx.clone(),
             game_found_tx,
             detection_tx,
+            #[cfg(target_os = "linux")]
+            runtime_telemetry.clone(),
+            #[cfg(target_os = "linux")]
+            presentation_observation,
             repaint_callback,
         );
 
@@ -512,6 +545,8 @@ impl NativeApp {
             toast: None,
             last_detection_output: None,
             last_telemetry_snapshot: None,
+            #[cfg(all(target_os = "linux", any(debug_assertions, feature = "telemetry")))]
+            runtime_telemetry,
             ipc_publisher,
             ipc_bound_port,
             ipc_handle,

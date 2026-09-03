@@ -14,6 +14,14 @@ Overmax의 Linux 지원은 초기 단계입니다. Windows와 같은 범용 지�
 - 단일 출력의 창모드 캡처와 인식
 - 창모드 오버레이는 화면 기준 수동 배치만 지원하며 게임 창을 자동으로 따라가지 않음
 
+## 검증 환경
+
+- 배포 번들: Ubuntu 22.04 / glibc 2.35
+- 캡처 lifecycle CI: Xvfb + Openbox
+- Wayland compositor: KDE Plasma(KWin), Hyprland, niri, MangoWM
+
+KDE Plasma(KWin), Hyprland, niri에서는 게임 추적·캡처·오버레이 표시를 확인했습니다. MangoWM에서는 오버레이 표시까지 확인했지만, 0.15.x~0.16.1의 layer-shell 입력 회귀가 있어 아래의 [알려진 compositor 문제](#알려진-compositor-문제)를 함께 확인해야 합니다.
+
 ## 내 환경 확인하기
 
 압축을 푼 디렉터리에서 다음 명령을 실행합니다.
@@ -78,6 +86,16 @@ sh -c '(cd "OVERMAX_DIR" && exec ./overmax) & exec "$@"' -- %command%
 | 창모드에서 게임 창 이동 후 오버레이가 따라오지 않음   | 오버레이를 직접 다시 배치합니다.                                                                                                               |
 | 설정 또는 캐시 저장 시 권한 오류                      | bundle을 사용자 쓰기 권한이 있는 디렉터리에 다시 풉니다.                                                                                       |
 | 업데이트 후 실행되지 않음                             | 새 bundle 전체를 다시 풀고 기존 `settings.user.json`과 `cache/`만 복사합니다. 이전 실행 파일이나 공유 라이브러리와 섞지 마세요.                |
+
+## 알려진 compositor 문제
+
+### Mango layer-shell 입력 회귀
+
+Mango 0.16.1에서는 Overmax layer-shell 오버레이가 정상 표시되어도 마우스 입력이 뒤의 게임 창으로 전달될 수 있습니다. Mango 0.15.x부터 layer-shell surface의 마우스·키보드 입력이 무시되는 동일 증상이 [Mango issue #1214](https://github.com/mangowm/mango/issues/1214)에 보고되어 있습니다.
+
+Overmax에서 표시 상태의 input region과 `seat0` pointer binding을 확인했지만, compositor로부터 `wl_pointer.enter`, `motion`, `button` 이벤트가 전달되지 않았습니다. 따라서 이 버전 범위에서는 Overmax 설정이나 입력 영역 변경으로 해결할 수 없습니다.
+
+Mango upstream에서 수정된 버전을 사용하거나, 수정 전까지 정상 동작이 보고된 0.14.x 또는 다른 `wlr-layer-shell` compositor를 사용합니다. 게임의 키보드 포커스를 빼앗을 수 있는 `KeyboardInteractivity` 강제 변경은 우회책으로 사용하지 않습니다.
 
 ## 현재 미지원 기능과 환경
 
