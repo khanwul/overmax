@@ -45,6 +45,7 @@ OS별 구동 가이드 및 외부 연동 프로토콜 규격을 보관합니다.
 ### 4. Plans & RFCs (`docs/plans/`)
 과거 및 진행 중인 기술 기획서, 분석 보고서, 실험 결과를 보존합니다.
 * **디텍션 & CV 파이프라인**:
+  * [`2026-09-04-gpu-roi-atlas-capture-architecture.md`](plans/2026-09-04-gpu-roi-atlas-capture-architecture.md): GPU ROI Atlas 패킹 및 다중 해상도(720p~4K) 정규화 캡처 아키텍처.
   * [`2026-08-15-detection-pipeline-next-steps-plan.md`](plans/2026-08-15-detection-pipeline-next-steps-plan.md): 디텍션 파이프라인 잔여 작업 및 실측 계획.
   * [`2026-08-11-scene-detection-lightweight-plan.md`](plans/2026-08-11-scene-detection-lightweight-plan.md): 씬 감지기 경량화 및 Hysteresis 도입 계획.
   * [`2026-07-21-category-band-analysis-and-detection-spec.md`](plans/2026-07-21-category-band-analysis-and-detection-spec.md): 카테고리 띠 4px 통계 감지 사양.
