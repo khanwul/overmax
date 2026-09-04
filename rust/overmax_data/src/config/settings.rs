@@ -104,8 +104,8 @@ pub fn normalize_settings(settings: &mut Value) {
     let Value::Object(map) = settings else { return };
 
     if let Some(lang) = map.get("language").and_then(|v| v.as_str()) {
-        if lang != "ko" && lang != "en" && lang != "ja" {
-            map.insert("language".to_string(), json!("ko"));
+        if lang != "ko" && lang != "en" && lang != "ja" && lang != "auto" {
+            map.insert("language".to_string(), json!("auto"));
         }
     }
 
@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn test_normalize_settings() {
         let mut settings = json!({
-            "language": "fr", // should reset to "ko"
+            "language": "fr", // unknown should reset to "auto"
             "overlay": {
                 "scale": 1.1, // should snap to 1.0 or 1.25. (1.1-1.0)=0.1, (1.25-1.1)=0.15 => 1.0
                 "base_opacity": 1.5 // should clamp to 1.0
@@ -414,7 +414,7 @@ mod tests {
 
         normalize_settings(&mut settings);
 
-        assert_eq!(settings["language"], json!("ko"));
+        assert_eq!(settings["language"], json!("auto"));
         assert_eq!(settings["overlay"]["scale"], json!(1.0));
         assert_eq!(settings["overlay"]["base_opacity"], json!(1.0));
         assert_eq!(settings["window_tracker"]["poll_interval_sec"], json!(0.05));
@@ -428,9 +428,11 @@ mod tests {
 
     #[test]
     fn test_normalize_settings_keeps_valid_language() {
-        let mut settings = json!({"language": "en"});
-        normalize_settings(&mut settings);
-        assert_eq!(settings["language"], json!("en"));
+        for valid in ["ko", "en", "ja", "auto"] {
+            let mut settings = json!({"language": valid});
+            normalize_settings(&mut settings);
+            assert_eq!(settings["language"], json!(valid));
+        }
     }
 }
 

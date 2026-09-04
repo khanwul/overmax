@@ -587,3 +587,20 @@ pub fn draw_custom_cursor(painter: &egui::Painter, p: egui::Pos2) {
         stroke_white,
     );
 }
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetUserDefaultUILanguage() -> u16;
+}
+
+/// Detects the OS user interface display language.
+/// Returns "ko", "ja", or "en" (fallback for other languages).
+pub fn detect_os_language() -> &'static str {
+    let lang_id = unsafe { GetUserDefaultUILanguage() };
+    match lang_id & 0x03FF {
+        0x12 => "ko", // LANG_KOREAN
+        0x11 => "ja", // LANG_JAPANESE
+        0x09 => "en", // LANG_ENGLISH
+        _ => "en",    // Fallback to English for other locales
+    }
+}

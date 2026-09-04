@@ -734,37 +734,48 @@ fn general_section(ui: &mut egui::Ui, draft: &mut Value) {
     let current_lang = draft
         .get("language")
         .and_then(Value::as_str)
-        .unwrap_or("ko")
+        .unwrap_or("auto")
         .to_string();
 
-    segmented_row(ui, crate::t!("settings-language"), "", |ui| {
-        ui.horizontal(|ui| {
-            ui.style_mut().spacing.item_spacing.x = DialogTheme::GAP_XS;
-            ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
+    segmented_row(
+        ui,
+        crate::t!("settings-language"),
+        crate::t!("settings-language-hint"),
+        |ui| {
+            ui.horizontal(|ui| {
+                ui.style_mut().spacing.item_spacing.x = DialogTheme::GAP_XS;
+                ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
 
-            // right_to_left 이므로 역순으로 추가하여 화면에는 [한국어 | English | 日本語] 순으로 배치
-            for (label, val) in [("日本語", "ja"), ("English", "en"), ("한국어", "ko")] {
-                let is_active = current_lang == val;
-                let btn =
-                    egui::Button::new(RichText::new(label).size(DialogTheme::FONT_BODY).strong())
-                        .fill(if is_active {
-                            DialogTheme::BG_CONTROL_ACTIVE
-                        } else {
-                            DialogTheme::BG_CONTROL
-                        })
-                        .stroke(Stroke::new(1.0, DialogTheme::BG_CARD_STROKE))
-                        .corner_radius(CornerRadius::same(DialogTheme::R_SM))
-                        .wrap();
+                // right_to_left 이므로 역순으로 추가하여 화면에는 [자동 | 한국어 | English | 日本語] 순으로 배치
+                for (label, val) in [
+                    ("日本語", "ja"),
+                    ("English", "en"),
+                    ("한국어", "ko"),
+                    (crate::t!("settings-lang-auto"), "auto"),
+                ] {
+                    let is_active = current_lang == val;
+                    let btn = egui::Button::new(
+                        RichText::new(label).size(DialogTheme::FONT_BODY).strong(),
+                    )
+                    .fill(if is_active {
+                        DialogTheme::BG_CONTROL_ACTIVE
+                    } else {
+                        DialogTheme::BG_CONTROL
+                    })
+                    .stroke(Stroke::new(1.0, DialogTheme::BG_CARD_STROKE))
+                    .corner_radius(CornerRadius::same(DialogTheme::R_SM))
+                    .wrap();
 
-                if ui
-                    .add_sized(egui::vec2(84.0, DialogTheme::CONTROL_HEIGHT), btn)
-                    .clicked()
-                {
-                    root_map_mut(draft).insert("language".into(), json!(val));
+                    if ui
+                        .add_sized(egui::vec2(72.0, DialogTheme::CONTROL_HEIGHT), btn)
+                        .clicked()
+                    {
+                        root_map_mut(draft).insert("language".into(), json!(val));
+                    }
                 }
-            }
-        });
-    });
+            });
+        },
+    );
 }
 
 fn update_section(ui: &mut egui::Ui, draft: &mut Value) {

@@ -53,3 +53,7 @@ pub fn get_local_mouse_pos(_ctx: &egui::Context, _hwnd_opt: Option<isize>) -> Op
 }
 
 pub fn draw_custom_cursor(_painter: &egui::Painter, _p: egui::Pos2) {}
+
+pub fn detect_os_language() -> &'static str {
+    "en"
+}

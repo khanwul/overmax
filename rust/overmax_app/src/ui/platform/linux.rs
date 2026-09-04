@@ -140,6 +140,38 @@ pub fn get_local_mouse_pos(_ctx: &egui::Context, _hwnd_opt: Option<isize>) -> Op
 
 pub fn draw_custom_cursor(_painter: &egui::Painter, _p: egui::Pos2) {}
 
+/// Detects the OS user interface language via POSIX environment variables.
+/// Checks LANGUAGE -> LC_ALL -> LC_MESSAGES -> LANG in standard priority order.
+/// Returns "ko", "ja", or "en" (fallback for other languages).
+pub fn detect_os_language() -> &'static str {
+    parse_posix_locale(&[
+        std::env::var("LANGUAGE").ok(),
+        std::env::var("LC_ALL").ok(),
+        std::env::var("LC_MESSAGES").ok(),
+        std::env::var("LANG").ok(),
+    ])
+}
+
+fn parse_posix_locale(envs: &[Option<String>]) -> &'static str {
+    for env in envs.iter().flatten() {
+        let trimmed = env.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        for part in trimmed.split(':') {
+            let p = part.trim().to_ascii_lowercase();
+            if p.starts_with("ko") {
+                return "ko";
+            } else if p.starts_with("ja") {
+                return "ja";
+            } else if p.starts_with("en") {
+                return "en";
+            }
+        }
+    }
+    "en"
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -148,5 +180,24 @@ mod tests {
             super::parse_fontconfig_match("fonts/NotoSansCJK.ttc\n7\n"),
             Some(("fonts/NotoSansCJK.ttc", 7))
         );
+    }
+
+    #[test]
+    fn test_posix_locale_detection() {
+        use super::parse_posix_locale;
+
+        assert_eq!(parse_posix_locale(&[Some("ko_KR.UTF-8".into())]), "ko");
+        assert_eq!(parse_posix_locale(&[Some("ja_JP.UTF-8".into())]), "ja");
+        assert_eq!(parse_posix_locale(&[Some("en_US.UTF-8".into())]), "en");
+        assert_eq!(parse_posix_locale(&[None, Some("ko_KR".into())]), "ko");
+        // Colon-separated LANGUAGE priority list
+        assert_eq!(
+            parse_posix_locale(&[Some("de_DE:ja_JP:en_US".into())]),
+            "ja"
+        );
+        // Unsupported language falls back to English
+        assert_eq!(parse_posix_locale(&[Some("fr_FR.UTF-8".into())]), "en");
+        // Empty falls back to English
+        assert_eq!(parse_posix_locale(&[None, Some("".into())]), "en");
     }
 }

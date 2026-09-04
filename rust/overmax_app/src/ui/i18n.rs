@@ -30,14 +30,30 @@ pub fn current_locale() -> Locale {
     }
 }
 
-/// Reads the top-level `"language"` key (`"ko"`/`"en"`/`"ja"`) from merged settings JSON.
-pub fn set_locale_from_settings(settings: &Value) {
-    let locale = match settings.get("language").and_then(Value::as_str) {
+/// Resolves a locale from an explicit language string, falling back to OS detection
+/// if the language is `"auto"`, missing, empty, or unparseable.
+pub fn resolve_locale(lang: Option<&str>) -> Locale {
+    match lang {
+        Some("ko") => Locale::Ko,
         Some("en") => Locale::En,
         Some("ja") => Locale::Ja,
-        _ => Locale::Ko,
-    };
-    set_locale(locale);
+        Some("auto") | None | Some("") => match crate::ui::platform::detect_os_language() {
+            "ja" => Locale::Ja,
+            "en" => Locale::En,
+            _ => Locale::Ko,
+        },
+        _ => match crate::ui::platform::detect_os_language() {
+            "ja" => Locale::Ja,
+            "en" => Locale::En,
+            _ => Locale::Ko,
+        },
+    }
+}
+
+/// Reads the top-level `"language"` key (`"auto"`/`"ko"`/`"en"`/`"ja"`) from merged settings JSON.
+pub fn set_locale_from_settings(settings: &Value) {
+    let lang = settings.get("language").and_then(Value::as_str);
+    set_locale(resolve_locale(lang));
 }
 
 /// Zero-cost, zero-reallocation macro-based i18n dispatcher.
@@ -682,6 +698,20 @@ macro_rules! t {
             Ja => "言語"
         )
     };
+    ("settings-lang-auto") => {
+        $crate::t_select!(
+            Ko => "자동",
+            En => "Auto",
+            Ja => "自動"
+        )
+    };
+    ("settings-language-hint") => {
+        $crate::t_select!(
+            Ko => "자동 선택 시 OS 언어에 맞춥니다",
+            En => "Follows OS language when set to Auto",
+            Ja => "自動設定時はOSの言語に合わせます"
+        )
+    };
     ("settings-recommend-provider") => {
         $crate::t_select!(
             Ko => "추천 Provider",
@@ -1184,6 +1214,45 @@ mod tests {
         assert_eq!(t!("settings-language"), "言語");
         assert_eq!(t!("candidate-count", n = 3), "3件の候補");
 
+        set_locale(Locale::Ko);
+    }
+
+    #[test]
+    fn test_resolve_locale_explicit_and_auto() {
+        assert_eq!(resolve_locale(Some("ko")), Locale::Ko);
+        assert_eq!(resolve_locale(Some("en")), Locale::En);
+        assert_eq!(resolve_locale(Some("ja")), Locale::Ja);
+
+        // "auto", None, and empty should fallback to OS detection (never panic)
+        let auto_loc = resolve_locale(Some("auto"));
+        let none_loc = resolve_locale(None);
+        let empty_loc = resolve_locale(Some(""));
+        assert_eq!(auto_loc, none_loc);
+        assert_eq!(auto_loc, empty_loc);
+        assert!(matches!(auto_loc, Locale::Ko | Locale::En | Locale::Ja));
+
+        // Translation verification for new keys
+        set_locale(Locale::Ko);
+        assert_eq!(t!("settings-lang-auto"), "자동");
+        set_locale(Locale::En);
+        assert_eq!(t!("settings-lang-auto"), "Auto");
+        set_locale(Locale::Ja);
+        assert_eq!(t!("settings-lang-auto"), "自動");
+
+        // Settings JSON integration
+        let s_ko = serde_json::json!({ "language": "ko" });
+        set_locale_from_settings(&s_ko);
+        assert_eq!(current_locale(), Locale::Ko);
+
+        let s_en = serde_json::json!({ "language": "en" });
+        set_locale_from_settings(&s_en);
+        assert_eq!(current_locale(), Locale::En);
+
+        let s_auto = serde_json::json!({ "language": "auto" });
+        set_locale_from_settings(&s_auto);
+        assert_eq!(current_locale(), auto_loc);
+
+        // Reset to Ko
         set_locale(Locale::Ko);
     }
 }
