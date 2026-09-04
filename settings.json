@@ -8,7 +8,8 @@
     "logo_ocr_cooldown_sec": 1.0,
     "idle_sleep_sec": 0.5,
     "engine": "auto",
-    "content_protected": true
+    "content_protected": true,
+    "enable_gpu_atlas": true
   },
   "debug_window": {
     "max_lines": 500,

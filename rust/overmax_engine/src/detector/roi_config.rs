@@ -1,7 +1,7 @@
 use overmax_core::SceneType;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawRoiRect {
     pub x: i32,
     pub y: i32,

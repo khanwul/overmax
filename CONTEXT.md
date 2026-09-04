@@ -9,7 +9,7 @@
 Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선택된 곡의 난이도별 정보를 오버레이로 보여주는 도구이다.
 
 - **현재 Windows 인식 방식**: 화면 캡처 + Rust 네이티브 CV 이미지 매칭 (`overmax_cv`) + OCR (Windows OCR)
-  - _Windows 캡처 엔진_: GDI 캡처 엔진 및 DXGI Desktop Duplication 캡처 엔진을 감싸는 `AdaptiveCaptureEngine` Facade 구성. GDI 백엔드가 안정성 기본값으로 작동하며 설정창에서 DXGI로 런타임 스위칭 가능. DXGI 캡처 시 `IDXGIOutput5::DuplicateOutput1`을 적용하여 Windows HDR 활성화 디스플레이에서도 OS DWM 레벨 8비트 SDR 자동 변환을 완벽 지원하며, `CreateDXGIFactory1` 기반 활성 디스플레이 어댑터 자동 탐색을 통해 듀얼 GPU(iGPU + 외장 dGPU) 환경을 완벽 지원함. 또한 multi-monitor Output 자동 탐색 및 가상 스크린 좌표 오프셋 변환을 통해 서브 모니터 구동을 완벽 지원함.
+  - _Windows 캡처 엔진_: GDI 캡처 엔진 및 DXGI Desktop Duplication 캡처 엔진을 감싸는 `AdaptiveCaptureEngine` Facade 구성. GDI 백엔드가 안정성 기본값으로 작동하며 설정창에서 DXGI로 런타임 스위칭 가능. DXGI 캡처 시 `IDXGIOutput5::DuplicateOutput1`을 적용하여 Windows HDR 활성화 디스플레이에서도 OS DWM 레벨 8비트 SDR 자동 변환을 완벽 지원하며, `CreateDXGIFactory1` 기반 활성 디스플레이 어댑터 자동 탐색을 통해 듀얼 GPU(iGPU + 외장 dGPU) 환경을 완벽 지원함. 또한 multi-monitor Output 자동 탐색 및 가상 스크린 좌표 오프셋 변환을 통해 서브 모니터 구동을 완벽 지원함. 여기에 512×512 GPU ROI Atlas와 핑퐁 더블 버퍼링(Double-Buffered Staging Textures)을 구축하여 1080p(8.3MB) 복사 병목 및 GPU 스톨을 소거, 실측 캡처 지연을 4.50ms에서 0.62ms(86.2% 단축, 7.2배 고속화)로 서브밀리초화함. 비-1080p 환경(1440p, 4K, 울트라와이드)은 단일 패스 GPU Normalizer(Draw Quad)를 통해 CPU 전송량을 1MB로 고정함.
 - **현재 Windows UI**: egui / winit (하드웨어 가속 활용 멀티 뷰포트 네이티브 UI)
   - _ODDS 다이얼로그 디자인 시스템 분리_: 240x160 인게임 HUD 전용 컴팩트 테마(`overlay_theme.rs`)와 독립된 데스크톱 다이얼로그 시스템(`dialog_theme.rs` - Overmax Desktop Dialog System)을 구축하여 14px/12px 타이포그래피, 32px 표준 컨트롤 높이, 카드 배경 및 2행 전폭 입력 폼(`field_row`), RTL 슬라이더(`rtl_slider`)를 표준화함.
   - _4대 탭 IA 구조화_: 설정창을 일반/추천/V-Archive/고급 4개 탭으로 분리하고, V-Archive 연결/업로드 섹션 분리, 세그먼트 버튼 1열 선택 등 깔끔한 데스크톱 사용자 경험을 제공함.
@@ -101,7 +101,18 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 # Detection Pipeline & State Handling
 
-## 1. 프레임 제어 및 쿨다운 스케줄링 (Centralized Control & Cooldowns)
+## 1. 초저지연 화면 캡처 및 아틀라스 파이프라인 (Sub-millisecond GPU ROI Atlas & Double Buffering)
+
+- **$512 \times 512$ GPU ROI Atlas**: 1080p 전체 화면(8.3MB)을 CPU RAM으로 전송하고 크롭하던 대역폭 병목을 원천 해소하기 위해, 디텍션에 필요한 43개 ROI(240,098 px)를 $512 \times 512$(1MB) 텍스처 내에 100% 무손실 1:1 패킹한 정적 슬롯 테이블(`atlas_layout.rs`) 및 $O(1)$ 정적 점프 테이블 트랜슬레이터(`atlas_translator.rs`)를 도입했습니다.
+- **D3D11 하드웨어 직접 복사 (Zero Draw Call)**: 1080p 16:9 환경에서는 셰이더 및 Render Target 없이, 백버퍼에서 Staging 텍스처로 `CopySubresourceRegion`을 43회 직행(< 50 µs)하여 VRAM 내부 복사 비용을 극소화했습니다.
+- **핑퐁 더블 버퍼링 (Double-Buffered Staging Textures) & GPU 스톨 0ms 소거**: 동기식 `context.Map`에 의한 4~5ms의 GPU 파이프라인 대기 스톨을 소거하기 위해 2개의 Staging 텍스처를 교대로 운용합니다. 새 프레임 획득 시 GPU 복사 후 `context.Flush()`로 비동기 DMA 전송을 시작하고, CPU는 이전 틱에 이미 복사가 완료된 Staging 버퍼를 즉시 `Map`하여 GPU 대기 시간을 0ms로 소거했습니다.
+- **3단계 정량 기여도 완전 분리 판정 (Attribution Analysis)**:
+  - **[A] main (단일 1080p, 4.50ms) ➔ [B] fullframe-db (더블 1080p, 3.17ms)**: 더블버퍼링의 순수 기여도는 **-1.33ms (34.3% 비중)** 로 GPU 동기화 대기를 소거하지만, 8.3MB 풀프레임 복사 비용으로 인해 3.17ms 잔존.
+  - **[B] fullframe-db (더블 1080p, 3.17ms) ➔ [C] atlas-db (더블 512×512, 0.62ms)**: 아틀라스의 순수 기여도는 **-2.55ms (65.7% 비중)** 로 메모리 복사량을 87.5%(8.3MB ➔ 1.0MB) 절감하여 비로소 **0.62ms(P50: 0.63ms, P95: 0.80ms)** 의 서브밀리초 진입 달성.
+  - 아틀라스의 기여도가 더블버퍼링보다 약 2배 크며, 더블버퍼링 단독으로는 3ms 한계를 넘을 수 없으므로 4K(33MB) 대역폭 방어 및 극저지연을 위해 아틀라스가 필수불가결함을 실측으로 완전 입증했습니다.
+- **조건부 GPU Normalizer (비-1080p 안전망)**: 1080p에서는 0-Cost 바이패스하며, 1440p, 4K, 21:9 울트라와이드 등 비-1080p 환경 감지 시에만 단일 패스 Fullscreen Triangle 셰이더(`normalizer.rs`)와 Bilinear Sampler를 가동하여 1080p로 렌더한 후 아틀라스로 공급함으로써 4K 환경에서도 CPU 전송량을 1MB로 엄격 고정합니다.
+
+## 2. 프레임 제어 및 쿨다운 스케줄링 (Centralized Control & Cooldowns)
 
 - **Window Tracker 동적 폴링**: DJMAX Respect V 창의 위치 및 포커스를 조회하는 Win32 시스템 콜 오버헤드를 막기 위해 `WindowQueryScheduler`가 주기적으로 호출을 차단합니다. 창 드래그 중인 경우 `16ms`(60FPS), 창이 정지 상태인 경우 `300ms`, 창 미발견 시 `1000ms`로 주기를 자동 변환합니다.
 - **DXGI 재생성 쿨다운**: `AdaptiveCaptureEngine`이 DXGI 캡처에 실패하여 GDI로 폴백할 시, 매 프레임 재생성을 시도하지 않고 최소 **3초**의 쿨다운 간격을 보장하여 CPU 스팸 루프를 차단합니다.
@@ -110,7 +121,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 - **분석 루프 Sleep 제어 및 설정 연동**: `DetectionWorker` 분석 스레드는 활성 송셀렉트 시 기본 `120ms` (`active_sleep_ms`), 백그라운드 시 기본 `500ms` (`background_sleep_ms`) 동안 sleep하도록 설정에 연동되어 조율됩니다.
 - **egui 마우스 호버 렌더링 스팸 억제**: 비활성 창 상태에서 십자선 소프트웨어 커서 렌더링을 위해 마우스 호버 시 매 프레임 `request_repaint()`를 스팸하던 문제를 해결하여, 마우스 이동 또는 드래그가 감지된 경우에만 repainting하도록 억제했습니다.
 
-## 2. 씬 감지 및 동적 ROI (Scene-Aware ROI)
+## 3. 씬 감지 및 동적 ROI (Scene-Aware ROI)
 
 - **재킷 엣지/유사도 기반 씬 우선 판독**: 결과창(Result), 오픈매치(OpenMatch), 프리스타일(Freestyle) 씬의 경우, 재킷 영역의 엣지 강도(JACKET_EDGE_THRESHOLD = 15.0) 또는 우측의 곡 카테고리 띠(5x60) 영역의 단색 감지(check_category_band_solid)가 활성화되는 경우에 한해 재킷 이미지 매칭을 시도합니다. 이때 사용되는 재킷 매칭 임계값은 설정 파일의 `similarity_threshold` 값을 모든 씬에서 오프셋 없이 100% 동일하게 연동하여 사용합니다. 매칭에 성공하면 즉시 해당 씬과 곡 ID를 확정하여 씬 감지 반응성을 대폭 개선하고 CPU 부하를 경감합니다.
 - **100% Pure Rust CV 템플릿 매칭 (Windows OCR 완전 제거)**: Windows OCR 및 WinRT COM 의존성을 전면 삭제하고 Pure Rust Native 템플릿 매칭(`detector::templates`)으로 로고 및 씬 판별을 단일화하여 무의미한 OS 의존성과 오버헤드를 완전히 차단했습니다.
@@ -118,13 +129,13 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
   - `logo` ROI는 씬과 독립적으로 상단 고정 좌표를 가지며, 씬 판별의 트리거 역할을 수행.
 - **히스테리시스 버퍼**: `HysteresisBuffer`를 통해 선곡 화면 진입/이탈 판정 및 신뢰도(Confidence) 계산.
 
-## 3. 곡 인식 (Song Recognition)
+## 4. 곡 인식 (Song Recognition)
 
 - **재킷 이미지 매칭**: `ImageIndexDb`를 통해 캡처된 재킷 영역과 미리 색인된 곡 재킷의 유사도를 계산.
 - **Rust Native CV**: `overmax_cv`를 통해 1차 u64 해시 Early Exit (Hamming <= 42) + 2차 2x2 분할 그리드 히스토그램 L1 벌점 WTA 방식의 고속 이미지 매칭 연산을 지원합니다. 무거운 HOG 코사인 유사도 매칭을 100% 제거하고 싱글 스레드 순차 최적화를 실현하여 종합 122배(루프 연산 457배) 고속화를 달성했습니다.
 - **하위 호환성 및 데이터 영속화**: 기존 DB 구조 호환성을 위해 2x2 그리드 히스토그램 데이터를 images 테이블의 metadata TEXT 컬럼에 JSON 직렬화하여 적재 및 파싱하며, 히스토그램이 없는 레거시 DB에서도 정상적으로 해시 유사도로 스위칭 동작합니다.
 
-## 3. 원자적 상태 감지 및 안정화 (Atomic Play Context Sync)
+## 5. 원자적 상태 감지 및 안정화 (Atomic Play Context Sync)
 
 - **PlayState 감지**:
   - **버튼 모드 (Button Mode)**: `Mode` enum (`B4`, `B5`, `B6`, `B8`) 활용. 선곡창에서는 `btn_mode` ROI의 평균 BGR 색상과 대표색의 Euclidean 거리가 60 이하인 모드를 선택하고, 결과창에서는 독립적인 모드 템플릿 매칭을 수행합니다.

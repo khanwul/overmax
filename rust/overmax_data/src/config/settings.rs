@@ -463,6 +463,8 @@ pub struct ScreenCaptureSettings {
     pub engine: String,
     #[serde(default = "default_content_protected")]
     pub content_protected: bool,
+    #[serde(default = "default_enable_gpu_atlas")]
+    pub enable_gpu_atlas: bool,
 }
 
 fn default_logo_cooldown() -> f64 {
@@ -481,6 +483,9 @@ fn default_capture_engine() -> String {
     "auto".to_string()
 }
 fn default_content_protected() -> bool {
+    true
+}
+fn default_enable_gpu_atlas() -> bool {
     true
 }
 
@@ -641,6 +646,7 @@ impl Default for ScreenCaptureSettings {
             background_sleep_ms: default_background_sleep(),
             engine: default_capture_engine(),
             content_protected: default_content_protected(),
+            enable_gpu_atlas: default_enable_gpu_atlas(),
         }
     }
 }

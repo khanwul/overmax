@@ -36,4 +36,7 @@ pub trait CaptureEngine: Send + Sync {
 
     #[cfg(target_os = "windows")]
     fn set_preferred_engine(&mut self, _preferred: windows::PreferredCaptureEngine) {}
+
+    #[cfg(target_os = "windows")]
+    fn set_enable_gpu_atlas(&mut self, _enable: bool) {}
 }

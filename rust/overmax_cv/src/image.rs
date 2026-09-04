@@ -284,7 +284,8 @@ pub fn segment_characters(binary: &[u8], width: usize, height: usize) -> Vec<(us
     let mut start_x = 0;
 
     // 켜진 픽셀 임계값 (노이즈 방지를 위해 1열당 높이에 비례한 최소 픽셀 활성화하여 배경 잔여 노이즈 컷)
-    let col_threshold = ((height / 10).max(1)) as u32;
+    // 숫자 '1'의 하단 가로 받침대(Base Serif, 높이 ~6px)가 잘려나가지 않도록 height / 25 (최소 1px) 적용
+    let col_threshold = ((height / 25).max(1)) as u32;
 
     for (x, &col_sum) in col_proj.iter().enumerate().take(width) {
         let active = col_sum >= col_threshold;

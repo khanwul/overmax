@@ -142,6 +142,8 @@ impl DetectionPipeline {
     }
 
     pub fn detect(&mut self, frame: &CapturedFrame, now: f64) -> DetectionOutput {
+        self.rois.update_window_size(frame.width, frame.height);
+
         let scene_start = Instant::now();
         let maybe_scene = self.detect_scene_if_due(frame, now);
         let scene_elapsed = scene_start.elapsed().as_micros() as u64;
