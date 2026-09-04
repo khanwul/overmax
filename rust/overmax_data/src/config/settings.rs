@@ -486,7 +486,7 @@ fn default_content_protected() -> bool {
     true
 }
 fn default_enable_gpu_atlas() -> bool {
-    false
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
