@@ -105,6 +105,27 @@ Direct3D11의 고속 복사 API인 `CopySubresourceRegion`은 **1:1 픽셀 크�
   * 기존 [`RoiManager::calculate_transform`](../../rust/overmax_engine/src/detector/roi.rs)에 구현된 레터박스/필러박스 계산 로직을 GPU Normalizer의 뷰포트(Viewport) 매핑에 전달합니다.
   * 게임의 실제 16:9 콘텐츠 영역만 정규화 텍스처에 1:1 정렬되도록 오프셋을 적용합니다.
 
+### 3.4 [실험적 탐색] 극단적 초저해상도(360p / 540p) 다운샘플링 검증 (Extreme Downsampling Exploration)
+* **아이디어 가설**:
+  * 만약 GPU에서 1080p가 아니라 **360p($640 \times 360$)** 또는 **540p($960 \times 540$)** 수준으로 대폭 다운샘플링해도 기존 인식률이 유지된다면:
+    * 360p 전체 화면 크기 자체가 $640 \times 360 \times 4 = \mathbf{921.6\text{ KB}}$로 **1 MB 미만**입니다.
+    * 즉, 아틀라스 패킹 복사 연산마저 생략하고 **360p 프레임 통째를 1회 Map(수십 µs)해도 기존 1080p 전체 복사 대비 대역폭을 89% 절감**할 수 있습니다.
+    * 만약 360p 상에서 아틀라스 패킹까지 결합하면 최종 전송량은 **수십 KB(0.1 MB 미만)** 수준으로 극단적 다이어트가 가능합니다.
+* **핵심 검증 과제 (Crucial Test Cases)**:
+  1. **초소형 ROI의 보존성**:
+     * `btn_mode`(1080p 기준 $5 \times 5\text{ px}$): 360p에서는 약 $1.6 \times 1.6\text{ px}$로 축소되므로 Bilinear 블러링에 의한 색상 왜곡 여부 검증 필요.
+     * `mode_colorbar`(1080p 기준 $6 \times 96\text{ px}$): 360p에서는 가로폭이 $2\text{ px}$에 불과해 단색성(Solidity) 판정 가능 여부 검증 필요.
+  2. **숫자/소수점 세그멘테이션 분해능**:
+     * Rate의 소수점(`.`, 1080p에서 약 2~3px)이 360p에서 서브픽셀화되어 증발하지 않는지 확인.
+     * Score의 얇은 폰트(8 vs 3, 6 vs 5) 획 분별력 유지 여부.
+  3. **자켓 해시 민감도**:
+     * $60 \times 60$ 자켓이 $20 \times 20$으로 축소되었을 때 Perceptual Hash(u64) 및 2×2 히스토그램 L1 벌점의 변별력 유지 한계점 측정.
+* **단계별 해상도 실험 매트릭스 (Resolution Scaling Benchmark Matrix)**:
+  * **1080p** (Reference, 100%): 8.3 MB
+  * **720p** (66.7% 스케일): 3.68 MB (안정적 폰트 분해능 유지 예상)
+  * **540p** (50.0% 스케일): 2.07 MB (Sweet Spot 후보)
+  * **360p** (33.3% 스케일): 0.92 MB (초경량 한계선 테스트)
+
 ---
 
 ## 4. 아키텍처 컴포넌트 설계
@@ -189,9 +210,14 @@ context.Unmap(&self.staging_atlas, 0);
 * [ ] D3D11 Draw Quad / Sampler 기반 `GpuNormalizer` 구현
 * [ ] 720p, 900p, 1440p, 4K 가상 해상도 캡처 테스트 및 Bilinear 보간 템플릿 매칭 정확도 검증
 * [ ] 16:10 (Steam Deck 1280×800) 레터박스 오프셋 연동
+* [ ] **[실험] 360p / 540p 초저해상도 인식 한계 벤치마크 테스트**:
+  * [ ] 360p($640 \times 360$) 다운샘플링 프레임 대상 Rate 소수점(`.`) 인식률 검증
+  * [ ] 360p 대상 Score 얇은 폰트(8 vs 3) 마스크 매칭 정확도 검증
+  * [ ] 360p 대상 `btn_mode`(1.6px) 색상 왜곡 여부 및 한계 해상도 도출 (360p vs 540p vs 720p)
 
 ### Phase 3: 텔레메트리 벤치마크 및 프로덕션 롤아웃 (Milestone 3)
 * [ ] `telemetry.log`에 `atlas_capture_us` 메트릭 추가 및 실측 레이턴시 검증 (목표: < 0.8ms)
+* [ ] 최적 해상도 규격(1080p 고정 vs 540p/360p 초경량 모드) 최종 확정 및 기본값 반영
 * [ ] D3D 디바이스 로스트 및 예외 상황 시 기존 1080p 전체 캡처로 무중단 안전 폴백(Fallback) 보장
 
 ---
@@ -202,4 +228,5 @@ context.Unmap(&self.staging_atlas, 0);
 | :--- | :--- | :--- |
 | **GPU CopySubresourceRegion 43회 API 오버헤드** | D3D11 커맨드 기록 오버헤드 발생 가능 (수십 µs) | VRAM 내부 DMA 복사는 병렬로 수행되므로 총 지연시간은 0.1ms 미만. 필요 시 겹치는 ROI를 병합(Union Bounding Box)하여 복사 횟수를 20회 이하로 축소 |
 | **<1080p 업스케일 시 템플릿 매칭 엣지 블러링** | 720p ➔ 1080p Bilinear 업스케일 시 폰트 경계선이 다소 흐려질 수 있음 | 이진화 임계치(Threshold) 허용 범위 검증. 필요 시 Point/Bilinear 혼합 필터링 적용 |
+| **360p 초저해상도 시 소수점/초소형 ROI 증발** | 360p에서 Rate 점(`.`) 및 5px 버튼 모드가 1px 이하 서브픽셀로 축소되어 오인식 가능 | 1080p ➔ 720p ➔ 540p ➔ 360p 단계별 해상도 스케일링 테스트셋을 통해 오인식 0%가 보장되는 최소 임계 해상도(Sweet Spot)를 확정 |
 | **Linux/X11 호환성** | Direct3D11 전용 API 사용으로 인한 크로스 플랫폼 분기 | Linux 백엔드(XSHM/Wayland)는 기존의 무복사 CPU `ImageView` 파이프라인을 유지하고, Windows DXGI 백엔드에 선택적(Feature Gate)으로 적용 |
