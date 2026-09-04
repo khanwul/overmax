@@ -4,13 +4,16 @@ use crate::capture::window_tracker::WindowRect;
 
 use windows::core::Interface;
 use windows::Win32::Foundation::{HMODULE, RECT};
-use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0};
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0,
+};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
     D3D11_CREATE_DEVICE_FLAG, D3D11_MAP_READ, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
 };
 use windows::Win32::Graphics::Dxgi::{
-    IDXGIAdapter, IDXGIDevice, IDXGIOutput1, IDXGIOutputDuplication, DXGI_OUTDUPL_FRAME_INFO,
+    CreateDXGIFactory1, IDXGIAdapter, IDXGIDevice, IDXGIFactory1, IDXGIOutput1, IDXGIOutput5,
+    IDXGIOutputDuplication, DXGI_OUTDUPL_FRAME_INFO,
 };
 
 pub struct DxgiCaptureEngine {
@@ -27,35 +30,80 @@ pub struct DxgiCaptureEngine {
 unsafe impl Send for DxgiCaptureEngine {}
 unsafe impl Sync for DxgiCaptureEngine {}
 
+unsafe fn create_device_and_adapter(
+) -> Result<(ID3D11Device, ID3D11DeviceContext, IDXGIAdapter), String> {
+    // 1. 실제 디스플레이 출력이 연결된 하드웨어 어댑터를 우선 탐색 (듀얼 GPU 환경: iGPU vs 외장 그래픽 충돌 방지)
+    if let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() {
+        let mut adapter_idx = 0;
+        while let Ok(adapter1) = factory.EnumAdapters1(adapter_idx) {
+            if adapter1.EnumOutputs(0).is_ok() {
+                let mut device = None;
+                let mut context = None;
+                let mut level = D3D_FEATURE_LEVEL_11_0;
+                let adapter: IDXGIAdapter = match adapter1.cast() {
+                    Ok(a) => a,
+                    Err(_) => {
+                        adapter_idx += 1;
+                        continue;
+                    }
+                };
+
+                let res = D3D11CreateDevice(
+                    &adapter,
+                    D3D_DRIVER_TYPE_UNKNOWN,
+                    HMODULE::default(),
+                    D3D11_CREATE_DEVICE_FLAG(0),
+                    Some(&[D3D_FEATURE_LEVEL_11_0]),
+                    windows::Win32::Graphics::Direct3D11::D3D11_SDK_VERSION,
+                    Some(&mut device),
+                    Some(&mut level),
+                    Some(&mut context),
+                );
+
+                if res.is_ok() {
+                    if let (Some(device), Some(context)) = (device, context) {
+                        return Ok((device, context, adapter));
+                    }
+                }
+            }
+            adapter_idx += 1;
+        }
+    }
+
+    // 2. 어댑터 열거 실패 시 기본 어댑터로 폴백
+    let mut device = None;
+    let mut context = None;
+    let mut level = D3D_FEATURE_LEVEL_11_0;
+
+    D3D11CreateDevice(
+        None,
+        D3D_DRIVER_TYPE_HARDWARE,
+        HMODULE::default(),
+        D3D11_CREATE_DEVICE_FLAG(0),
+        Some(&[D3D_FEATURE_LEVEL_11_0]),
+        windows::Win32::Graphics::Direct3D11::D3D11_SDK_VERSION,
+        Some(&mut device),
+        Some(&mut level),
+        Some(&mut context),
+    )
+    .map_err(|e| format!("D3D11CreateDevice failed: {e}"))?;
+
+    let device = device.ok_or("D3D11 device not created")?;
+    let context = context.ok_or("D3D11 context not created")?;
+    let dxgi_device: IDXGIDevice = device
+        .cast()
+        .map_err(|e| format!("Query IDXGIDevice failed: {e}"))?;
+    let adapter = dxgi_device
+        .GetAdapter()
+        .map_err(|e| format!("GetAdapter failed: {e}"))?;
+
+    Ok((device, context, adapter))
+}
+
 impl DxgiCaptureEngine {
     pub fn new() -> Result<Self, String> {
         unsafe {
-            let mut device = None;
-            let mut context = None;
-            let mut level = D3D_FEATURE_LEVEL_11_0;
-
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_FLAG(0),
-                Some(&[D3D_FEATURE_LEVEL_11_0]),
-                windows::Win32::Graphics::Direct3D11::D3D11_SDK_VERSION,
-                Some(&mut device),
-                Some(&mut level),
-                Some(&mut context),
-            )
-            .map_err(|e| format!("D3D11CreateDevice failed: {e}"))?;
-
-            let device = device.ok_or("D3D11 device not created")?;
-            let context = context.ok_or("D3D11 context not created")?;
-
-            let dxgi_device: IDXGIDevice = device
-                .cast()
-                .map_err(|e| format!("Query IDXGIDevice failed: {e}"))?;
-            let adapter = dxgi_device
-                .GetAdapter()
-                .map_err(|e| format!("GetAdapter failed: {e}"))?;
+            let (device, context, adapter) = create_device_and_adapter()?;
 
             let (duplication, width, height, output_bounds) =
                 Self::find_output(&adapter, &device, None)?;
@@ -107,13 +155,29 @@ impl DxgiCaptureEngine {
 
             let (output, bounds) = best_output.or(first_output).ok_or("No DXGI output found")?;
 
-            let output1: IDXGIOutput1 = output
-                .cast()
-                .map_err(|e| format!("Query IDXGIOutput1 failed: {e}"))?;
-
-            let duplication = output1
-                .DuplicateOutput(device)
-                .map_err(|e| format!("DuplicateOutput failed: {e}"))?;
+            // HDR 지원: IDXGIOutput5::DuplicateOutput1 을 사용하여 OS DWM 차원에서
+            // 8비트 SDR B8G8R8A8_UNORM 으로 자동 다운샘플링/톤 변환하여 수신하도록 요청
+            let duplication = if let Ok(output5) = output.cast::<IDXGIOutput5>() {
+                let supported =
+                    [windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM];
+                output5
+                    .DuplicateOutput1(device, 0, &supported)
+                    .or_else(|_| {
+                        let output1: IDXGIOutput1 = output
+                            .cast()
+                            .map_err(|e| format!("Query IDXGIOutput1 failed: {e}"))?;
+                        output1
+                            .DuplicateOutput(device)
+                            .map_err(|e| format!("DuplicateOutput fallback failed: {e}"))
+                    })?
+            } else {
+                let output1: IDXGIOutput1 = output
+                    .cast()
+                    .map_err(|e| format!("Query IDXGIOutput1 failed: {e}"))?;
+                output1
+                    .DuplicateOutput(device)
+                    .map_err(|e| format!("DuplicateOutput failed: {e}"))?
+            };
             let desc = duplication.GetDesc();
 
             Ok((
@@ -204,9 +268,11 @@ impl CaptureEngine for DxgiCaptureEngine {
             let mut resource = None;
             let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
 
-            let acquire_res = self
-                .duplication
-                .AcquireNextFrame(0, &mut frame_info, &mut resource);
+            // 초기 프레임 미획득 시 50ms 대기하여 안정적으로 첫 프레임을 획득하고, 이후에는 0ms(논블로킹) 폴링
+            let timeout_ms = if out_frame.bgra.is_empty() { 50 } else { 0 };
+            let acquire_res =
+                self.duplication
+                    .AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource);
 
             let staging = self
                 .staging_texture

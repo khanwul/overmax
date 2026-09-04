@@ -9,7 +9,7 @@
 Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선택된 곡의 난이도별 정보를 오버레이로 보여주는 도구이다.
 
 - **현재 Windows 인식 방식**: 화면 캡처 + Rust 네이티브 CV 이미지 매칭 (`overmax_cv`) + OCR (Windows OCR)
-  - _Windows 캡처 엔진_: GDI 캡처 엔진 및 DXGI Desktop Duplication 캡처 엔진을 감싸는 `AdaptiveCaptureEngine` Facade 구성. GDI 백엔드가 안정성 기본값으로 작동하며 설정창에서 DXGI로 런타임 스위칭 가능. DXGI 캡처 시 multi-monitor Output 자동 탐색 및 가상 스크린 좌표 오프셋 변환을 통해 서브 모니터 구동을 완벽 지원함.
+  - _Windows 캡처 엔진_: GDI 캡처 엔진 및 DXGI Desktop Duplication 캡처 엔진을 감싸는 `AdaptiveCaptureEngine` Facade 구성. GDI 백엔드가 안정성 기본값으로 작동하며 설정창에서 DXGI로 런타임 스위칭 가능. DXGI 캡처 시 `IDXGIOutput5::DuplicateOutput1`을 적용하여 Windows HDR 활성화 디스플레이에서도 OS DWM 레벨 8비트 SDR 자동 변환을 완벽 지원하며, `CreateDXGIFactory1` 기반 활성 디스플레이 어댑터 자동 탐색을 통해 듀얼 GPU(iGPU + 외장 dGPU) 환경을 완벽 지원함. 또한 multi-monitor Output 자동 탐색 및 가상 스크린 좌표 오프셋 변환을 통해 서브 모니터 구동을 완벽 지원함.
 - **현재 Windows UI**: egui / winit (하드웨어 가속 활용 멀티 뷰포트 네이티브 UI)
   - _ODDS 다이얼로그 디자인 시스템 분리_: 240x160 인게임 HUD 전용 컴팩트 테마(`overlay_theme.rs`)와 독립된 데스크톱 다이얼로그 시스템(`dialog_theme.rs` - Overmax Desktop Dialog System)을 구축하여 14px/12px 타이포그래피, 32px 표준 컨트롤 높이, 카드 배경 및 2행 전폭 입력 폼(`field_row`), RTL 슬라이더(`rtl_slider`)를 표준화함.
   - _4대 탭 IA 구조화_: 설정창을 일반/추천/V-Archive/고급 4개 탭으로 분리하고, V-Archive 연결/업로드 섹션 분리, 세그먼트 버튼 1열 선택 등 깔끔한 데스크톱 사용자 경험을 제공함.
