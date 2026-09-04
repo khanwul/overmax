@@ -8,22 +8,36 @@
 
 ## 1. 배경 및 동기 (Background & Motivation)
 
-### 1.1 현재 아키텍처의 성능 병목 분석
+### 1.1 현재 아키텍처의 성능 병목 분석 및 선행 실측 데이터 (Empirical Findings)
 현재 Overmax의 DXGI 캡처 및 디텍션 파이프라인은 1080p 전체 화면(`1920×1080×4` = **8,294,400 바이트, 약 8.3 MB**)을 매 프레임 GPU VRAM에서 CPU 시스템 메모리로 전송(`Map(D3D11_MAP_READ)`)하고 있습니다.
 
-* **실측 지연 시간 분해 (Telemetry 측정값)**:
-  * **GPU ➔ CPU 메모리 복사 (`Map` + DMA)**: **4.0 ~ 5.5 ms** (전체 파이프라인 지연의 ~50%)
-  * **CPU 컴퓨터 비전(CV) 연산**: **3.0 ~ 5.0 ms** (`[u32; 32]` 비트마스크, CPU `popcnt`, 2×2 히스토그램 L1 벌점 WTA)
-* **문제 정의**:
-  * 실제 디텍션 알고리즘에서 참조하는 유효 픽셀은 자켓, 모드, 난이도, 레이트, 스코어, 뱃지 등 **극히 일부분의 ROI(전체의 약 11.6%)**에 불과합니다.
-  * 나머지 88.4%의 불필요한 배경/노트 픽셀을 CPU로 퍼 올리기 위해 초당 수십~수백 MB의 PCI-e 대역폭과 메모리 버스 대역폭을 낭비하고 있습니다.
+* **D3D11 Staging 전송 단계별 분리 실측 (`measure_breakdown.rs` 100회 평균)**:
+  | 전송 대상 버퍼 | 데이터 크기 | `Map(D3D11_MAP_READ)` (PCIe 동기화) | `CPU memcpy` (라인별 복사) | 전송 총합 지연 | 속도 개선 배수 |
+  | :--- | :--- | :--- | :--- | :--- | :--- |
+  | **1080p 원본 프레임** | **8.29 MB** | **919.1 µs (0.92 ms)** | **1,672.4 µs (1.67 ms)** | **2,618.5 µs (2.62 ms)** | 1.0x (기준) |
+  | **512×512 ROI Atlas** | **1.05 MB** | **381.9 µs (0.38 ms)** | **310.3 µs (0.31 ms)** | **717.9 µs (0.72 ms)** | **3.64배 고속화 (순수 1.90 ms 즉시 절감!)** |
+  | **360p 다운샘플 프레임**| **0.88 MB** | **333.6 µs (0.33 ms)** | **246.3 µs (0.25 ms)** | **601.0 µs (0.60 ms)** | **4.36배 고속화 (순수 2.02 ms 즉시 절감!)** |
+
+* **실측 판정 결과 (갈림길 해결)**:
+  * 기존 텔레메트리의 `frame_capture_avg` (~4.9 ms) 중 **절반 이상(2.62 ms, 53%)이 순수 `Map` 대기 + CPU `memcpy`**에서 발생하고 있었습니다.
+  * 즉, `AcquireNextFrame` 스톨이 아니라 **8.3MB라는 거대한 대역폭을 PCIe 버스로 끌어오고 CPU 메모리에 복사하는 과정 자체가 지연의 주범**이었습니다.
+  * 따라서 512×512 아틀라스(1.0MB)로 전송량을 88% 줄이면 1.90ms가 확정적으로 세이브되므로, **GPU 아틀라스 파이프라인 도입은 확정적인 최선의 선택**임이 증명되었습니다.
+
+* **CV 파이프라인 내 리사이즈 연산 비중 실측 (2,000회 평균)**:
+  * **PlayState (Score / Rate / Mode / Diff 템플릿 매칭)**:
+    * 문자당 `resize_binary_nearest_into`: **2.97 µs** (8문자 전체 0.024 ms 수준, 전체 3.8ms 중 **0.6%**에 불과).
+    * ➔ **결론**: PlayState 영역의 GPU 프리리사이즈는 실익 0% (CPU 처리가 압도적으로 단순하고 충분히 빠름).
+  * **Jacket Matching (자켓 이미지 매칭)**:
+    * 전체 자켓 매칭 소요시간: **6,303.8 µs (6.30 ms)**
+    * 총 리사이즈 연산 비중: **1,646.6 µs (1.65 ms, 26.1% 차지)** (Histogram 64x64 리사이즈 1.03ms, phash 0.36ms 등).
+    * ➔ **결론**: 자켓 매칭의 경우 GPU 64x64 다운샘플링 패킹 시 **최대 1.65ms 추가 절감 실익** 존재 (후속 최적화 단계에서 적용).
 
 ### 1.2 핵심 아이디어 (Core Proposal)
 1. **GPU 내부 사전 패킹 (GPU Static ROI Atlas)**:
    * CPU로 전체 1080p 화면을 복사하는 대신, GPU VRAM 상에서 모든 씬의 ROI를 **단 1장의 초소형 아틀라스(Atlas, 512×512) 텍스처에 다닥다닥 모아 붙입니다**.
 2. **단 1회의 초소형 Map 전송**:
    * 모아 붙인 아틀라스 텍스처(512×512, **약 1 MB**)만 CPU로 `Map()` 복사합니다.
-   * 복사 데이터량 **88% 절감**, 캡처 지연시간 **4.9ms ➔ ~0.5ms로 10배 단축**.
+   * 복사 데이터량 **88% 절감**, 전송 지연시간 **2.62ms ➔ 0.72ms로 1.9ms 단축**.
 3. **아틀라스 트랜슬레이터 (Atlas Translator)**:
    * 기존 ROI 설정(`(SceneType, "score")`)을 아틀라스 내부의 `(atlas_x, atlas_y, w, h)`로 1:1 매핑해 주는 `AtlasTranslator`를 구축합니다.
    * 기존 디텍션 파이프라인([`ImageView`](../architecture/detection_pipeline.md), `matching.rs`, `digit.rs`, `jacket_matcher.rs`) 코드를 **100% 무수정으로 재사용**합니다.
@@ -58,35 +72,64 @@
 ## 3. 해상도 정규화 및 다중 해상도 대응 전략 (Multi-Resolution Normalization)
 
 DJMAX RESPECT V는 다양한 해상도(720p, 1080p, 1440p QHD, 4K UHD) 및 화면비(16:9, 16:10, 21:9)에서 실행됩니다.  
-Direct3D11의 고속 복사 API인 `CopySubresourceRegion`은 **1:1 픽셀 크기 복사만 지원**하므로, 해상도 대응을 위한 명확한 전략이 필요합니다.
+Direct3D11의 고속 복사 API인 `CopySubresourceRegion`은 **1:1 픽셀 크기 복사만 지원**하므로, 해상도 대응 전략이 파이프라인의 핵심 설계 요소입니다.
+
+### 3.1 "GPU Normalize 무용론" 심층 분석 및 아키텍처 결정
+
+#### ① 왜 "GPU Normalize가 쓸모없다"는 지적이 나오는가?
+1. **1080p 16:9 환경에서의 완전한 낭비 (No-op 오버헤드)**:
+   * 플레이어 대다수의 게임 환경은 $1920 \times 1080$ (16:9)입니다.
+   * 이미 1080p인 원본 버퍼에 D3D11 Draw Call(Vertex Shader + Pixel Shader + RTT 렌더타겟 바인딩)을 걸어 1080p로 다시 그리는 것은 **불필요한 GPU 연산력 및 VRAM 대역폭 낭비**입니다.
+2. **비효율적인 렌더링 면적 비율 (버려지는 픽셀 88%)**:
+   * 1440p나 4K 전체 화면을 1080p로 렌더링해도, 실제 아틀라스에 담기는 유효 ROI는 전체 207만 픽셀 중 **24만 픽셀(11.5%)**에 불과합니다.
+   * 나머지 88.5%의 화면(인게임 배경 BGA, 애니메이션 등)을 굳이 GPU가 다운스케일링하고 있는 셈입니다.
+3. **Bilinear 필터링에 의한 폰트 엣지 블러링**:
+   * 비정수배 축소(예: 1440p $\to$ 1080p = 0.75배)를 거치면 얇은 1픽셀짜리 폰트나 소수점(`.`)에 안티에일리어싱 블러가 생겨, 고해상도 원본 픽셀을 그대로 읽을 때보다 이진화/OCR 엣지 품질이 미세하게 떨어질 수 있습니다.
+
+#### ② 미적용 시 발생하는 치명적 기술적 벽 (왜 완전히 폐기할 수는 없는가?)
+* **`CopySubresourceRegion`의 1:1 복사 한계**: 스케일링이 불가능하므로 고해상도 원본에서 ROI를 직접 뜰 경우 자켓이 240px에서 320px(1440p), 480px(4K)로 비대해집니다.
+* **컴파일 타임 정적 베이킹(`pub const ATLAS_SLOTS`) 파괴**: ROI 크기가 해상도마다 가변이 되면 512×512 고정 아틀라스에 수용할 수 없어 가변 아틀라스 및 런타임 동적 패킹이 강제되며, $O(1)$ `const fn` 트랜슬레이터가 완전히 무너집니다.
+* **CPU 리사이즈 부하 또는 33MB 전송 폭탄**: 4K 원본 프레임 전체를 전송하면 10ms 이상의 PCIe 전송 스톨이 발생하고, 반대로 가변 ROI를 CPU로 가져오면 템플릿 매칭 엔진이 1080p 기준이므로 CPU가 43개 조각을 일일이 리사이즈해야 합니다.
+
+#### ③ 최종 아키텍처: 조건부 바이패스 (Adaptive Zero-Cost Normalization) 🌟
+위 분석을 바탕으로, **"1080p 패스트패스 완전 바이패스 + 비-1080p 선별 가동 안전망"** 투 트랙 구조를 확정합니다.
 
 ```
-[ 게임 원본 텍스처 ]
-  (720p / 1080p / 1440p / 4K / 16:10 레터박스)
-         │
-         ▼
-[ Stage 0: GPU Normalizer (뷰포트 정규화) ]
-  * 1080p 네이티브: No-op (Pass-through)
-  * 비-1080p (<1080p 또는 >1080p): D3D11 Bilinear Blit / RenderTarget ➔ 1920x1080 Offscreen RT
-         │
-         ▼ (완벽한 1920x1080 텍스처)
-[ Stage 1: Static Atlas Blit ]
-  * CopySubresourceRegion x 43회 (VRAM 간 고속 전송, < 50µs)
-         │
-         ▼ (512x512 Atlas Texture)
-[ Stage 2: 1회 Map(D3D11_MAP_READ) ]
-  * CPU로 1MB만 전송 (~0.5ms)
-         │
-         ▼
-[ Stage 3: AtlasTranslator ]
-  * 기존 ROI 호출을 아틀라스 오프셋으로 매핑 ➔ 기존 CV 파이프라인 무수정 실행
+[ 게임 원본 텍스처 (BackBuffer) ]
+        │
+        ├────────────────────────────────────────────────┐
+        ▼ (is_native_1080p == true, 90% 이상 환경)       ▼ (is_native_1080p == false, 1440p/4K/21:9)
+[ Fast Path: Normalize 완전 바이패스 ]            [ Safety Guard: GPU Draw Quad Normalizer ]
+* Zero Draw Call, 셰이더/RTT 미사용              * D3D11 Sampler Bilinear Draw Quad 1회
+* 원본 버퍼에서 직접 아틀라스로 복사               * 16:9 UV Crop (Letterbox/Pillarbox 제거)
+        │                                                │
+        └────────────────────────┬───────────────────────┘
+                                 ▼
+                     [ 1:1 CopySubresourceRegion x 43회 ]
+                       * 512x512 VRAM Atlas (< 50 µs)
+                                 │
+                                 ▼
+                     [ 1회 Map(D3D11_MAP_READ) (1 MB) ]
+                       * 전송 지연 0.72 ms (기존 2.62 ms 대비 1.9 ms 절감)
+                                 │
+                                 ▼
+                     [ AtlasTranslator (const fn O(1)) ]
+                       * 기존 CV 파이프라인 100% 무수정 직행
 ```
 
-### 3.1 1080p보다 작은 해상도 대응 (< 1080p: 720p, 900p, Steam Deck 1280×800)
+* **1080p 16:9 환경 (플레이어 대다수)**:
+  * GPU Normalize 패스를 **완전히 스킵(Zero Draw Call)**합니다.
+  * 셰이더나 중간 RTT를 생성/바인딩하지 않고, 스왑체인 백버퍼에서 512×512 아틀라스로 순수 `CopySubresourceRegion` 43회만 직행합니다 (순수 하드웨어 DMA, 0.01ms 미만).
+* **비-1080p 환경 (1440p, 4K, 21:9 울트라와이드 등)**:
+  * 33MB 전송 폭탄 및 가변 아틀라스 파괴를 막기 위한 **선별적 안전망(Safety Fallback Guard)**으로만 Draw Quad UV 정규화를 가동합니다.
+
+---
+
+### 3.2 1080p보다 작은 해상도 대응 (< 1080p: 720p, 900p, Steam Deck 1280×800)
 * **문제 상황**:
   * 720p(1280×720) 환경에서는 1080p 기준 60×60 자켓이 화면 상에 약 40×40 픽셀로 렌더링됩니다.
   * Overmax의 템플릿 매칭 엔진([`templates`](../../rust/overmax_engine/src/detector/templates))은 1080p 폰트 규격에 최적화된 마스크를 사용하므로, 스케일이 다르면 인식이 실패합니다.
-* **해결 방안 (GPU Normalization Pass)**:
+* **해결 방안 (조건부 GPU Normalizer 가동)**:
   * **D3D11 Hardware Bilinear Blit**:
     * 1080p보다 작은 프레임이 감지되면, GPU 상에 상주하는 $1920 \times 1080$ 크기의 `normalized_texture`를 중간 렌더 타겟(RenderTarget)으로 둡니다.
     * Direct3D11의 하드웨어 샘플러(Bilinear Filter)를 사용해 원본 프레임을 1080p로 1차 업스케일 렌더링(Draw Quad 1회, GPU 소요시간 < 10µs)합니다.
@@ -95,12 +138,12 @@ Direct3D11의 고속 복사 API인 `CopySubresourceRegion`은 **1:1 픽셀 크�
     * 아틀라스의 2D 패킹 좌표와 템플릿 크기가 **해상도에 관계없이 항상 1080p 정적 규격으로 영구 고정**됩니다.
     * CPU에서 수행하던 리사이즈 연산이 완전히 소거됩니다.
 
-### 3.2 1080p보다 큰 해상도 대응 (> 1080p: 1440p QHD, 2160p 4K)
+### 3.3 1080p보다 큰 해상도 대응 (> 1080p: 1440p QHD, 2160p 4K)
 * **방식**:
-  * 1440p/4K 화면 역시 Stage 0의 `normalized_texture`($1920 \times 1080$)로 하드웨어 Bilinear 다운샘플링 렌더링합니다.
-  * 4K의 거대한 프레임(3840×2160×4 = **33.1 MB**)을 CPU로 가져오던 엄청난 대역폭 낭비를 1MB로 압축하여 방지합니다.
+  * 1440p/4K 화면 역시 비-1080p 안전망으로 진입하여 `normalized_texture`($1920 \times 1080$)로 하드웨어 Bilinear 다운샘플링 렌더링합니다.
+  * 4K의 거대한 프레임(3840×2160×4 = **33.1 MB**)을 CPU로 가져오던 치명적인 PCIe 대역폭 스톨(10ms+)을 방지하고 1MB 아틀라스 전송(0.72ms)을 유지합니다.
 
-### 3.3 종횡비(Aspect Ratio) 정규화 및 블랙바(Letterbox/Pillarbox) 제거
+### 3.4 종횡비(Aspect Ratio) 정규화 및 블랙바(Letterbox/Pillarbox) 제거
 DJMAX RESPECT V의 모든 UI와 판정 레이아웃은 **기준 비율 16:9 ($1.7778$)**에 고정되어 렌더링됩니다.  
 모니터가 16:9가 아니거나 창모드 크기가 임의로 조절된 상태에서 단순 스트레칭(Stretching) 다운스케일을 거치면 화면이 찌그러져 템플릿 매칭이 완전히 깨지므로, **GPU Normalizer 단계에서 16:9 종횡비 보정(UV Crop)**을 반드시 선행해야 합니다.
 
@@ -140,7 +183,7 @@ DJMAX RESPECT V의 모든 UI와 판정 레이아웃은 **기준 비율 16:9 ($1.
 * **결과**:
   * 16:10 모니터, 21:9 울트라와이드 모니터, 임의 크기의 창모드에서도 **아틀라스 내부의 ROI 위치와 종횡비가 1080p 16:9 기준과 1픽셀 오차도 없이 완벽히 일치**하게 됩니다.
 
-### 3.4 [실험적 탐색] 극단적 초저해상도(360p / 540p) 다운샘플링 검증 (Extreme Downsampling Exploration)
+### 3.5 [실험적 탐색] 극단적 초저해상도(360p / 540p) 다운샘플링 검증 (Extreme Downsampling Exploration)
 * **아이디어 가설**:
   * 만약 GPU에서 1080p가 아니라 **360p($640 \times 360$)** 또는 **540p($960 \times 540$)** 수준으로 대폭 다운샘플링해도 기존 인식률이 유지된다면:
     * 360p 전체 화면 크기 자체가 $640 \times 360 \times 4 = \mathbf{921.6\text{ KB}}$로 **1 MB 미만**입니다.
@@ -264,27 +307,67 @@ context.Unmap(&self.staging_atlas, 0);
 
 ---
 
-## 5. 단계별 구현 로드맵 (Phased Implementation Plan)
+## 5. 단계별 구현 로드맵 (Refined Phased Implementation Plan)
 
-### Phase 1: 1080p 정적 아틀라스 패킹 & 트랜슬레이터 프로토타입 (Milestone 1)
-* [ ] `AtlasLayout` 2D Shelf 패킹 알고리즘 및 정적 512×512 슬롯 맵 생성기 구현
-* [ ] `AtlasTranslator` 모듈 작성 및 기존 `RoiManager`와의 1:1 단위 테스트 검증
-* [ ] 1080p 환경에서 `CopySubresourceRegion` 기반 512×512 Staging Texture 1회 Map 검증
-* [ ] 기존 템플릿 매칭 및 자켓 매칭 테스트셋(117개) 무손실 통과 확인
+"조건부 바이패스 (Adaptive Zero-Cost)" 아키텍처에 따라, **1080p 기준의 순수 하드웨어 DMA 아틀라스 파이프라인(Step 1~3)을 최우선으로 구축**하고, 비-1080p 안전망(Draw Quad)과 다운샘플링 고도화를 후속 단계로 명확히 분리합니다.
 
-### Phase 2: 다중 해상도 정규화 뷰포트 구축 (Milestone 2)
-* [ ] D3D11 Draw Quad / Sampler 기반 `GpuNormalizer` 구현
-* [ ] 720p, 900p, 1440p, 4K 가상 해상도 캡처 테스트 및 Bilinear 보간 템플릿 매칭 정확도 검증
-* [ ] 16:10 (Steam Deck 1280×800) 레터박스 오프셋 연동
-* [ ] **[실험] 360p / 540p 초저해상도 인식 한계 벤치마크 테스트**:
-  * [ ] 360p($640 \times 360$) 다운샘플링 프레임 대상 Rate 소수점(`.`) 인식률 검증
-  * [ ] 360p 대상 Score 얇은 폰트(8 vs 3) 마스크 매칭 정확도 검증
-  * [ ] 360p 대상 `btn_mode`(1.6px) 색상 왜곡 여부 및 한계 해상도 도출 (360p vs 540p vs 720p)
+```
+[ Step 1: 컴파일 타임 베이킹 ] ➔ [ Step 2: 오프라인 무손실 검증 ] ➔ [ Step 3: DXGI 1080p 순수 1:1 하드웨어 캡처 ]
+                                                                                   │
+                                   [ Step 5: 자켓 프리리사이즈 / 360p 탐색 ]  [ Step 4: 비-1080p 조건부 Normalize 안전망 ]
+```
 
-### Phase 3: 텔레메트리 벤치마크 및 프로덕션 롤아웃 (Milestone 3)
-* [ ] `telemetry.log`에 `atlas_capture_us` 메트릭 추가 및 실측 레이턴시 검증 (목표: < 0.8ms)
-* [ ] 최적 해상도 규격(1080p 고정 vs 540p/360p 초경량 모드) 최종 확정 및 기본값 반영
-* [ ] D3D 디바이스 로스트 및 예외 상황 시 기존 1080p 전체 캡처로 무중단 안전 폴백(Fallback) 보장
+---
+
+### Step 1: 컴파일 타임 1080p 아틀라스 레이아웃 & 트랜슬레이터 구현 (최우선 과제)
+* [ ] **`atlas_layout.rs` 정적 슬롯 테이블 베이킹**:
+  * 43개 ROI(240,098 px)를 $512 \times 512$ 내에 빈틈없이 2D 패킹한 `pub const ATLAS_SLOTS: [AtlasSlot; 43]` 정적 상수 배열 정의.
+  * 런타임 힙 할당(Heap Allocation) 0, 런타임 룩업 해시맵 0.
+* [ ] **`atlas_translator.rs` O(1) 점프 테이블 작성**:
+  * `pub const fn get_roi_for_scene(name: &str, scene: SceneType) -> Option<RoiRect>` 컴파일 타임 매칭 구현.
+  * 기존 `ImageView` 및 디텍션 파이프라인과 100% 호환되는 어댑터 인터페이스 제공.
+* [ ] **단위 테스트 기반 기하학적 완전성 검증**:
+  * 43개 슬롯의 $512 \times 512$ 경계 초과 검증 (`assert!(slot.atlas_rect.x + slot.atlas_rect.width <= 512)`).
+  * 43개 슬롯 간 상호 AABB 교차(Overlap) 0건 기하학적 전수 검증.
+  * 기존 `RoiManager::get_roi_for_scene`과 ROI 크기(width, height) 100% 일치 검증.
+
+---
+
+### Step 2: 오프라인 가상 아틀라스 CPU 무손실 검증
+* [ ] **CPU 가상 아틀라스 조립 하네스 작성**:
+  * 기존 1080p `CapturedFrame`에서 43개 슬롯을 복사하여 $512 \times 512$ 가상 아틀라스 프레임을 CPU 상에서 생성하는 테스트 유틸 구현.
+* [ ] **엔진 템플릿 매칭 & 자켓 매칭 회귀 테스트**:
+  * 가상 아틀라스 프레임과 `AtlasTranslator`를 경유한 인식이 기존 원본 프레임 인식 결과와 100% 동일함을 증명.
+  * 기존 117개 단위/통합 테스트셋 및 `verify_pipeline` 무손실 통과 확인.
+
+---
+
+### Step 3: DXGI 1080p 순수 1:1 하드웨어 아틀라스 캡처 연동 (Zero Draw Call)
+* [ ] **D3D11 $512 \times 512$ Staging Texture 및 DMA 루프 연동**:
+  * `dxgi.rs`에 1MB($512 \times 512$) Staging Texture 할당.
+  * 1080p 16:9 환경에서 Draw Call(셰이더) 없이, 원본 백버퍼에서 바로 `CopySubresourceRegion` 43회 VRAM 내부 복사 실행 (< 50 µs).
+* [ ] **단 1회 1MB `Map(D3D11_MAP_READ)` 전송 및 텔레메트리 실측**:
+  * PCIe 대기 및 CPU 복사 지연시간이 실측 수치대로 **0.72 ms (기존 2.62 ms 대비 1.9 ms 절감)**로 단축되는지 검증.
+  * `settings.json`에 `enable_gpu_atlas` 기능 플래그 및 문제 발생 시 즉각 기존 전체화면 캡처로 롤백되는 안전장치 마련.
+
+---
+
+### Step 4: [안전망] 비-1080p (1440p / 4K / 21:9) 전용 조건부 GPU Normalize 연동
+* [ ] **선별적 GPU Draw Quad 파이프라인 (`is_native_1080p == false`) 구축**:
+  * 1080p 환경에서는 셰이더/RTT를 완전히 바이패스(Zero Cost).
+  * 1440p, 4K, 21:9 울트라와이드, 16:10 환경 감지 시에만 $1920 \times 1080$ RenderTarget 바인딩.
+* [ ] **16:9 UV Crop 및 하드웨어 Bilinear 리샘플링**:
+  * 레터박스/필러박스를 건너뛰고 순수 16:9 영역만 1080p 오프스크린 텍스처로 렌더링.
+  * 4K 환경에서 33MB 전송 폭탄을 원천 차단하고 $512 \times 512$ 아틀라스 파이프라인으로 합류.
+
+---
+
+### Step 5: 360p/540p 초저해상도 한계 탐색 & 자켓 64×64 GPU 프리리사이즈
+* [ ] **자켓 1.65ms 절감을 위한 GPU 프리리사이즈 검토**:
+  * 아틀라스 내 자켓 슬롯을 $64 \times 64$ 크기로 GPU 다운샘플링 패킹하여 CPU 리사이즈 비용(1.65 ms) 추가 소거.
+* [ ] **360p / 540p 극단적 다운샘플링 인식 한계 벤치마크**:
+  * 360p($640 \times 360$) 다운샘플링 프레임 대상 Rate 소수점(`.`) 인식률 및 Score 얇은 폰트(8 vs 3) 마스크 매칭 정확도 검증.
+  * 초소형 ROI(`btn_mode` 1.6px) 색상 왜곡 한계선 측정 후 최적 다운샘플링 배율 확정.
 
 ---
 

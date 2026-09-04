@@ -72,15 +72,24 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 
 ---
 
-## 7. 캡처 파이프라인 고속화 및 초경량 정규화 (GPU ROI Atlas & Normalization)
+## 7. 캡처 파이프라인 고속화 (GPU ROI Atlas & Adaptive Normalization)
 
-- [ ] **7.1 1080p 정적 아틀라스 패킹 및 트랜슬레이터 구축 (Phase 1)**
-  - [ ] `roi_config` 기반 512×512 정적 2D Shelf 패킹 테이블(`AtlasLayout`) 설계
-  - [ ] `AtlasTranslator` 어댑터 작성 및 기존 `ImageView`/템플릿 매칭 100% 무수정 연동 검증
-  - [ ] D3D11 `CopySubresourceRegion` 기반 1MB 단일 Map 전송 프로토타입 구현 및 캡처 지연 0.5ms 검증
-- [ ] **7.2 다중 해상도 & 종횡비(Letterbox/Pillarbox) 정규화 뷰포트 (Phase 2)**
-  - [ ] D3D11 하드웨어 Bilinear Sampler Draw Quad 기반 `GpuNormalizer` 구현
-  - [ ] 16:10(Steam Deck), 21:9(울트라와이드), 창모드 UV 레터박스/필러박스 자동 제거
-  - [ ] 360p/540p 초저해상도 인식 한계 벤치마크 테스트 (소수점/1.6px 모드 보존성 검증)
-- [ ] **7.3 텔레메트리 벤치마크 및 프로덕션 롤아웃 (Phase 3)**
-  - [ ] `telemetry.log` 레이턴시 실측 및 예외 상황 시 기존 1080p 전체 캡처 안전 폴백 연동
+- [ ] **7.1 컴파일 타임 아틀라스 레이아웃 & 트랜슬레이터 베이킹 (Step 1)**
+  - [ ] 43개 ROI(240,098 px)의 $512 \times 512$ 아틀라스 상수 배열(`pub const ATLAS_SLOTS: [AtlasSlot; 43]`) 베이킹 (`atlas_layout.rs`)
+  - [ ] `const fn get_roi_for_scene` 기반 $O(1)$ 정적 점프 테이블 트랜슬레이터 구현 (`atlas_translator.rs`)
+  - [ ] 기하학적 완전성 단위 테스트: 512×512 경계 검사 및 43개 슬롯 간 상호 AABB Overlap 0건 전수 검증
+- [ ] **7.2 오프라인 가상 아틀라스 CPU 무손실 검증 (Step 2)**
+  - [ ] 1080p 프레임을 $512 \times 512$ 가상 아틀라스로 조립하는 CPU 테스트 하네스 작성
+  - [ ] 가상 아틀라스 경유 디텍션 결과가 기존 파이프라인과 100% 일치함을 증명 (117개 테스트셋 및 `verify_pipeline`)
+- [ ] **7.3 DXGI 1080p 순수 1:1 하드웨어 아틀라스 캡처 연동 (Step 3)**
+  - [ ] 1080p 16:9 패스트패스: Draw Call 제로, 백버퍼 ➔ $512 \times 512$ VRAM Staging `CopySubresourceRegion` 43회 직행 (< 50 µs)
+  - [ ] 단 1회 1MB `Map(D3D11_MAP_READ)` 전송 및 실측 0.72ms(1.9ms 절감) 레이턴시 검증
+  - [ ] `settings.json` 안전 가드 플래그(`enable_gpu_atlas`) 및 예외 시 즉시 레거시 전체화면 캡처로 폴백 연동
+- [ ] **7.4 비-1080p 조건부 GPU Normalizer 안전망 연동 (Step 4)**
+  - [ ] 1080p가 아닐 때만 선별 동작하는 조건부 Draw Quad 렌더타겟($1920 \times 1080$) 파이프라인 구축
+  - [ ] 16:10(Steam Deck), 21:9(울트라와이드), 1440p/4K UV Crop 및 하드웨어 Bilinear 리샘플링
+  - [ ] 4K 환경에서 33MB 전송 폭탄 방지 및 아틀라스 무손실 전달 검증
+- [ ] **7.5 자켓 64×64 GPU 프리리사이즈 & 360p/540p 초저해상도 한계 탐색 (Step 5)**
+  - [ ] 자켓 매칭 1.65ms 절감을 위한 아틀라스 내 64×64 GPU 다운샘플링 패킹 최적화
+  - [ ] 360p($640 \times 360$) / 540p 다운샘플링 환경에서 Rate 소수점(`.`) 및 Score 얇은 폰트 인식 한계 벤치마크
+
