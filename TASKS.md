@@ -69,3 +69,18 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 - [ ] **6.1 래더매치(Ladder Match) 씬 감지 대응**
   - [ ] 래더매치 밴픽/선곡 화면 및 대기실 감지 대응
   - [ ] 래더매치 결과창 인식 지원
+
+---
+
+## 7. 캡처 파이프라인 고속화 및 초경량 정규화 (GPU ROI Atlas & Normalization)
+
+- [ ] **7.1 1080p 정적 아틀라스 패킹 및 트랜슬레이터 구축 (Phase 1)**
+  - [ ] `roi_config` 기반 512×512 정적 2D Shelf 패킹 테이블(`AtlasLayout`) 설계
+  - [ ] `AtlasTranslator` 어댑터 작성 및 기존 `ImageView`/템플릿 매칭 100% 무수정 연동 검증
+  - [ ] D3D11 `CopySubresourceRegion` 기반 1MB 단일 Map 전송 프로토타입 구현 및 캡처 지연 0.5ms 검증
+- [ ] **7.2 다중 해상도 & 종횡비(Letterbox/Pillarbox) 정규화 뷰포트 (Phase 2)**
+  - [ ] D3D11 하드웨어 Bilinear Sampler Draw Quad 기반 `GpuNormalizer` 구현
+  - [ ] 16:10(Steam Deck), 21:9(울트라와이드), 창모드 UV 레터박스/필러박스 자동 제거
+  - [ ] 360p/540p 초저해상도 인식 한계 벤치마크 테스트 (소수점/1.6px 모드 보존성 검증)
+- [ ] **7.3 텔레메트리 벤치마크 및 프로덕션 롤아웃 (Phase 3)**
+  - [ ] `telemetry.log` 레이턴시 실측 및 예외 상황 시 기존 1080p 전체 캡처 안전 폴백 연동
