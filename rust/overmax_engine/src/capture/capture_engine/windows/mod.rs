@@ -1,5 +1,7 @@
 pub mod dxgi;
 pub mod gdi;
+pub mod normalizer;
+pub mod shader_bytes;
 
 use crate::capture::capture_engine::CaptureEngine;
 use crate::capture::frame::CapturedFrame;

@@ -25,6 +25,7 @@ pub struct DxgiCaptureEngine {
     duplication: IDXGIOutputDuplication,
     staging_texture: Option<ID3D11Texture2D>,
     staging_atlas_texture: Option<ID3D11Texture2D>,
+    normalizer: Option<super::normalizer::D3d11Normalizer>,
     enable_gpu_atlas: bool,
     width: u32,
     height: u32,
@@ -119,6 +120,7 @@ impl DxgiCaptureEngine {
                 duplication,
                 staging_texture: None,
                 staging_atlas_texture: None,
+                normalizer: None,
                 enable_gpu_atlas: false,
                 width,
                 height,
@@ -281,6 +283,13 @@ impl DxgiCaptureEngine {
         }
         Ok(())
     }
+
+    fn ensure_normalizer(&mut self) -> Result<(), String> {
+        if self.normalizer.is_none() {
+            self.normalizer = Some(super::normalizer::D3d11Normalizer::new(&self.device)?);
+        }
+        Ok(())
+    }
 }
 
 impl CaptureEngine for DxgiCaptureEngine {
@@ -306,10 +315,14 @@ impl CaptureEngine for DxgiCaptureEngine {
         let _ = self.ensure_output_for_rect(rect);
 
         unsafe {
-            let use_atlas = self.enable_gpu_atlas && rect.width == 1920 && rect.height == 1080;
+            let use_atlas = self.enable_gpu_atlas;
 
             if use_atlas {
                 self.ensure_staging_atlas_texture()?;
+                let is_1080p_exact = rect.width == 1920 && rect.height == 1080;
+                if !is_1080p_exact {
+                    self.ensure_normalizer()?;
+                }
 
                 let mut resource = None;
                 let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
@@ -323,24 +336,54 @@ impl CaptureEngine for DxgiCaptureEngine {
                     .as_ref()
                     .ok_or("Staging atlas texture missing")?;
 
-                let local_left = rect.left - self.output_bounds.left;
-                let local_top = rect.top - self.output_bounds.top;
-
                 match acquire_res {
                     Ok(_) => {
                         if let Some(res) = resource {
                             let texture: ID3D11Texture2D = res
                                 .cast()
                                 .map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
-                            copy_slots_to_atlas(
-                                &self.context,
-                                &texture,
-                                staging_atlas,
-                                local_left,
-                                local_top,
-                                self.width,
-                                self.height,
-                            );
+
+                            if is_1080p_exact {
+                                // Fast path: 1080p 1:1, zero draw call, direct copy from desktop texture
+                                let local_left = rect.left - self.output_bounds.left;
+                                let local_top = rect.top - self.output_bounds.top;
+                                copy_slots_to_atlas(
+                                    &self.context,
+                                    &texture,
+                                    staging_atlas,
+                                    local_left,
+                                    local_top,
+                                    self.width,
+                                    self.height,
+                                );
+                            } else {
+                                // Normalizer path: GPU bilinear blit to 1920x1080 render target
+                                let normalizer = self.normalizer.as_mut().unwrap();
+                                let norm_tex = match normalizer.normalize(
+                                    &self.context,
+                                    &texture,
+                                    rect,
+                                    self.width,
+                                    self.height,
+                                    self.output_bounds,
+                                ) {
+                                    Ok(t) => t,
+                                    Err(e) => {
+                                        let _ = self.duplication.ReleaseFrame();
+                                        return Err(e);
+                                    }
+                                };
+                                copy_slots_to_atlas(
+                                    &self.context,
+                                    norm_tex,
+                                    staging_atlas,
+                                    0,
+                                    0,
+                                    super::normalizer::NORMALIZED_WIDTH,
+                                    super::normalizer::NORMALIZED_HEIGHT,
+                                );
+                            }
+
                             let _ = self.duplication.ReleaseFrame();
 
                             return copy_atlas_to_buffer(&self.context, staging_atlas, out_frame);
