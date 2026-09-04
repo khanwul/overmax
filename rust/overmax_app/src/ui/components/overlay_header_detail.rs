@@ -183,7 +183,11 @@ impl<'a> OverlayHeaderDetail<'a> {
         if pattern.keypart {
             meta_list.push(t!("overlay-keypart-focused").to_string());
         }
-        if !pattern.note.is_empty() {
+        // `note`는 한국어 커뮤니티 서열표 원문 텍스트(예: "무리배치", "개인차")이므로,
+        // 번역이 제공되지 않고 영미/일본 플레이어에게는 가독성이 없어 노이즈가 되므로 한국어(Ko) 환경에서만 표출합니다.
+        if crate::ui::i18n::current_locale() == crate::ui::i18n::Locale::Ko
+            && !pattern.note.is_empty()
+        {
             meta_list.push(pattern.note.clone());
         }
 
@@ -336,6 +340,8 @@ mod tests {
 
     #[test]
     fn collects_sheet_meta_correctly() {
+        use crate::ui::i18n::{set_locale, Locale};
+
         let state = GameSessionState {
             scene: overmax_core::SceneType::Unknown,
             context: Some(PlayContext {
@@ -359,8 +365,29 @@ mod tests {
         }];
 
         let sub = OverlayHeaderDetail::new(&state, &patterns);
-        let meta = sub.collect_pattern_meta();
 
-        assert_eq!(meta, vec!["황배:랜덤", "보조:사용", "개인차"]);
+        // Ko locale: note is displayed
+        set_locale(Locale::Ko);
+        assert_eq!(
+            sub.collect_pattern_meta(),
+            vec!["황배:랜덤", "보조:사용", "개인차"]
+        );
+
+        // En locale: note is omitted because it is unlocalized Korean text
+        set_locale(Locale::En);
+        assert_eq!(
+            sub.collect_pattern_meta(),
+            vec!["Recommendation:Random", "Assist Key:Used"]
+        );
+
+        // Ja locale: note is omitted
+        set_locale(Locale::Ja);
+        assert_eq!(
+            sub.collect_pattern_meta(),
+            vec!["推奨:ランダム", "アシスト:使用"]
+        );
+
+        // Reset to Ko
+        set_locale(Locale::Ko);
     }
 }

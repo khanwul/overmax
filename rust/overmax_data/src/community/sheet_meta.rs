@@ -64,6 +64,8 @@ impl AssistMeta {
 pub struct PatternSheetMetaItem {
     #[serde(default, skip_serializing_if = "GoldMeta::is_none")]
     pub gold: GoldMeta,
+    /// 한국어 커뮤니티 서열표의 비고란 텍스트 (예: "무리배치 주의", "개인차").
+    /// 다국어 번역이 제공되지 않는 비정형 한국어 원문이므로, UI 표출 시 `Locale::Ko`에서만 표시됩니다.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub note: String,
     #[serde(default, skip_serializing_if = "AssistMeta::is_none")]
