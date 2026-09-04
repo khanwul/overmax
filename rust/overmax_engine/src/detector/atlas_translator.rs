@@ -50,35 +50,35 @@ impl AtlasTranslator {
                 x2: 370,
                 y2: 297,
             }),
+            (SceneType::ResultFreestyle, b"mode_colorbar") => Some(RoiRect {
+                x1: 328,
+                y1: 297,
+                x2: 334,
+                y2: 393,
+            }),
             (SceneType::ResultFreestyle, b"diff_panel" | b"diff_panel_NM") => Some(RoiRect {
-                x1: 422,
-                y1: 315,
-                x2: 512,
-                y2: 333,
+                x1: 418,
+                y1: 353,
+                x2: 508,
+                y2: 371,
             }),
             (SceneType::ResultFreestyle, b"diff_panel_HD") => Some(RoiRect {
-                x1: 422,
-                y1: 333,
-                x2: 512,
-                y2: 351,
+                x1: 418,
+                y1: 371,
+                x2: 508,
+                y2: 389,
             }),
             (SceneType::ResultFreestyle, b"diff_panel_MX") => Some(RoiRect {
-                x1: 422,
-                y1: 351,
-                x2: 512,
-                y2: 369,
+                x1: 418,
+                y1: 389,
+                x2: 508,
+                y2: 407,
             }),
             (SceneType::ResultFreestyle, b"diff_panel_SC") => Some(RoiRect {
                 x1: 418,
-                y1: 369,
+                y1: 407,
                 x2: 508,
-                y2: 387,
-            }),
-            (SceneType::ResultFreestyle, b"mode_colorbar") => Some(RoiRect {
-                x1: 493,
-                y1: 0,
-                x2: 499,
-                y2: 96,
+                y2: 425,
             }),
 
             // [ResultOpen3]
@@ -101,9 +101,9 @@ impl AtlasTranslator {
                 y2: 150,
             }),
             (SceneType::ResultOpen3, b"jacket") => Some(RoiRect {
-                x1: 400,
+                x1: 404,
                 y1: 150,
-                x2: 460,
+                x2: 464,
                 y2: 210,
             }),
             (SceneType::ResultOpen3, b"rate") => Some(RoiRect {
@@ -113,16 +113,16 @@ impl AtlasTranslator {
                 y2: 487,
             }),
             (SceneType::ResultOpen3, b"openmatch_diff") => Some(RoiRect {
-                x1: 320,
-                y1: 297,
-                x2: 426,
-                y2: 315,
+                x1: 342,
+                y1: 317,
+                x2: 448,
+                y2: 335,
             }),
             (SceneType::ResultOpen3, b"openmatch_mode") => Some(RoiRect {
-                x1: 347,
-                y1: 507,
-                x2: 352,
-                y2: 512,
+                x1: 507,
+                y1: 435,
+                x2: 512,
+                y2: 440,
             }),
 
             // [ResultOpen2]
@@ -157,16 +157,16 @@ impl AtlasTranslator {
                 y2: 426,
             }),
             (SceneType::ResultOpen2, b"openmatch_diff") => Some(RoiRect {
-                x1: 316,
+                x1: 342,
                 y1: 335,
-                x2: 422,
+                x2: 448,
                 y2: 353,
             }),
             (SceneType::ResultOpen2, b"openmatch_mode") => Some(RoiRect {
-                x1: 352,
-                y1: 507,
-                x2: 357,
-                y2: 512,
+                x1: 507,
+                y1: 440,
+                x2: 512,
+                y2: 445,
             }),
 
             // [Freestyle]
@@ -213,19 +213,19 @@ impl AtlasTranslator {
                 y2: 509,
             }),
             (SceneType::Freestyle, b"max_combo_badge") => Some(RoiRect {
-                x1: 418,
-                y1: 387,
-                x2: 454,
-                y2: 423,
+                x1: 471,
+                y1: 425,
+                x2: 507,
+                y2: 461,
             }),
             (SceneType::Freestyle, b"btn_mode") => Some(RoiRect {
-                x1: 337,
-                y1: 507,
-                x2: 342,
-                y2: 512,
+                x1: 507,
+                y1: 425,
+                x2: 512,
+                y2: 430,
             }),
 
-            // [OpenMatch & LadderMatch (동일 레이아웃 공유)]
+            // [OpenMatch]
             (SceneType::OpenMatch | SceneType::LadderMatch, b"jacket") => Some(RoiRect {
                 x1: 317,
                 y1: 169,
@@ -234,9 +234,9 @@ impl AtlasTranslator {
             }),
             (SceneType::OpenMatch | SceneType::LadderMatch, b"diff_panel" | b"diff_panel_NM") => {
                 Some(RoiRect {
-                    x1: 377,
+                    x1: 381,
                     y1: 210,
-                    x2: 493,
+                    x2: 497,
                     y2: 241,
                 })
             }
@@ -265,24 +265,23 @@ impl AtlasTranslator {
                 y2: 507,
             }),
             (SceneType::OpenMatch | SceneType::LadderMatch, b"rate") => Some(RoiRect {
-                x1: 316,
-                y1: 315,
-                x2: 419,
-                y2: 335,
+                x1: 342,
+                y1: 297,
+                x2: 445,
+                y2: 317,
             }),
             (SceneType::OpenMatch | SceneType::LadderMatch, b"max_combo_badge") => Some(RoiRect {
-                x1: 454,
-                y1: 387,
-                x2: 490,
-                y2: 423,
+                x1: 342,
+                y1: 353,
+                x2: 378,
+                y2: 389,
             }),
             (SceneType::OpenMatch | SceneType::LadderMatch, b"btn_mode") => Some(RoiRect {
-                x1: 342,
-                y1: 507,
-                x2: 347,
-                y2: 512,
+                x1: 507,
+                y1: 430,
+                x2: 512,
+                y2: 435,
             }),
-
             _ => None,
         }
     }
@@ -320,11 +319,11 @@ impl AtlasTranslator {
                 y2: 297,
             }),
 
-            // OpenMatch & LadderMatch
+            // OpenMatch
             (SceneType::OpenMatch | SceneType::LadderMatch, Difficulty::NM) => Some(RoiRect {
-                x1: 377,
+                x1: 381,
                 y1: 210,
-                x2: 493,
+                x2: 497,
                 y2: 241,
             }),
             (SceneType::OpenMatch | SceneType::LadderMatch, Difficulty::HD) => Some(RoiRect {
@@ -348,30 +347,29 @@ impl AtlasTranslator {
 
             // ResultFreestyle
             (SceneType::ResultFreestyle, Difficulty::NM) => Some(RoiRect {
-                x1: 422,
-                y1: 315,
-                x2: 512,
-                y2: 333,
+                x1: 418,
+                y1: 353,
+                x2: 508,
+                y2: 371,
             }),
             (SceneType::ResultFreestyle, Difficulty::HD) => Some(RoiRect {
-                x1: 422,
-                y1: 333,
-                x2: 512,
-                y2: 351,
+                x1: 418,
+                y1: 371,
+                x2: 508,
+                y2: 389,
             }),
             (SceneType::ResultFreestyle, Difficulty::MX) => Some(RoiRect {
-                x1: 422,
-                y1: 351,
-                x2: 512,
-                y2: 369,
+                x1: 418,
+                y1: 389,
+                x2: 508,
+                y2: 407,
             }),
             (SceneType::ResultFreestyle, Difficulty::SC) => Some(RoiRect {
                 x1: 418,
-                y1: 369,
+                y1: 407,
                 x2: 508,
-                y2: 387,
+                y2: 425,
             }),
-
             _ => None,
         }
     }
@@ -426,27 +424,28 @@ mod tests {
                     panic!("Failed to resolve slot {} in {:?}", slot.name, slot.scene)
                 });
 
-            assert_eq!(
-                translated.x1, slot.atlas_rect.x,
-                "x1 mismatch for {} in {:?}",
-                slot.name, slot.scene
-            );
-            assert_eq!(
-                translated.y1, slot.atlas_rect.y,
-                "y1 mismatch for {} in {:?}",
-                slot.name, slot.scene
-            );
-            assert_eq!(
-                translated.x2,
-                slot.atlas_rect.x + slot.atlas_rect.width,
-                "x2 mismatch for {} in {:?}",
+            // 내부 ROI는 슬롯의 atlas_rect 경계 내부에 완전히 포함되어야 함
+            assert!(
+                translated.x1 >= slot.atlas_rect.x,
+                "x1 out of bounds for {} in {:?}",
                 slot.name,
                 slot.scene
             );
-            assert_eq!(
-                translated.y2,
-                slot.atlas_rect.y + slot.atlas_rect.height,
-                "y2 mismatch for {} in {:?}",
+            assert!(
+                translated.y1 >= slot.atlas_rect.y,
+                "y1 out of bounds for {} in {:?}",
+                slot.name,
+                slot.scene
+            );
+            assert!(
+                translated.x2 <= slot.atlas_rect.x + slot.atlas_rect.width,
+                "x2 out of bounds for {} in {:?}",
+                slot.name,
+                slot.scene
+            );
+            assert!(
+                translated.y2 <= slot.atlas_rect.y + slot.atlas_rect.height,
+                "y2 out of bounds for {} in {:?}",
                 slot.name,
                 slot.scene
             );

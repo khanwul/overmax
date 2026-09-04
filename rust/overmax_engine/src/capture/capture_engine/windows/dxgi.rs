@@ -1,6 +1,7 @@
 use crate::capture::capture_engine::CaptureEngine;
 use crate::capture::frame::CapturedFrame;
 use crate::capture::window_tracker::WindowRect;
+use crate::detector::atlas_layout::{ATLAS_HEIGHT, ATLAS_SLOTS, ATLAS_WIDTH};
 
 use windows::core::Interface;
 use windows::Win32::Foundation::{HMODULE, RECT};
@@ -8,8 +9,9 @@ use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0,
 };
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
-    D3D11_CREATE_DEVICE_FLAG, D3D11_MAP_READ, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BOX,
+    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG, D3D11_MAP_READ, D3D11_TEXTURE2D_DESC,
+    D3D11_USAGE_STAGING,
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, IDXGIAdapter, IDXGIDevice, IDXGIFactory1, IDXGIOutput1, IDXGIOutput5,
@@ -22,6 +24,8 @@ pub struct DxgiCaptureEngine {
     adapter: IDXGIAdapter,
     duplication: IDXGIOutputDuplication,
     staging_texture: Option<ID3D11Texture2D>,
+    staging_atlas_texture: Option<ID3D11Texture2D>,
+    enable_gpu_atlas: bool,
     width: u32,
     height: u32,
     output_bounds: RECT,
@@ -114,6 +118,8 @@ impl DxgiCaptureEngine {
                 adapter,
                 duplication,
                 staging_texture: None,
+                staging_atlas_texture: None,
+                enable_gpu_atlas: false,
                 width,
                 height,
                 output_bounds,
@@ -238,6 +244,43 @@ impl DxgiCaptureEngine {
         }
         Ok(())
     }
+
+    pub fn set_enable_gpu_atlas(&mut self, enable: bool) {
+        self.enable_gpu_atlas = enable;
+    }
+
+    #[allow(dead_code)]
+    pub fn enable_gpu_atlas(&self) -> bool {
+        self.enable_gpu_atlas
+    }
+
+    fn ensure_staging_atlas_texture(&mut self) -> Result<(), String> {
+        if self.staging_atlas_texture.is_none() {
+            unsafe {
+                let desc = D3D11_TEXTURE2D_DESC {
+                    Width: ATLAS_WIDTH,
+                    Height: ATLAS_HEIGHT,
+                    MipLevels: 1,
+                    ArraySize: 1,
+                    Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+                    SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
+                    Usage: D3D11_USAGE_STAGING,
+                    BindFlags: 0,
+                    CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                    MiscFlags: 0,
+                };
+                let mut texture = None;
+                self.device
+                    .CreateTexture2D(&desc, None, Some(&mut texture))
+                    .map_err(|e| format!("Create staging atlas texture failed: {e}"))?;
+                self.staging_atlas_texture = Some(texture.ok_or("Staging atlas texture is None")?);
+            }
+        }
+        Ok(())
+    }
 }
 
 impl CaptureEngine for DxgiCaptureEngine {
@@ -263,6 +306,65 @@ impl CaptureEngine for DxgiCaptureEngine {
         let _ = self.ensure_output_for_rect(rect);
 
         unsafe {
+            let use_atlas = self.enable_gpu_atlas && rect.width == 1920 && rect.height == 1080;
+
+            if use_atlas {
+                self.ensure_staging_atlas_texture()?;
+
+                let mut resource = None;
+                let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+                let timeout_ms = if out_frame.bgra.is_empty() { 50 } else { 0 };
+                let acquire_res =
+                    self.duplication
+                        .AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource);
+
+                let staging_atlas = self
+                    .staging_atlas_texture
+                    .as_ref()
+                    .ok_or("Staging atlas texture missing")?;
+
+                let local_left = rect.left - self.output_bounds.left;
+                let local_top = rect.top - self.output_bounds.top;
+
+                match acquire_res {
+                    Ok(_) => {
+                        if let Some(res) = resource {
+                            let texture: ID3D11Texture2D = res
+                                .cast()
+                                .map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
+                            copy_slots_to_atlas(
+                                &self.context,
+                                &texture,
+                                staging_atlas,
+                                local_left,
+                                local_top,
+                                self.width,
+                                self.height,
+                            );
+                            let _ = self.duplication.ReleaseFrame();
+
+                            return copy_atlas_to_buffer(&self.context, staging_atlas, out_frame);
+                        }
+                        let _ = self.duplication.ReleaseFrame();
+                    }
+                    Err(err) => {
+                        let code = err.code().0 as u32;
+                        if code == 0x887A0027 {
+                            if out_frame.bgra.is_empty() {
+                                return Err("DXGI initial frame timeout".to_string());
+                            }
+                        } else {
+                            return Err(format!(
+                                "DXGI AcquireNextFrame failed with HRESULT 0x{:X}: {}",
+                                code, err
+                            ));
+                        }
+                    }
+                }
+
+                return copy_atlas_to_buffer(&self.context, staging_atlas, out_frame);
+            }
+
             self.ensure_staging_texture(self.width, self.height)?;
 
             let mut resource = None;
@@ -367,5 +469,85 @@ unsafe fn crop_texture_to_buffer(
     }
 
     context.Unmap(staging, 0);
+    Ok(())
+}
+
+unsafe fn copy_slots_to_atlas(
+    context: &ID3D11DeviceContext,
+    src_texture: &ID3D11Texture2D,
+    staging_atlas: &ID3D11Texture2D,
+    local_left: i32,
+    local_top: i32,
+    desktop_width: u32,
+    desktop_height: u32,
+) {
+    for slot in ATLAS_SLOTS.iter() {
+        let src_x = local_left + slot.src_rect.x;
+        let src_y = local_top + slot.src_rect.y;
+
+        if src_x < 0
+            || src_y < 0
+            || (src_x as u32 + slot.src_rect.width as u32) > desktop_width
+            || (src_y as u32 + slot.src_rect.height as u32) > desktop_height
+        {
+            continue;
+        }
+
+        let box_src = D3D11_BOX {
+            left: src_x as u32,
+            top: src_y as u32,
+            front: 0,
+            right: (src_x + slot.src_rect.width) as u32,
+            bottom: (src_y + slot.src_rect.height) as u32,
+            back: 1,
+        };
+
+        context.CopySubresourceRegion(
+            staging_atlas,
+            0,
+            slot.atlas_rect.x as u32,
+            slot.atlas_rect.y as u32,
+            0,
+            src_texture,
+            0,
+            Some(&box_src),
+        );
+    }
+}
+
+unsafe fn copy_atlas_to_buffer(
+    context: &ID3D11DeviceContext,
+    staging_atlas: &ID3D11Texture2D,
+    out_frame: &mut CapturedFrame,
+) -> Result<(), String> {
+    let mut mapped = Default::default();
+    context
+        .Map(staging_atlas, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+        .map_err(|e| format!("Map atlas texture failed: {e}"))?;
+
+    let row_pitch = mapped.RowPitch as usize;
+    let data_ptr = mapped.pData as *const u8;
+    let w = ATLAS_WIDTH as usize;
+    let h = ATLAS_HEIGHT as usize;
+    let len = w * h * 4;
+
+    out_frame.width = ATLAS_WIDTH as i32;
+    out_frame.height = ATLAS_HEIGHT as i32;
+    out_frame.bgra.resize(len, 0);
+
+    let row_bytes = w * 4;
+    let dst_ptr = out_frame.bgra.as_mut_ptr();
+
+    if row_pitch == row_bytes {
+        std::ptr::copy_nonoverlapping(data_ptr, dst_ptr, len);
+    } else {
+        for y in 0..h {
+            let src_row = data_ptr.add(y * row_pitch);
+            let dst_row = dst_ptr.add(y * row_bytes);
+            std::ptr::copy_nonoverlapping(src_row, dst_row, row_bytes);
+        }
+    }
+
+    context.Unmap(staging_atlas, 0);
     Ok(())
 }

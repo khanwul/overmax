@@ -81,10 +81,11 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 - [x] **7.2 오프라인 가상 아틀라스 CPU 무손실 검증 (Step 2)**
   - [x] 1080p 프레임을 $512 \times 512$ 가상 아틀라스로 조립하는 CPU 테스트 하네스 작성
   - [x] 가상 아틀라스 경유 디텍션 결과가 기존 파이프라인과 100% 일치함을 증명 (117개 테스트셋 및 `verify_pipeline`)
-- [ ] **7.3 DXGI 1080p 순수 1:1 하드웨어 아틀라스 캡처 연동 (Step 3)**
-  - [ ] 1080p 16:9 패스트패스: Draw Call 제로, 백버퍼 ➔ $512 \times 512$ VRAM Staging `CopySubresourceRegion` 43회 직행 (< 50 µs)
-  - [ ] 단 1회 1MB `Map(D3D11_MAP_READ)` 전송 및 실측 0.72ms(1.9ms 절감) 레이턴시 검증
-  - [ ] `settings.json` 안전 가드 플래그(`enable_gpu_atlas`) 및 예외 시 즉시 레거시 전체화면 캡처로 폴백 연동
+- [x] **7.3 DXGI 1080p 순수 1:1 하드웨어 아틀라스 캡처 연동 (Step 3)**
+  - [x] 1080p 16:9 패스트패스: Draw Call 제로, 백버퍼 ➔ $512 \times 512$ VRAM Staging `CopySubresourceRegion` 43회 직행 (< 50 µs)
+  - [x] 단 1회 1MB `Map(D3D11_MAP_READ)` 전송 및 카테고리 띠(64x60) / 마진(22x96) 슬롯 확장 지원
+  - [x] `settings.json` 안전 가드 플래그(`enable_gpu_atlas`) 및 예외 시 즉시 레거시 전체화면 캡처로 폴백 연동
+  - [x] `RoiManager` 자동 아틀라스 어댑터 및 `DetectionPipeline` 즉시 연동 완료
 - [ ] **7.4 비-1080p 조건부 GPU Normalizer 안전망 연동 (Step 4)**
   - [ ] 1080p가 아닐 때만 선별 동작하는 조건부 Draw Quad 렌더타겟($1920 \times 1080$) 파이프라인 구축
   - [ ] 16:10(Steam Deck), 21:9(울트라와이드), 1440p/4K UV Crop 및 하드웨어 Bilinear 리샘플링

@@ -295,6 +295,8 @@ impl DetectionWorker {
                 .parse()
                 .unwrap_or_default();
             capturer_adaptive.set_preferred_engine(pref);
+            let atlas_enabled = self.settings.screen_capture().enable_gpu_atlas;
+            capturer_adaptive.set_enable_gpu_atlas(atlas_enabled);
         }
         let mut capturer: Box<dyn CaptureEngine> = Box::new(capturer_adaptive);
         let mut pipeline = self.build_pipeline();
@@ -351,6 +353,14 @@ impl DetectionWorker {
                             "[Detection] capture backend updated: {old_pref:?} -> {new_pref:?}"
                         ));
                         _capturer.set_preferred_engine(new_pref);
+                    }
+                    let old_atlas = self.settings.screen_capture().enable_gpu_atlas;
+                    let new_atlas = new_settings.screen_capture().enable_gpu_atlas;
+                    if old_atlas != new_atlas {
+                        self.log(format!(
+                            "[Detection] gpu atlas updated: {old_atlas} -> {new_atlas}"
+                        ));
+                        _capturer.set_enable_gpu_atlas(new_atlas);
                     }
                 }
                 self.settings = new_settings;

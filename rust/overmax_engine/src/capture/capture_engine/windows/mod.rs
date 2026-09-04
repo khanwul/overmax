@@ -34,6 +34,7 @@ pub struct AdaptiveCaptureEngine {
     current_is_fullscreen: bool,
     last_dxgi_init_attempt: std::time::Instant,
     preferred_engine: PreferredCaptureEngine,
+    enable_gpu_atlas: bool,
 }
 
 impl AdaptiveCaptureEngine {
@@ -47,6 +48,7 @@ impl AdaptiveCaptureEngine {
                 .checked_sub(std::time::Duration::from_secs(5))
                 .unwrap_or_else(std::time::Instant::now),
             preferred_engine: PreferredCaptureEngine::Gdi,
+            enable_gpu_atlas: false,
         })
     }
 
@@ -56,6 +58,18 @@ impl AdaptiveCaptureEngine {
 
     pub fn preferred_engine(&self) -> PreferredCaptureEngine {
         self.preferred_engine
+    }
+
+    pub fn set_enable_gpu_atlas(&mut self, enable: bool) {
+        self.enable_gpu_atlas = enable;
+        if let Some(ref mut dxgi) = self.dxgi_backend {
+            dxgi.set_enable_gpu_atlas(enable);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn enable_gpu_atlas(&self) -> bool {
+        self.enable_gpu_atlas
     }
 
     fn fallback_to_gdi(
@@ -80,6 +94,10 @@ fn is_multi_monitor() -> bool {
 impl CaptureEngine for AdaptiveCaptureEngine {
     fn set_preferred_engine(&mut self, preferred: PreferredCaptureEngine) {
         self.set_preferred_engine(preferred);
+    }
+
+    fn set_enable_gpu_atlas(&mut self, enable: bool) {
+        self.set_enable_gpu_atlas(enable);
     }
 
     fn capture_bgra(&mut self, rect: WindowRect) -> Result<CapturedFrame, String> {
@@ -111,7 +129,10 @@ impl CaptureEngine for AdaptiveCaptureEngine {
                 if self.last_dxgi_init_attempt.elapsed() >= std::time::Duration::from_secs(3) {
                     self.last_dxgi_init_attempt = std::time::Instant::now();
                     match DxgiCaptureEngine::new() {
-                        Ok(dxgi) => self.dxgi_backend = Some(dxgi),
+                        Ok(mut dxgi) => {
+                            dxgi.set_enable_gpu_atlas(self.enable_gpu_atlas);
+                            self.dxgi_backend = Some(dxgi);
+                        }
                         Err(e) => {
                             return self.fallback_to_gdi(
                                 rect,

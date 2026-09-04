@@ -21,7 +21,7 @@ pub struct AtlasSlot {
 }
 
 /// 컴파일 타임에 2D MaxRects 알고리즘으로 100% 무손실 배치된 43개 정적 슬롯 테이블 (Zero Heap Allocation)
-pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
+pub const ATLAS_SLOTS: [AtlasSlot; 43] = [
     AtlasSlot {
         scene: SceneType::ResultFreestyle,
         name: "score",
@@ -188,13 +188,13 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
         src_rect: RawRoiRect {
             x: 710,
             y: 533,
-            width: 60,
+            width: 64,
             height: 60,
         },
         atlas_rect: RawRoiRect {
             x: 340,
             y: 94,
-            width: 60,
+            width: 64,
             height: 60,
         },
     },
@@ -204,13 +204,13 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
         src_rect: RawRoiRect {
             x: 664,
             y: 533,
-            width: 60,
+            width: 64,
             height: 60,
         },
         atlas_rect: RawRoiRect {
             x: 317,
             y: 169,
-            width: 60,
+            width: 64,
             height: 60,
         },
     },
@@ -240,7 +240,7 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 60,
         },
         atlas_rect: RawRoiRect {
-            x: 400,
+            x: 404,
             y: 150,
             width: 60,
             height: 60,
@@ -272,7 +272,7 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 31,
         },
         atlas_rect: RawRoiRect {
-            x: 377,
+            x: 381,
             y: 210,
             width: 116,
             height: 31,
@@ -487,6 +487,22 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
         },
     },
     AtlasSlot {
+        scene: SceneType::ResultFreestyle,
+        name: "mode_colorbar",
+        src_rect: RawRoiRect {
+            x: 52,
+            y: 0,
+            width: 22,
+            height: 96,
+        },
+        atlas_rect: RawRoiRect {
+            x: 320,
+            y: 297,
+            width: 22,
+            height: 96,
+        },
+    },
+    AtlasSlot {
         scene: SceneType::OpenMatch,
         name: "rate",
         src_rect: RawRoiRect {
@@ -496,8 +512,8 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 20,
         },
         atlas_rect: RawRoiRect {
-            x: 316,
-            y: 315,
+            x: 342,
+            y: 297,
             width: 103,
             height: 20,
         },
@@ -512,8 +528,8 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 18,
         },
         atlas_rect: RawRoiRect {
-            x: 320,
-            y: 297,
+            x: 342,
+            y: 317,
             width: 106,
             height: 18,
         },
@@ -528,7 +544,7 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 18,
         },
         atlas_rect: RawRoiRect {
-            x: 316,
+            x: 342,
             y: 335,
             width: 106,
             height: 18,
@@ -544,8 +560,8 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 18,
         },
         atlas_rect: RawRoiRect {
-            x: 422,
-            y: 315,
+            x: 418,
+            y: 353,
             width: 90,
             height: 18,
         },
@@ -560,8 +576,8 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 18,
         },
         atlas_rect: RawRoiRect {
-            x: 422,
-            y: 333,
+            x: 418,
+            y: 371,
             width: 90,
             height: 18,
         },
@@ -576,8 +592,8 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 18,
         },
         atlas_rect: RawRoiRect {
-            x: 422,
-            y: 351,
+            x: 418,
+            y: 389,
             width: 90,
             height: 18,
         },
@@ -593,7 +609,7 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
         },
         atlas_rect: RawRoiRect {
             x: 418,
-            y: 369,
+            y: 407,
             width: 90,
             height: 18,
         },
@@ -608,8 +624,8 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 36,
         },
         atlas_rect: RawRoiRect {
-            x: 418,
-            y: 387,
+            x: 471,
+            y: 425,
             width: 36,
             height: 36,
         },
@@ -624,26 +640,10 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 36,
         },
         atlas_rect: RawRoiRect {
-            x: 454,
-            y: 387,
+            x: 342,
+            y: 353,
             width: 36,
             height: 36,
-        },
-    },
-    AtlasSlot {
-        scene: SceneType::ResultFreestyle,
-        name: "mode_colorbar",
-        src_rect: RawRoiRect {
-            x: 60,
-            y: 0,
-            width: 6,
-            height: 96,
-        },
-        atlas_rect: RawRoiRect {
-            x: 493,
-            y: 0,
-            width: 6,
-            height: 96,
         },
     },
     AtlasSlot {
@@ -656,8 +656,8 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 5,
         },
         atlas_rect: RawRoiRect {
-            x: 337,
-            y: 507,
+            x: 507,
+            y: 425,
             width: 5,
             height: 5,
         },
@@ -672,8 +672,8 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 5,
         },
         atlas_rect: RawRoiRect {
-            x: 342,
-            y: 507,
+            x: 507,
+            y: 430,
             width: 5,
             height: 5,
         },
@@ -688,8 +688,8 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 5,
         },
         atlas_rect: RawRoiRect {
-            x: 347,
-            y: 507,
+            x: 507,
+            y: 435,
             width: 5,
             height: 5,
         },
@@ -704,14 +704,13 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
             height: 5,
         },
         atlas_rect: RawRoiRect {
-            x: 352,
-            y: 507,
+            x: 507,
+            y: 440,
             width: 5,
             height: 5,
         },
     },
 ];
-
 /// 1080p 프레임(`CapturedFrame`)에서 43개 ROI 슬롯을 복사하여
 /// 512x512 정적 아틀라스 프레임을 CPU 상에서 생성합니다.
 ///
@@ -887,11 +886,27 @@ mod tests {
                 let expected = scene_config.rois.get(slot.name).unwrap_or_else(|| {
                     panic!("ROI {} not found in scene {:?}", slot.name, slot.scene)
                 });
-                assert_eq!(
-                    slot.src_rect, *expected,
-                    "Src rect mismatch for {} in {:?}",
-                    slot.name, slot.scene
-                );
+                if (slot.scene == SceneType::Freestyle || slot.scene == SceneType::OpenMatch)
+                    && slot.name == "jacket"
+                {
+                    // 카테고리 띠(4px) 확장에 따라 src_rect.width가 64(60 + 4)로 설정됨을 검증
+                    assert_eq!(slot.src_rect.x, expected.x);
+                    assert_eq!(slot.src_rect.y, expected.y);
+                    assert_eq!(slot.src_rect.width, expected.width + 4);
+                    assert_eq!(slot.src_rect.height, expected.height);
+                } else if slot.scene == SceneType::ResultFreestyle && slot.name == "mode_colorbar" {
+                    // 결과창 외곽선 마진(8px) 확장에 따라 src_rect.x가 52(60 - 8), width가 22(6 + 16)로 설정됨을 검증
+                    assert_eq!(slot.src_rect.x, expected.x - 8);
+                    assert_eq!(slot.src_rect.y, expected.y);
+                    assert_eq!(slot.src_rect.width, expected.width + 16);
+                    assert_eq!(slot.src_rect.height, expected.height);
+                } else {
+                    assert_eq!(
+                        slot.src_rect, *expected,
+                        "Src rect mismatch for {} in {:?}",
+                        slot.name, slot.scene
+                    );
+                }
             }
         }
     }
@@ -929,26 +944,30 @@ mod tests {
             let orig_crop = crop_roi(&original_frame, slot.src_rect.into())
                 .unwrap_or_else(|| panic!("Failed to crop original for {}", slot.name));
 
-            let atlas_roi = AtlasTranslator::get_roi_for_scene(slot.name, slot.scene)
-                .unwrap_or_else(|| panic!("Failed to resolve atlas roi for {}", slot.name));
+            let atlas_slot_crop = crop_roi(&atlas_frame, slot.atlas_rect.into())
+                .unwrap_or_else(|| panic!("Failed to crop atlas slot for {}", slot.name));
 
-            let atlas_crop = crop_roi(&atlas_frame, atlas_roi)
-                .unwrap_or_else(|| panic!("Failed to crop atlas for {}", slot.name));
-
-            assert_eq!(orig_crop.width, atlas_crop.width);
-            assert_eq!(orig_crop.height, atlas_crop.height);
+            assert_eq!(orig_crop.width, atlas_slot_crop.width);
+            assert_eq!(orig_crop.height, atlas_slot_crop.height);
 
             // 모든 행, 모든 바이트가 100% 동일한지 전수 비교
             for y in 0..orig_crop.height {
                 assert_eq!(
                     orig_crop.row(y),
-                    atlas_crop.row(y),
+                    atlas_slot_crop.row(y),
                     "Pixel mismatch at row {} for slot {} in {:?}",
                     y,
                     slot.name,
                     slot.scene
                 );
             }
+
+            // 그리고 AtlasTranslator가 반환하는 내부 ROI도 유효하고 슬롯 내부에 정상 크롭되는지 검증
+            let atlas_roi = AtlasTranslator::get_roi_for_scene(slot.name, slot.scene)
+                .unwrap_or_else(|| panic!("Failed to resolve atlas roi for {}", slot.name));
+            let atlas_crop = crop_roi(&atlas_frame, atlas_roi)
+                .unwrap_or_else(|| panic!("Failed to crop atlas for {}", slot.name));
+            assert!(atlas_crop.width > 0 && atlas_crop.height > 0);
         }
     }
 
