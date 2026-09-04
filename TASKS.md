@@ -74,10 +74,10 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 
 ## 7. 캡처 파이프라인 고속화 (GPU ROI Atlas & Adaptive Normalization)
 
-- [ ] **7.1 컴파일 타임 아틀라스 레이아웃 & 트랜슬레이터 베이킹 (Step 1)**
-  - [ ] 43개 ROI(240,098 px)의 $512 \times 512$ 아틀라스 상수 배열(`pub const ATLAS_SLOTS: [AtlasSlot; 43]`) 베이킹 (`atlas_layout.rs`)
-  - [ ] `const fn get_roi_for_scene` 기반 $O(1)$ 정적 점프 테이블 트랜슬레이터 구현 (`atlas_translator.rs`)
-  - [ ] 기하학적 완전성 단위 테스트: 512×512 경계 검사 및 43개 슬롯 간 상호 AABB Overlap 0건 전수 검증
+- [x] **7.1 컴파일 타임 아틀라스 레이아웃 & 트랜슬레이터 베이킹 (Step 1)**
+  - [x] 43개 ROI(240,098 px)의 $512 \times 512$ 아틀라스 상수 배열(`pub const ATLAS_SLOTS: [AtlasSlot; 43]`) 베이킹 (`atlas_layout.rs`)
+  - [x] `const fn get_roi_for_scene` 기반 $O(1)$ 정적 점프 테이블 트랜슬레이터 구현 (`atlas_translator.rs`)
+  - [x] 기하학적 완전성 단위 테스트: 512×512 경계 검사 및 43개 슬롯 간 상호 AABB Overlap 0건 전수 검증
 - [ ] **7.2 오프라인 가상 아틀라스 CPU 무손실 검증 (Step 2)**
   - [ ] 1080p 프레임을 $512 \times 512$ 가상 아틀라스로 조립하는 CPU 테스트 하네스 작성
   - [ ] 가상 아틀라스 경유 디텍션 결과가 기존 파이프라인과 100% 일치함을 증명 (117개 테스트셋 및 `verify_pipeline`)

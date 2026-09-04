@@ -16,6 +16,25 @@ pub struct RoiRect {
 }
 
 impl RoiRect {
+    pub const fn from_raw(rect: RawRoiRect) -> Self {
+        Self {
+            x1: rect.x,
+            y1: rect.y,
+            x2: rect.x + rect.width,
+            y2: rect.y + rect.height,
+        }
+    }
+
+    #[inline]
+    pub const fn width(&self) -> i32 {
+        self.x2 - self.x1
+    }
+
+    #[inline]
+    pub const fn height(&self) -> i32 {
+        self.y2 - self.y1
+    }
+
     pub fn crop<'a>(&self, frame: &'a CapturedFrame) -> Option<ImageView<'a>> {
         crop_roi(frame, *self)
     }
@@ -103,7 +122,7 @@ impl RoiManager {
     /// 지정된 씬의 ROI 영역을 반환합니다.
     pub fn get_roi_for_scene(&self, name: &str, scene: SceneType) -> Option<RoiRect> {
         let roi = self.config.scenes.get(&scene)?.rois.get(name)?;
-        Some(self.transform_roi(RoiRect::from(roi.clone())))
+        Some(self.transform_roi(RoiRect::from(*roi)))
     }
 
     pub fn get_roi(&self, name: &str) -> Option<RoiRect> {

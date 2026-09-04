@@ -24,13 +24,17 @@ fn main() {
     println!("[1] Measuring Direct3D11 GPU-to-CPU Staging Transfer (1080p vs 512x512 Atlas, 100 iterations)...");
     #[cfg(target_os = "windows")]
     {
-        use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0};
+        use windows::Win32::Graphics::Direct3D::{
+            D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0,
+        };
         use windows::Win32::Graphics::Direct3D11::{
             D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
             D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG, D3D11_MAP_READ, D3D11_TEXTURE2D_DESC,
             D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING,
         };
-        use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+        use windows::Win32::Graphics::Dxgi::Common::{
+            DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
+        };
 
         unsafe {
             let mut device: Option<ID3D11Device> = None;
@@ -58,7 +62,10 @@ fn main() {
                         MipLevels: 1,
                         ArraySize: 1,
                         Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                        SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                        SampleDesc: DXGI_SAMPLE_DESC {
+                            Count: 1,
+                            Quality: 0,
+                        },
                         Usage: D3D11_USAGE_DEFAULT,
                         BindFlags: 0,
                         CPUAccessFlags: 0,
@@ -72,8 +79,12 @@ fn main() {
 
                     let mut gpu_tex: Option<ID3D11Texture2D> = None;
                     let mut staging_tex: Option<ID3D11Texture2D> = None;
-                    device.CreateTexture2D(&desc_gpu, None, Some(&mut gpu_tex)).unwrap();
-                    device.CreateTexture2D(&desc_staging, None, Some(&mut staging_tex)).unwrap();
+                    device
+                        .CreateTexture2D(&desc_gpu, None, Some(&mut gpu_tex))
+                        .unwrap();
+                    device
+                        .CreateTexture2D(&desc_staging, None, Some(&mut staging_tex))
+                        .unwrap();
                     let gpu_tex = gpu_tex.unwrap();
                     let staging_tex = staging_tex.unwrap();
 
@@ -89,7 +100,9 @@ fn main() {
                     for _ in 0..5 {
                         context.CopyResource(&staging_tex, &gpu_tex);
                         let mut mapped = Default::default();
-                        context.Map(&staging_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).unwrap();
+                        context
+                            .Map(&staging_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                            .unwrap();
                         context.Unmap(&staging_tex, 0);
                     }
 
@@ -102,7 +115,9 @@ fn main() {
 
                         let t_map = Instant::now();
                         let mut mapped = Default::default();
-                        context.Map(&staging_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).unwrap();
+                        context
+                            .Map(&staging_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                            .unwrap();
                         let map_us = t_map.elapsed().as_micros() as u64;
 
                         let t_memcpy = Instant::now();
@@ -133,7 +148,13 @@ fn main() {
                     let (mc_mean, mc_min, mc_max, mc_p95) = mean_and_p95(memcpy_times);
                     let (tot_mean, _, tot_max, tot_p95) = mean_and_p95(total_times);
 
-                    println!("    --- {} ({} x {}, {:.2} MB) ---", label, w, h, (w * h * 4) as f64 / 1024.0 / 1024.0);
+                    println!(
+                        "    --- {} ({} x {}, {:.2} MB) ---",
+                        label,
+                        w,
+                        h,
+                        (w * h * 4) as f64 / 1024.0 / 1024.0
+                    );
                     println!("    * GPU CopyResource       : {:>6.1} µs", c_mean);
                     println!("    * Map(D3D11_MAP_READ)    : {:>6.1} µs (min {:>4} µs, p95 {:>5} µs, max {:>5} µs)", m_mean, m_min, m_p95, m_max);
                     println!("    * CPU memcpy             : {:>6.1} µs (min {:>4} µs, p95 {:>5} µs, max {:>5} µs)", mc_mean, mc_min, mc_p95, mc_max);
@@ -149,10 +170,18 @@ fn main() {
 
                 println!("\n    >>> D3D11 TRANSFER SPEEDUP COMPARISON <<<");
                 println!("    * 1080p (8.3 MB) ➔ {:.2} ms", t_1080p / 1000.0);
-                println!("    * 512x512 Atlas (1.0 MB) ➔ {:.2} ms ({:.1}x Faster! {:.2} ms 절감)",
-                    t_atlas / 1000.0, t_1080p / t_atlas, (t_1080p - t_atlas) / 1000.0);
-                println!("    * 360p Frame (0.9 MB) ➔ {:.2} ms ({:.1}x Faster! {:.2} ms 절감)",
-                    t_360p / 1000.0, t_1080p / t_360p, (t_1080p - t_360p) / 1000.0);
+                println!(
+                    "    * 512x512 Atlas (1.0 MB) ➔ {:.2} ms ({:.1}x Faster! {:.2} ms 절감)",
+                    t_atlas / 1000.0,
+                    t_1080p / t_atlas,
+                    (t_1080p - t_atlas) / 1000.0
+                );
+                println!(
+                    "    * 360p Frame (0.9 MB) ➔ {:.2} ms ({:.1}x Faster! {:.2} ms 절감)",
+                    t_360p / 1000.0,
+                    t_1080p / t_360p,
+                    (t_1080p - t_360p) / 1000.0
+                );
             } else {
                 println!("    Failed to create D3D11 device: {:?}", res);
             }
@@ -235,23 +264,49 @@ fn main() {
         let total_jacket_pipeline_us = full_hashes_us + hist_resize_us + db_l1_match_us;
         let total_resize_us = ahash_resize_us + dhash_resize_us + phash_resize_us + hist_resize_us;
 
-        println!("    * Full compute_hashes (ahash+dhash+phash) : {:>6.1} µs", full_hashes_us);
-        println!("      - ahash resize (8x8)                    : {:>6.1} µs", ahash_resize_us);
-        println!("      - dhash resize (9x8)                    : {:>6.1} µs", dhash_resize_us);
-        println!("      - phash resize (32x32)                  : {:>6.1} µs", phash_resize_us);
-        println!("    * Histogram 64x64 resize                  : {:>6.1} µs", hist_resize_us);
-        println!("    * 1,000 곡 DB L1 거리 매칭 루프           : {:>6.1} µs", db_l1_match_us);
+        println!(
+            "    * Full compute_hashes (ahash+dhash+phash) : {:>6.1} µs",
+            full_hashes_us
+        );
+        println!(
+            "      - ahash resize (8x8)                    : {:>6.1} µs",
+            ahash_resize_us
+        );
+        println!(
+            "      - dhash resize (9x8)                    : {:>6.1} µs",
+            dhash_resize_us
+        );
+        println!(
+            "      - phash resize (32x32)                  : {:>6.1} µs",
+            phash_resize_us
+        );
+        println!(
+            "    * Histogram 64x64 resize                  : {:>6.1} µs",
+            hist_resize_us
+        );
+        println!(
+            "    * 1,000 곡 DB L1 거리 매칭 루프           : {:>6.1} µs",
+            db_l1_match_us
+        );
         println!("    --------------------------------------------------");
-        println!("    * Total Jacket Match Pipeline             : {:>6.1} µs ({:.2} ms)",
-            total_jacket_pipeline_us, total_jacket_pipeline_us / 1000.0);
-        println!("    * Total Resize Time in Jacket Match       : {:>6.1} µs ({:.1}%)",
-            total_resize_us, (total_resize_us / total_jacket_pipeline_us) * 100.0);
+        println!(
+            "    * Total Jacket Match Pipeline             : {:>6.1} µs ({:.2} ms)",
+            total_jacket_pipeline_us,
+            total_jacket_pipeline_us / 1000.0
+        );
+        println!(
+            "    * Total Resize Time in Jacket Match       : {:>6.1} µs ({:.1}%)",
+            total_resize_us,
+            (total_resize_us / total_jacket_pipeline_us) * 100.0
+        );
     }
 
     // ------------------------------------------------------------
     // 3. PlayState / Template Matching Breakdown (resize_binary_nearest_into)
     // ------------------------------------------------------------
-    println!("\n[3] Measuring PlayState & Template Matching Resize Breakdown (2,000 iterations)...");
+    println!(
+        "\n[3] Measuring PlayState & Template Matching Resize Breakdown (2,000 iterations)..."
+    );
     {
         use overmax_cv::image::resize_binary_nearest_into;
 
@@ -279,12 +334,21 @@ fn main() {
         }
         let bitmask_match_us = (t0.elapsed().as_micros() as f64) / iters as f64;
 
-        println!("    * resize_binary_nearest_into (글자당)      : {:>6.2} µs (nanoseconds: {:>4.0} ns)",
-            nearest_resize_us, nearest_resize_us * 1000.0);
-        println!("    * Bitmask XOR + Popcount (32 라인 대조)    : {:>6.2} µs (nanoseconds: {:>4.0} ns)",
-            bitmask_match_us, bitmask_match_us * 1000.0);
-        println!("    * 8글자 단어 매칭 시 총 리사이즈 소요시간  : {:>6.2} µs ({:.3} ms)",
-            nearest_resize_us * 8.0, (nearest_resize_us * 8.0) / 1000.0);
+        println!(
+            "    * resize_binary_nearest_into (글자당)      : {:>6.2} µs (nanoseconds: {:>4.0} ns)",
+            nearest_resize_us,
+            nearest_resize_us * 1000.0
+        );
+        println!(
+            "    * Bitmask XOR + Popcount (32 라인 대조)    : {:>6.2} µs (nanoseconds: {:>4.0} ns)",
+            bitmask_match_us,
+            bitmask_match_us * 1000.0
+        );
+        println!(
+            "    * 8글자 단어 매칭 시 총 리사이즈 소요시간  : {:>6.2} µs ({:.3} ms)",
+            nearest_resize_us * 8.0,
+            (nearest_resize_us * 8.0) / 1000.0
+        );
     }
 
     println!("\n============================================================");
