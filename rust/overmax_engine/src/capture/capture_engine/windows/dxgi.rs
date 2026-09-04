@@ -24,7 +24,9 @@ pub struct DxgiCaptureEngine {
     adapter: IDXGIAdapter,
     duplication: IDXGIOutputDuplication,
     staging_texture: Option<ID3D11Texture2D>,
-    staging_atlas_texture: Option<ID3D11Texture2D>,
+    staging_atlas_textures: [Option<ID3D11Texture2D>; 2],
+    atlas_write_idx: usize,
+    atlas_frames_captured: usize,
     normalizer: Option<super::normalizer::D3d11Normalizer>,
     enable_gpu_atlas: bool,
     width: u32,
@@ -119,7 +121,9 @@ impl DxgiCaptureEngine {
                 adapter,
                 duplication,
                 staging_texture: None,
-                staging_atlas_texture: None,
+                staging_atlas_textures: [None, None],
+                atlas_write_idx: 0,
+                atlas_frames_captured: 0,
                 normalizer: None,
                 enable_gpu_atlas: false,
                 width,
@@ -214,6 +218,8 @@ impl DxgiCaptureEngine {
                 self.height = height;
                 self.output_bounds = bounds;
                 self.staging_texture = None;
+                self.atlas_frames_captured = 0;
+                self.atlas_write_idx = 0;
             }
         }
         Ok(())
@@ -256,29 +262,31 @@ impl DxgiCaptureEngine {
         self.enable_gpu_atlas
     }
 
-    fn ensure_staging_atlas_texture(&mut self) -> Result<(), String> {
-        if self.staging_atlas_texture.is_none() {
-            unsafe {
-                let desc = D3D11_TEXTURE2D_DESC {
-                    Width: ATLAS_WIDTH,
-                    Height: ATLAS_HEIGHT,
-                    MipLevels: 1,
-                    ArraySize: 1,
-                    Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
-                    SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
-                        Count: 1,
-                        Quality: 0,
-                    },
-                    Usage: D3D11_USAGE_STAGING,
-                    BindFlags: 0,
-                    CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
-                    MiscFlags: 0,
-                };
-                let mut texture = None;
-                self.device
-                    .CreateTexture2D(&desc, None, Some(&mut texture))
-                    .map_err(|e| format!("Create staging atlas texture failed: {e}"))?;
-                self.staging_atlas_texture = Some(texture.ok_or("Staging atlas texture is None")?);
+    fn ensure_staging_atlas_textures(&mut self) -> Result<(), String> {
+        unsafe {
+            let desc = D3D11_TEXTURE2D_DESC {
+                Width: ATLAS_WIDTH,
+                Height: ATLAS_HEIGHT,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+                SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_STAGING,
+                BindFlags: 0,
+                CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                MiscFlags: 0,
+            };
+            for slot in &mut self.staging_atlas_textures {
+                if slot.is_none() {
+                    let mut texture = None;
+                    self.device
+                        .CreateTexture2D(&desc, None, Some(&mut texture))
+                        .map_err(|e| format!("Create staging atlas texture failed: {e}"))?;
+                    *slot = Some(texture.ok_or("Staging atlas texture is None")?);
+                }
             }
         }
         Ok(())
@@ -318,7 +326,7 @@ impl CaptureEngine for DxgiCaptureEngine {
             let use_atlas = self.enable_gpu_atlas;
 
             if use_atlas {
-                self.ensure_staging_atlas_texture()?;
+                self.ensure_staging_atlas_textures()?;
                 let is_1080p_exact = rect.width == 1920 && rect.height == 1080;
                 if !is_1080p_exact {
                     self.ensure_normalizer()?;
@@ -331,10 +339,8 @@ impl CaptureEngine for DxgiCaptureEngine {
                     self.duplication
                         .AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource);
 
-                let staging_atlas = self
-                    .staging_atlas_texture
-                    .as_ref()
-                    .ok_or("Staging atlas texture missing")?;
+                let write_idx = self.atlas_write_idx;
+                let prev_idx = 1 - write_idx;
 
                 match acquire_res {
                     Ok(_) => {
@@ -343,6 +349,10 @@ impl CaptureEngine for DxgiCaptureEngine {
                                 .cast()
                                 .map_err(|e| format!("Query ID3D11Texture2D failed: {e}"))?;
 
+                            let staging_write = self.staging_atlas_textures[write_idx]
+                                .as_ref()
+                                .ok_or("Staging atlas texture missing")?;
+
                             if is_1080p_exact {
                                 // Fast path: 1080p 1:1, zero draw call, direct copy from desktop texture
                                 let local_left = rect.left - self.output_bounds.left;
@@ -350,7 +360,7 @@ impl CaptureEngine for DxgiCaptureEngine {
                                 copy_slots_to_atlas(
                                     &self.context,
                                     &texture,
-                                    staging_atlas,
+                                    staging_write,
                                     local_left,
                                     local_top,
                                     self.width,
@@ -376,7 +386,7 @@ impl CaptureEngine for DxgiCaptureEngine {
                                 copy_slots_to_atlas(
                                     &self.context,
                                     norm_tex,
-                                    staging_atlas,
+                                    staging_write,
                                     0,
                                     0,
                                     super::normalizer::NORMALIZED_WIDTH,
@@ -384,9 +394,32 @@ impl CaptureEngine for DxgiCaptureEngine {
                                 );
                             }
 
+                            // GPU 명령 큐를 즉시 비동기 플러시하여 백그라운드 DMA 전송 시작
+                            self.context.Flush();
                             let _ = self.duplication.ReleaseFrame();
 
-                            return copy_atlas_to_buffer(&self.context, staging_atlas, out_frame);
+                            self.atlas_frames_captured += 1;
+                            if self.atlas_frames_captured == 1 {
+                                // 최초 1프레임: 아직 이전 버퍼가 없으므로 현재 버퍼 직접 맵핑 (1회 웜업)
+                                self.atlas_write_idx = prev_idx;
+                                return copy_atlas_to_buffer(
+                                    &self.context,
+                                    staging_write,
+                                    out_frame,
+                                );
+                            } else {
+                                // 2번째 프레임부터: 이미 지난 틱에 GPU 복사가 완료된 이전 버퍼를 맵핑 (0ms Stall!)
+                                self.atlas_write_idx = prev_idx;
+                                let staging_read =
+                                    self.staging_atlas_textures[prev_idx]
+                                        .as_ref()
+                                        .ok_or("Previous staging atlas texture missing")?;
+                                return copy_atlas_to_buffer(
+                                    &self.context,
+                                    staging_read,
+                                    out_frame,
+                                );
+                            }
                         }
                         let _ = self.duplication.ReleaseFrame();
                     }
@@ -405,7 +438,16 @@ impl CaptureEngine for DxgiCaptureEngine {
                     }
                 }
 
-                return copy_atlas_to_buffer(&self.context, staging_atlas, out_frame);
+                // 타임아웃(정적 화면) 시 가장 최근 완성된 버퍼를 맵핑
+                let read_idx = if self.atlas_frames_captured == 0 {
+                    write_idx
+                } else {
+                    prev_idx
+                };
+                let staging_read = self.staging_atlas_textures[read_idx]
+                    .as_ref()
+                    .ok_or("Staging atlas texture missing")?;
+                return copy_atlas_to_buffer(&self.context, staging_read, out_frame);
             }
 
             self.ensure_staging_texture(self.width, self.height)?;
