@@ -552,4 +552,111 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_atlas_crop_vs_roi_manager_detection_features() {
+        use crate::capture::frame_utils::region_mean_bgr;
+        use crate::detector::atlas_layout::build_virtual_atlas;
+        use overmax_cv::color::Bgr;
+
+        let w = 1920;
+        let h = 1080;
+        let mut bgra = vec![0u8; (w * h * 4) as usize];
+
+        // 1. 자켓 영역 (Freestyle 710, 533, 60, 60)에 그라디언트 패턴 렌더링
+        for y in 533..(533 + 60) {
+            for x in 710..(710 + 60) {
+                let idx = ((y * w + x) * 4) as usize;
+                bgra[idx] = ((x * 3) & 0xFF) as u8; // B
+                bgra[idx + 1] = ((y * 5) & 0xFF) as u8; // G
+                bgra[idx + 2] = (((x + y) * 2) & 0xFF) as u8; // R
+                bgra[idx + 3] = 255;
+            }
+        }
+
+        // 2. 버튼 모드 영역 (80, 130, 5, 5)에 4B 색상 주입
+        let btn_color = Bgr::from_rgb_hex(0x2D4F55);
+        for y in 130..(130 + 5) {
+            for x in 80..(80 + 5) {
+                let idx = ((y * w + x) * 4) as usize;
+                bgra[idx] = btn_color.b;
+                bgra[idx + 1] = btn_color.g;
+                bgra[idx + 2] = btn_color.r;
+                bgra[idx + 3] = 255;
+            }
+        }
+
+        // 3. 난이도 패널 NM 영역 (98, 488, 110, 28)에 NM 밝기 주입
+        for y in 488..(488 + 28) {
+            for x in 98..(98 + 110) {
+                let idx = ((y * w + x) * 4) as usize;
+                bgra[idx] = 220;
+                bgra[idx + 1] = 220;
+                bgra[idx + 2] = 220;
+                bgra[idx + 3] = 255;
+            }
+        }
+
+        let orig_frame = CapturedFrame {
+            width: w,
+            height: h,
+            bgra,
+        };
+        let atlas_frame = build_virtual_atlas(&orig_frame);
+        let roi_manager = RoiManager::new(1920, 1080);
+
+        // [A] 자켓 Perceptual Hash (ahash, dhash, phash) 100% 비트 단위 일치 검증
+        let orig_jacket_crop = roi_manager
+            .get_roi_for_scene("jacket", SceneType::Freestyle)
+            .unwrap()
+            .crop(&orig_frame)
+            .unwrap();
+        let atlas_jacket_crop =
+            AtlasTranslator::crop_roi(&atlas_frame, "jacket", SceneType::Freestyle).unwrap();
+
+        let orig_hashes = orig_jacket_crop
+            .to_image_region()
+            .compute_hashes(4)
+            .unwrap();
+        let atlas_hashes = atlas_jacket_crop
+            .to_image_region()
+            .compute_hashes(4)
+            .unwrap();
+
+        assert_eq!(
+            orig_hashes, atlas_hashes,
+            "Jacket perceptual hashes must be 100% bit-identical between original and atlas"
+        );
+
+        // [B] 버튼 모드 색상 (region_mean_bgr) 100% 일치 검증
+        let orig_btn_roi = roi_manager
+            .get_roi_for_scene("btn_mode", SceneType::Freestyle)
+            .unwrap();
+        let orig_btn_color = region_mean_bgr(&orig_frame, orig_btn_roi);
+
+        let atlas_btn_roi =
+            AtlasTranslator::get_roi_for_scene("btn_mode", SceneType::Freestyle).unwrap();
+        let atlas_btn_color = region_mean_bgr(&atlas_frame, atlas_btn_roi);
+
+        assert_eq!(
+            orig_btn_color, atlas_btn_color,
+            "Button mode mean BGR color must be 100% identical"
+        );
+
+        // [C] 난이도 패널 밝기 100% 일치 검증
+        let orig_diff_roi = roi_manager
+            .get_diff_panel_roi_for_scene(Difficulty::NM, SceneType::Freestyle)
+            .unwrap();
+        let orig_diff_color = region_mean_bgr(&orig_frame, orig_diff_roi);
+
+        let atlas_diff_roi =
+            AtlasTranslator::get_diff_panel_roi_for_scene(Difficulty::NM, SceneType::Freestyle)
+                .unwrap();
+        let atlas_diff_color = region_mean_bgr(&atlas_frame, atlas_diff_roi);
+
+        assert_eq!(
+            orig_diff_color, atlas_diff_color,
+            "Difficulty panel mean BGR color must be 100% identical"
+        );
+    }
 }

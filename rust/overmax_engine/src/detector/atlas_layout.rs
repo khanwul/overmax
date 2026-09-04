@@ -1,3 +1,4 @@
+use crate::capture::frame::CapturedFrame;
 use crate::detector::roi_config::RawRoiRect;
 use overmax_core::SceneType;
 
@@ -711,6 +712,50 @@ pub const ATLAS_SLOTS: [AtlasSlot; ATLAS_SLOT_COUNT] = [
     },
 ];
 
+/// 1080p 프레임(`CapturedFrame`)에서 43개 ROI 슬롯을 복사하여
+/// 512x512 정적 아틀라스 프레임을 CPU 상에서 생성합니다.
+///
+/// 이는 CPU 오프라인 검증 및 테스트 하네스를 위한 무손실 가상 아틀라스 빌더입니다.
+pub fn build_virtual_atlas(frame: &CapturedFrame) -> CapturedFrame {
+    let mut atlas_bgra = vec![0u8; (ATLAS_WIDTH * ATLAS_HEIGHT * 4) as usize];
+    let frame_w = frame.width;
+    let frame_h = frame.height;
+    let atlas_stride = (ATLAS_WIDTH * 4) as usize;
+    let src_stride = (frame_w * 4) as usize;
+
+    for slot in &ATLAS_SLOTS {
+        let sx = slot.src_rect.x;
+        let sy = slot.src_rect.y;
+        let sw = slot.src_rect.width;
+        let sh = slot.src_rect.height;
+
+        let ax = slot.atlas_rect.x;
+        let ay = slot.atlas_rect.y;
+
+        if sx < 0 || sy < 0 || sx + sw > frame_w || sy + sh > frame_h {
+            continue;
+        }
+
+        let copy_bytes = (sw * 4) as usize;
+        for row in 0..sh {
+            let src_y = (sy + row) as usize;
+            let dst_y = (ay + row) as usize;
+
+            let src_idx = (src_y * src_stride) + (sx as usize * 4);
+            let dst_idx = (dst_y * atlas_stride) + (ax as usize * 4);
+
+            atlas_bgra[dst_idx..dst_idx + copy_bytes]
+                .copy_from_slice(&frame.bgra[src_idx..src_idx + copy_bytes]);
+        }
+    }
+
+    CapturedFrame {
+        width: ATLAS_WIDTH as i32,
+        height: ATLAS_HEIGHT as i32,
+        bgra: atlas_bgra,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -847,6 +892,120 @@ mod tests {
                     "Src rect mismatch for {} in {:?}",
                     slot.name, slot.scene
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn test_virtual_atlas_pixel_perfect_identity() {
+        use crate::capture::frame_utils::crop_roi;
+        use crate::detector::atlas_translator::AtlasTranslator;
+
+        // 1. 패턴 데이터로 채워진 1920x1080 테스트 프레임 생성
+        let w = 1920;
+        let h = 1080;
+        let mut bgra = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                bgra.push((x & 0xFF) as u8); // B
+                bgra.push((y & 0xFF) as u8); // G
+                bgra.push(((x ^ y) & 0xFF) as u8); // R
+                bgra.push(255); // A
+            }
+        }
+        let original_frame = CapturedFrame {
+            width: w,
+            height: h,
+            bgra,
+        };
+
+        // 2. CPU 가상 아틀라스 생성
+        let atlas_frame = build_virtual_atlas(&original_frame);
+        assert_eq!(atlas_frame.width, ATLAS_WIDTH as i32);
+        assert_eq!(atlas_frame.height, ATLAS_HEIGHT as i32);
+
+        // 3. 43개 슬롯 전수에 대해 원본 크롭 vs 아틀라스 크롭 픽셀 바이트 일치 검증
+        for slot in &ATLAS_SLOTS {
+            let orig_crop = crop_roi(&original_frame, slot.src_rect.into())
+                .unwrap_or_else(|| panic!("Failed to crop original for {}", slot.name));
+
+            let atlas_roi = AtlasTranslator::get_roi_for_scene(slot.name, slot.scene)
+                .unwrap_or_else(|| panic!("Failed to resolve atlas roi for {}", slot.name));
+
+            let atlas_crop = crop_roi(&atlas_frame, atlas_roi)
+                .unwrap_or_else(|| panic!("Failed to crop atlas for {}", slot.name));
+
+            assert_eq!(orig_crop.width, atlas_crop.width);
+            assert_eq!(orig_crop.height, atlas_crop.height);
+
+            // 모든 행, 모든 바이트가 100% 동일한지 전수 비교
+            for y in 0..orig_crop.height {
+                assert_eq!(
+                    orig_crop.row(y),
+                    atlas_crop.row(y),
+                    "Pixel mismatch at row {} for slot {} in {:?}",
+                    y,
+                    slot.name,
+                    slot.scene
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_virtual_atlas_diff_panel_pixel_perfect_identity() {
+        use crate::capture::frame_utils::crop_roi;
+        use crate::detector::atlas_translator::AtlasTranslator;
+        use crate::detector::roi::RoiManager;
+
+        let w = 1920;
+        let h = 1080;
+        let mut bgra = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                bgra.push(((x * 7) & 0xFF) as u8);
+                bgra.push(((y * 13) & 0xFF) as u8);
+                bgra.push(((x + y) & 0xFF) as u8);
+                bgra.push(255);
+            }
+        }
+        let original_frame = CapturedFrame {
+            width: w,
+            height: h,
+            bgra,
+        };
+
+        let atlas_frame = build_virtual_atlas(&original_frame);
+        let roi_manager = RoiManager::new(1920, 1080);
+
+        for scene in [
+            SceneType::Freestyle,
+            SceneType::OpenMatch,
+            SceneType::LadderMatch,
+            SceneType::ResultFreestyle,
+        ] {
+            for diff in Difficulty::ALL {
+                let orig_roi = roi_manager
+                    .get_diff_panel_roi_for_scene(diff, scene)
+                    .unwrap();
+                let orig_crop = crop_roi(&original_frame, orig_roi).unwrap();
+
+                let atlas_roi = AtlasTranslator::get_diff_panel_roi_for_scene(diff, scene).unwrap();
+                let atlas_crop = crop_roi(&atlas_frame, atlas_roi).unwrap();
+
+                assert_eq!(orig_crop.width, atlas_crop.width);
+                assert_eq!(orig_crop.height, atlas_crop.height);
+
+                for y in 0..orig_crop.height {
+                    assert_eq!(
+                        orig_crop.row(y),
+                        atlas_crop.row(y),
+                        "Diff panel pixel mismatch at row {} for diff {:?} in {:?}",
+                        y,
+                        diff,
+                        scene
+                    );
+                }
             }
         }
     }
