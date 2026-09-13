@@ -15,23 +15,25 @@ DJMAX RESPECT V 선곡 화면에서 V-Archive 기반 비공식 난이도 정보�
 
 ### 무엇을 해 주나요?
 
-선곡 화면에서 현재 선택된 곡의 **V-Archive 비공식 난이도**와 **유사 난이도 추천 목록**을 게임 화면 옆에 띄워줍니다.
+선곡 화면에서 현재 선택된 곡의 **V-Archive 비공식 난이도**와 **지능형 맞춤 추천 목록**을 게임 화면 옆에 띄워줍니다.
 
-- 현재 선택 곡의 버튼 모드별 비공식 난이도 표시 (NM/HD/MX/SC)
-- **V-Archive 기록 연동**: V-Archive의 플레이 기록을 불러오고, 로컬 수집 기록을 V-Archive에 등록 가능
-- **실시간 Rate / Max Combo 수집**: 게임 내에서 기록을 갱신하면 자동으로 인식하여 로컬에 저장 (실시간 최고기록 감지 시 V-Archive 간편 업로드 지원)
-- **유사 난이도 추천**: 현재 패턴과 유사한 난이도의 다른 패턴 추천 (Rate 낮은 순 → 미플레이 순)
-- **라이트 모드 (Lite Mode)**: 추천 리스트 등 불필요한 요소를 숨기고, 곡 정보 및 실시간 Rate 등 필수 정보만 보여주는 콤팩트한 레이아웃(세로 높이 약 60px 수준)을 제공합니다.
-- **실시간 신기록 및 간편 업로드 알림**: 플레이 중 감지된 Rate가 기존 V-Archive 기록보다 높을 경우, 오버레이 헤더에 **업로드 버튼(⬆)**이 활성화되어 손쉽게 V-Archive에 최신 기록을 반영 및 업로드할 수 있습니다.
+- **비공식 난이도 실시간 표시**: 현재 선택 곡의 버튼 모드별 비공식 난이도 표시 (NM/HD/MX/SC)
+- **지능형 다차원 추천 엔진**: 플레이어의 Top 50 실력 모델(TrueSkill SC/Pad 2-Track)을 분석하여 최적의 연습/도전 곡을 사유 뱃지(`BEST`, `RETRY`, `REST`, `PUSH` 등)와 함께 맞춤 추천
+- **실시간 Rate / Max Combo 수집**: 순수 Rust 템플릿 매칭으로 점수와 레이트를 오차 없이 실시간 인식 및 로컬 저장 (실시간 신기록 감지 시 V-Archive 간편 업로드 지원)
+- **초저지연 0.62ms GPU ROI Atlas 화면 캡처**: 512×512 아틀라스와 더블 버퍼링으로 인게임 끊김(Stuttering) 없는 서브밀리초 반응 속도 제공
+- **Windows HDR(scRGB) 무설정 자동 감지**: 모니터 색역 및 SDR 백색 레벨을 자동 감지하여 64KB 고속 역변환 LUT를 통한 왜곡 없는 색상 복원 (DXGI 캡처)
+- **실시간 로컬 IPC 스트리밍 및 원격 제어**: OBS 방송 위젯이나 서드파티 도구에서 실시간 게임 상태 수신(SSE `GET /events`) 및 JSON-RPC 2.0 원격 호출 연동 지원
+- **라이트 모드 (Lite Mode)**: 화면 가림을 최소화하는 콤팩트 레이아웃(세로 높이 약 60px) 및 흔들림 없는 모서리 자동 스냅 제공
+- **글로벌 다국어 지원**: 한국어, English, 日本語 3개 국어 UI 및 OS 표시 언어 자동 감지
 
-메모리 읽기나 게임 파일 수정은 일절 없으며, **창 추적 + 화면 캡처** 방식으로만 동작합니다.
+메모리 읽기나 게임 프로세스 인젝션은 일절 없으며, **창 추적 + 화면 캡처** 방식으로만 안전하게 동작합니다.
 
 ### 설치 방법
 
 #### Windows
 
 1. [Releases](https://github.com/orphera/overmax/releases) 에서 최신 버전의 `overmax.zip`을 다운로드합니다.
-2. 압축을 풀고 `overmax.exe`를 실행합니다.
+2. 압축을 풀고 `overmax.exe`를 실행합니다. (포터블 모드와 설치형 모드 `%LOCALAPPDATA%\Overmax` 완벽 호환)
 3. 실행 중 DJMAX RESPECT V를 실행하면 자동으로 인식이 시작됩니다.
 
 > **자동 업데이트**: 앱 시작 시 자동으로 최신 버전 여부 및 곡 DB(`image_index.db`) 상태를 확인하여 업데이트를 수행합니다.
@@ -54,14 +56,15 @@ DJMAX RESPECT V 선곡 화면에서 V-Archive 기반 비공식 난이도 정보�
 > * **테두리 없는 전체화면(전체 창 모드) 권장**: 오버레이 창을 게임 화면 위에 정상적으로 띄워놓고 플레이하려면 게임 옵션에서 화면 설정을 **"전체 창 모드(Borderless Fullscreen)"**로 설정해 주세요.
 > * **독점 전체화면 사용 시**: 게임을 일반 **"전체화면"** 모드로 실행하면 Windows OS 및 게임 안티치트(XIGNCODE3) 제약으로 인해 오버레이가 게임 위에 그려지지 못하고 게임 뒤로 숨게 됩니다. 독점 전체화면을 반드시 사용하셔야 하는 경우, 오버레이 창을 드래그하여 **듀얼 모니터의 보조 화면** 등 다른 모니터 영역에 배치해 두고 사용하셔야 합니다.
 
-> **참고**: 오버레이 UI는 한국어, 영어, 일본어 다국어(i18n)를 지원하며, 설정 창에서 언어를 변경할 수 있습니다.
+> **참고**: 오버레이 UI는 한국어, 영어, 일본어 다국어(i18n)를 지원하며, 설정 창에서 언제든지 언어를 변경할 수 있습니다.
 
 ### 설정
 
 - 오버레이 헤더의 **톱니바퀴 버튼(⚙)**을 누르면 설정 창이 열립니다.
-- 설정 창에서 **오버레이 크기(S / M / L / XL)**와 **투명도**, **표시 언어(한국어/English/日本語)**를 조절할 수 있습니다.
-- 오버레이는 egui 네이티브 드래그 기능을 활용하여 마우스 드래그로 원하는 위치에 부드럽게 옮길 수 있으며, 위치는 자동으로 저장됩니다.
+- 설정 창에서 **오버레이 크기(S / M / L / XL)**와 **투명도**, **표시 언어(한국어 / English / 日本語)**를 조절할 수 있습니다.
+- 오버레이는 마우스 드래그로 원하는 위치에 자유롭게 옮길 수 있으며, 위치는 자동으로 저장됩니다.
 - 설정 창에서 **라이트 모드**를 활성화할 수 있습니다. 라이트 모드 활성 상태에서는 의도치 않은 드래그 이동이 차단되며, 설정된 화면 구석 위치(좌상단, 우상단, 좌하단, 우하단)로 오버레이가 흔들림 없이(Jitter-free) 자동 스냅 및 고정됩니다.
+- **고급 설정**: 캡처 엔진(DXGI / GDI), GPU ROI Atlas 가속, 로컬 IPC 통신 활성화, 데이터 저장 경로 확인 및 폴더 열기를 지원합니다.
 
 ---
 
@@ -77,15 +80,16 @@ cargo build --release -p overmax-app
 
 ### 프로젝트 구조 (Rust)
 
-- `rust/overmax_app`: 메인 어플리케이션 (egui/winit 기반 네이티브 다중 뷰포트 UI 및 이벤트 루프)
-- `rust/overmax_engine`: 화면 캡처(DXGI/GDI/X11), 디텍션 파이프라인, 상태 머신 및 텔레메트리
-- `rust/overmax_core`: 핵심 상태 모델 및 공통 도메인 타입
-- `rust/overmax_data`: 설정, DB(SQLite), 추천 엔진 및 V-Archive API 연동
+- `rust/overmax_app`: 메인 어플리케이션 (egui/winit 기반 네이티브 다중 뷰포트 UI, 설정/디버그 창, IPC 서버 및 이벤트 루프)
+- `rust/overmax_engine`: 화면 캡처(DXGI GPU Atlas / GDI / X11), HDR 2-Anchor 역변환, 디텍션 파이프라인, 상태 머신 및 텔레메트리
+- `rust/overmax_core`: 핵심 상태 모델(`VerifiedPlayEvent` 등) 및 공통 도메인 타입
+- `rust/overmax_data`: 설정(`settings.user.json`), DB(SQLite `record.db`), 추천 엔진 및 V-Archive API 연동
 - `rust/overmax_cv`: 순수 Rust 기반 이미지 처리 핵심 알고리즘 (Perceptual Hash, 히스토그램, 템플릿 매칭 엔진 등)
 
 ### 빌드 및 배포 스크립트
 
-- `scripts/package-rust.ps1`: 전체 빌드 및 배포용 `overmax.zip`, `release_manifest.json` 생성 자동화 스크립트 (기존 배포 레이아웃과 동일한 규격 유지)
+- `scripts/package-rust.ps1`: 포터블 배포용 `overmax.zip`, `release_manifest.json` 생성 자동화 스크립트
+- `scripts/package-msix.ps1`: Windows Desktop Bridge(Centennial) 기반 Microsoft Store / MSIX 패키징 스크립트
 - `scripts/package-linux.sh`: Ubuntu 22.04/glibc 2.35 ABI 기준 x86_64 Linux `tar.gz` 생성 및 smoke 검증
 
 ---
@@ -96,14 +100,13 @@ cargo build --release -p overmax-app
 
 ---
 
-## 향후 개발 목표
+## 향후 개발 목표 (v0.5.0 로드맵)
 
-현재 Overmax는 차기 버전(v0.5.0) 개발을 위한 백로그에 따라 다음 목표를 중점적으로 추진하고 있습니다. 자세한 상세 현황 및 이슈 추적은 [TASKS.md](TASKS.md)를 참고해 주세요.
+현재 Overmax는 차기 버전(v0.5.0) 개발을 위한 백로그에 따라 다음 목표를 중점적으로 추진하고 있습니다. 세부 현황 및 이슈 추적은 [TASKS.md](TASKS.md)를 참고해 주세요.
 
-1. **외부 연동 및 IPC 프로토콜 고도화**: 실시간 이벤트 스트리밍, MCP(Model Context Protocol) 기반 외부 호출 RPC 및 추천 프로토콜 정리
-2. **플레이어 편의성 및 인게임 유틸리티**: 글로벌 단축키(Hotkeys) 지원 및 연습용 노트 레인 가림막(Lane Blind) 오버레이
-3. **기록 수집 및 V-Archive 자동 연동**: 결과창 씬 확정 시 V-Archive 백그라운드 자동 업로드
-4. **감지 씬 다양화**: 인게임 래더매치(Ladder Match) 밴픽 및 결과창 등 다양한 게임 상황 감지 지원
+1. **플레이어 편의성 및 인게임 유틸리티 (In-game Utilities & Controls)**: 글로벌/인게임 단축키(Hotkeys) 지원, 연습용 노트 레인 임시 가림막(Lane Blind / Curtain Overlay) 지원
+2. **기록 수집 및 V-Archive 자동 연동 (Record Automation)**: 결과창 씬 확정 시 V-Archive API 백그라운드 자동 업로드
+3. **감지 씬 다양화 및 인게임 확장 (Scene Diversity & Ladder Match)**: 인게임 래더매치(Ladder Match) 밴픽 화면, 대기실 및 결과창 인식 지원
 
 ---
 
