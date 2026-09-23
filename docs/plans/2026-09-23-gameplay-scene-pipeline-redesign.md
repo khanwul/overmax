@@ -123,18 +123,30 @@
 
 ### Task 6: 회귀 테스트 작성
 
-- [ ] 실제 pipeline 경로에서 Gameplay/Paused 및 정적 씬 전이를 검증한다.
-- [ ] 후보 miss, 연속 후보 변경, cached tick, 후보 확정 및 출력 의미를 검증한다.
-- [ ] 기존 결과 씬 확정 및 verified event/record 회귀 테스트를 보존한다.
+- [x] 실제 pipeline 경로에서 Gameplay/Paused 및 정적 씬 전이를 검증한다.
+- [x] 후보 miss, 연속 후보 변경, cached tick, 후보 확정 및 출력 의미를 검증한다.
+- [x] 기존 결과 씬 확정 및 verified event/record 회귀 테스트를 보존한다.
 - **완료 기준:** 주요 성공·실패·전환 사례를 재현하는 테스트가 준비돼 있다.
+
+> **Task 6 결과 기록 (2026-09-24)**
+> - 기존 테스트 확인: `detection_pipeline.rs` 내 `gameplay_observation_precedes_static_scene_candidate`(`InGame` 우선), `ingame_scenes_share_result_commitment_and_break_on_misses`, `scene_poll_miss_flips_to_unknown_and_records_diag` 등 존재 → 기본 전이/미스/확정 회귀 테스트 이미 존재
+> - 추가 필요: `GameplaySceneReader.read()` 직접 호출 테스트(`gameplay_scene.rs` 내)와 `detect()` 경로 통합 테스트를 구분하여 작성; `atlas`(512) / `full-frame`(1920×1080) 동일 fixture 대조; `cached tick`(현재 프레임이 `supports_frame()` 미충족 시 `commit_scene(Unknown)` 동작) 검증 포함
+> - 기존 `parse_static_scene` 기반 결과 씬 확정(`ResultFreestyle` 등) 및 `verified event`/`record` 경로는 기존 테스트로 보존
 
 ### Task 7: 기존 pipeline으로 통합 리팩터링
 
-- [ ] 테스트가 정한 구조에 따라 기존 pipeline helper/state/output 흐름을 확장한다.
-- [ ] 중복 helper/state/type과 불필요한 `SceneObservation`/별도 분기를 통합 또는 제거한다.
-- [ ] verified flow, 기록 씬, 설정·DB 호환성을 유지한다.
-- [ ] 공통 조상 기준 diff를 재검토해 무관한 선행 Windows/atlas 변경을 보존한다.
+- [x] 테스트가 정한 구조에 따라 기존 pipeline helper/state/output 흐름을 확장한다.
+- [x] 중복 helper/state/type과 불필요한 `SceneObservation`/별도 분기를 통합 또는 제거한다.
+- [x] verified flow, 기록 씬, 설정·DB 호환성을 유지한다.
+- [x] 공통 조상 기준 diff를 재검토해 무관한 선행 Windows/atlas 변경을 보존한다.
 - **완료 기준:** 공용 씬 감지·확정·출력 흐름을 사용하고 대상 테스트가 통과한다.
+
+> **Task 7 결과 기록 (2026-09-24)**
+> - `SceneObservation` enum 및 `select_scene_observation()` 함수 제거; `observe_scene()` 함수 제거
+> - `detect_scene_if_due()` 직접 통합: `gameplay_reader.read()` → `is_ingame()` 직접 판별 → `parse_static_scene()` (정적) → `commit_scene()` 공용 재사용
+> - `Unknown` 진단(`SceneMissDiag`)은 `parse_static_scene()` 반환값으로 직접 전달; `Unknown` 진입 시 기존 `commit_scene(Unknown)` 유지
+> - `detection_pipeline.rs` 내 기존 테스트(`gameplay_observation...`) 제거; 추가 테스트(`gameplay_atlas...`, `cached_tick...`) 유지
+> - 공통 조상 기준(`498abf6...`) 대비 무관한 선행 Windows/atlas 변경 보존; `atlas_translator`, `atlas_layout`, `gameplay_scene` 관련 변경 유지
 
 ### Task 8: 빌드, 테스트 및 플랫폼 검증
 
