@@ -584,4 +584,68 @@ mod tests {
             );
         }
     }
+
+    /// 아틀라스 슬롯이 없는 씬에 ROI 매핑이 생기면 안 된다.
+    ///
+    /// `get_roi_for_scene`이 `Some`을 반환하는데 `ATLAS_SLOTS`에 대응 슬롯이 없으면,
+    /// 그 좌표는 어떤 픽셀도 담고 있지 않아 조용히 잘못된 데이터를 돌려준다.
+    /// 슬롯 테이블을 순회하는 기존 테스트는 이 불일치를 잡지 못하므로,
+    /// 여기서는 매핑 측에서 출발해 모든 씬을 검사한다.
+    #[test]
+    fn test_no_translator_mapping_without_backing_slot() {
+        // LadderMatch는 OpenMatch와 좌표를 공유하고, diff_panel은 난이도 무지 별칭이다.
+        // ResultOpen3/Open2의 jacket은 3씬의 src_rect가 동일해 ResultFreestyle 슬롯을 공유한다.
+        let shared: &[(SceneType, SceneType, &str)] = &[
+            (SceneType::LadderMatch, SceneType::OpenMatch, ""),
+            (SceneType::ResultOpen3, SceneType::ResultFreestyle, "jacket"),
+            (SceneType::ResultOpen2, SceneType::ResultFreestyle, "jacket"),
+        ];
+        let has_slot = |scene: SceneType, name: &str| {
+            ATLAS_SLOTS
+                .iter()
+                .any(|slot| slot.scene == scene && slot.name == name)
+        };
+        // 공유 씬은 owner 씬의 슬롯으로 해석하고, 난이도 무지 별칭은 같은 씬의
+        // diff_panel_NM 슬롯이 backing이 된다. 두 규칙은 겹칠 수 있다
+        // (예: LadderMatch/diff_panel은 OpenMatch 슬롯도 없고 별칭 resolution만 유효).
+        let is_backed = |scene: SceneType, name: &str| {
+            let owner = shared
+                .iter()
+                .find(|(s, _, only)| *s == scene && (only.is_empty() || *only == name))
+                .map(|(_, owner, _)| *owner)
+                .unwrap_or(scene);
+            has_slot(owner, name) || (name == "diff_panel" && has_slot(owner, "diff_panel_NM"))
+        };
+
+        let mut names: Vec<&str> = ATLAS_SLOTS.iter().map(|slot| slot.name).collect();
+        names.push("diff_panel");
+        names.sort_unstable();
+        names.dedup();
+
+        for scene in [
+            SceneType::Unknown,
+            SceneType::Freestyle,
+            SceneType::Online,
+            SceneType::OpenMatch,
+            SceneType::LadderMatch,
+            SceneType::ResultFreestyle,
+            SceneType::ResultOpen3,
+            SceneType::ResultOpen2,
+            SceneType::Gameplay,
+            SceneType::Paused,
+        ] {
+            for name in &names {
+                if AtlasTranslator::get_roi_for_scene(name, scene).is_none() {
+                    continue;
+                }
+                assert!(
+                    is_backed(scene, name),
+                    "{:?}/{} resolves via translator but has no backing atlas slot. \
+                     A mapping without a slot returns coordinates holding unrelated pixels.",
+                    scene,
+                    name
+                );
+            }
+        }
+    }
 }
