@@ -53,46 +53,31 @@ impl AtlasTranslator {
                 x2: 204,
                 y2: 364,
             }),
-            (
-                SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2,
-                b"diff_panel_NM",
-            ) => Some(RoiRect {
+            (SceneType::ResultFreestyle, b"diff_panel_NM") => Some(RoiRect {
                 x1: 181,
                 y1: 488,
                 x2: 271,
                 y2: 506,
             }),
-            (
-                SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2,
-                b"diff_panel_HD",
-            ) => Some(RoiRect {
+            (SceneType::ResultFreestyle, b"diff_panel_HD") => Some(RoiRect {
                 x1: 362,
                 y1: 214,
                 x2: 452,
                 y2: 232,
             }),
-            (
-                SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2,
-                b"diff_panel_MX",
-            ) => Some(RoiRect {
+            (SceneType::ResultFreestyle, b"diff_panel_MX") => Some(RoiRect {
                 x1: 413,
                 y1: 232,
                 x2: 503,
                 y2: 250,
             }),
-            (
-                SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2,
-                b"diff_panel_SC",
-            ) => Some(RoiRect {
+            (SceneType::ResultFreestyle, b"diff_panel_SC") => Some(RoiRect {
                 x1: 413,
                 y1: 250,
                 x2: 503,
                 y2: 268,
             }),
-            (
-                SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2,
-                b"diff_panel",
-            ) => Some(RoiRect {
+            (SceneType::ResultFreestyle, b"diff_panel") => Some(RoiRect {
                 x1: 181,
                 y1: 488,
                 x2: 271,
@@ -395,37 +380,25 @@ impl AtlasTranslator {
                 x2: 301,
                 y2: 479,
             }),
-            (
-                SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2,
-                Difficulty::NM,
-            ) => Some(RoiRect {
+            (SceneType::ResultFreestyle, Difficulty::NM) => Some(RoiRect {
                 x1: 181,
                 y1: 488,
                 x2: 271,
                 y2: 506,
             }),
-            (
-                SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2,
-                Difficulty::HD,
-            ) => Some(RoiRect {
+            (SceneType::ResultFreestyle, Difficulty::HD) => Some(RoiRect {
                 x1: 362,
                 y1: 214,
                 x2: 452,
                 y2: 232,
             }),
-            (
-                SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2,
-                Difficulty::MX,
-            ) => Some(RoiRect {
+            (SceneType::ResultFreestyle, Difficulty::MX) => Some(RoiRect {
                 x1: 413,
                 y1: 232,
                 x2: 503,
                 y2: 250,
             }),
-            (
-                SceneType::ResultFreestyle | SceneType::ResultOpen3 | SceneType::ResultOpen2,
-                Difficulty::SC,
-            ) => Some(RoiRect {
+            (SceneType::ResultFreestyle, Difficulty::SC) => Some(RoiRect {
                 x1: 413,
                 y1: 250,
                 x2: 503,

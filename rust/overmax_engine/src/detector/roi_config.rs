@@ -57,7 +57,6 @@ impl Default for GlobalRoiConfig {
             SceneType::ResultFreestyle => {
                 "jacket" => (705, 14, 60, 60),
                 "rate" => (891, 608, 129, 32),
-                "mode" => (0, 18, 340, 75),
                 "mode_digit" => (78, 28, 50, 68),
                 "mode_colorbar" => (60, 0, 6, 96),
                 "diff_panel" => (709, 86, 90, 18),
