@@ -17,6 +17,7 @@ pub struct SceneRoiConfig {
 #[derive(Debug, Clone)]
 pub struct GlobalRoiConfig {
     pub logo: RawRoiRect,
+    pub rois: HashMap<String, RawRoiRect>,
     pub scenes: HashMap<SceneType, SceneRoiConfig>,
 }
 
@@ -56,7 +57,6 @@ impl Default for GlobalRoiConfig {
             SceneType::ResultFreestyle => {
                 "jacket" => (705, 14, 60, 60),
                 "rate" => (891, 608, 129, 32),
-                "mode" => (0, 18, 340, 75),
                 "mode_digit" => (78, 28, 50, 68),
                 "mode_colorbar" => (60, 0, 6, 96),
                 "diff_panel" => (709, 86, 90, 18),
@@ -103,6 +103,71 @@ impl Default for GlobalRoiConfig {
                 width: 100,
                 height: 100,
             },
+            rois: HashMap::from([
+                (
+                    "gp_center_left".to_string(),
+                    RawRoiRect {
+                        x: 702,
+                        y: 80,
+                        width: 7,
+                        height: 257,
+                    },
+                ),
+                (
+                    "gp_center_right".to_string(),
+                    RawRoiRect {
+                        x: 1211,
+                        y: 80,
+                        width: 7,
+                        height: 257,
+                    },
+                ),
+                (
+                    "gp_left_left".to_string(),
+                    RawRoiRect {
+                        x: 102,
+                        y: 80,
+                        width: 7,
+                        height: 257,
+                    },
+                ),
+                (
+                    "gp_left_right".to_string(),
+                    RawRoiRect {
+                        x: 611,
+                        y: 80,
+                        width: 7,
+                        height: 257,
+                    },
+                ),
+                (
+                    "gp_right_left".to_string(),
+                    RawRoiRect {
+                        x: 1342,
+                        y: 80,
+                        width: 7,
+                        height: 257,
+                    },
+                ),
+                (
+                    "gp_right_right".to_string(),
+                    RawRoiRect {
+                        x: 1851,
+                        y: 80,
+                        width: 7,
+                        height: 257,
+                    },
+                ),
+                (
+                    "pause_title".to_string(),
+                    RawRoiRect {
+                        x: 731,
+                        y: 177,
+                        width: 148,
+                        height: 28,
+                    },
+                ),
+            ]),
             scenes,
         }
     }

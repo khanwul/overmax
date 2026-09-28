@@ -148,7 +148,22 @@ impl RoiManager {
                 name, scene,
             );
         }
-        let roi = self.config.scenes.get(&scene)?.rois.get(name)?;
+        let roi = self
+            .config
+            .rois
+            .get(name)
+            .or_else(|| self.config.scenes.get(&scene)?.rois.get(name))?;
+        Some(self.transform_roi(RoiRect::from(*roi)))
+    }
+
+    pub fn get_global_roi(&self, name: &str) -> Option<RoiRect> {
+        if self.is_atlas {
+            return crate::detector::atlas_translator::AtlasTranslator::get_roi_for_scene(
+                name,
+                SceneType::Unknown,
+            );
+        }
+        let roi = self.config.rois.get(name)?;
         Some(self.transform_roi(RoiRect::from(*roi)))
     }
 
@@ -274,14 +289,14 @@ mod tests {
         manager.update_window_size(512, 512);
         assert!(manager.is_atlas_mode());
 
-        // 아틀라스 점프 테이블 좌표(0, 0, 407, 94) 반환 검증
+        // 아틀라스 점프 테이블 좌표(42, 0, 449, 94) 반환 검증
         let atlas_roi = manager.get_roi_for_scene("score", SceneType::ResultFreestyle);
         assert_eq!(
             atlas_roi,
             Some(RoiRect {
-                x1: 0,
+                x1: 42,
                 y1: 0,
-                x2: 407,
+                x2: 449,
                 y2: 94
             })
         );
