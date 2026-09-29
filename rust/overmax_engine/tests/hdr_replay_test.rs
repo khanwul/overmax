@@ -34,6 +34,10 @@ fn find_raw_file(name: &str) -> Option<PathBuf> {
 
 #[cfg(windows)]
 #[test]
+// scratch/hdr_snapshot/*.raw 가 43슬롯 배치로 덤프되어 30939f7 이후의 현재
+// 아틀라스 좌표와 어긋난다. 47슬롯으로 재 덤프한 새 HDR 캡처로 교체되면 해제한다.
+// 상세 근거는 함수 본문의 TODO(hdr) 주석 참조.
+#[ignore = "stale atlas snapshot: 43-slot dump vs current 47-slot packing"]
 fn test_analyze_all_hdr_snapshots() {
     let target_dir = match find_snapshot_dir() {
         Some(d) => d,
@@ -244,6 +248,16 @@ fn analyze_single_snapshot(
         );
 
         // 스냅샷별 정밀 Assertion 검증
+        //
+        // TODO(hdr): scratch/hdr_snapshot/*.raw 는 2026-09-07에 43슬롯 아틀라스
+        // 배치로 덤프되었다. 커밋 30939f7(2026-09-23)이 43->47로 재패킹하며
+        // ATLAS_SLOTS 의 atlas_rect 를 전부 변경했으므로, 이 스냅샷의 ROI 픽셀은
+        // 현재 코드와 다른 좌표에 있다(실측: Freestyle/jacket 의 옛 좌표 (340,94)는
+        // lum mean=1.555, 새 좌표 (409,94)는 lum mean=0.044 = 빈 영역).
+        //
+        // 스냅샷이 어느 배치로 덤프되었는지는 json 메타에도 기록되어 있지 않아,
+        // 47슬롯으로 재 덤프한 새 HDR 캡처 없이는 이 테스트로 동작을 확인할 수
+        // 없다. 새 캡처가 생기면 이 ignore 를 해제하고 스냅샷을 교체한다.
         if file_name.contains("hdr_snapshot1") {
             assert_eq!(detected_scene, SceneType::Freestyle);
             assert_eq!(match_fs.as_ref().map(|m| m.image_id.as_str()), Some("733"));
