@@ -360,33 +360,29 @@ impl DxgiCaptureEngine {
             && center_y < self.output_bounds.bottom;
 
         if !inside {
-            if let Ok((duplication, width, height, bounds, is_hdr, device_name, detected_max_lum)) =
+            let (duplication, width, height, bounds, is_hdr, device_name, detected_max_lum) =
                 Self::find_output(&self.adapter, &self.device, Some(rect))
-            {
-                self.duplication = duplication;
-                self.width = width;
-                self.height = height;
-                self.output_bounds = bounds;
-                self.is_hdr_format = is_hdr;
-                self.staging_texture = None;
-                self.staging_atlas_textures = [None, None];
-                self.normalizer = None;
-                self.atlas_frames_captured = 0;
-                self.atlas_write_idx = 0;
-                self.device_name = device_name;
-                self.detected_max_lum = detected_max_lum;
-                if is_hdr {
-                    let level = Self::resolve_sdr_white_level(
-                        self.configured_sdr_white_level,
-                        &device_name,
-                    );
-                    self.active_sdr_white_level = level;
-                    self.hdr_lut =
-                        std::sync::Arc::new(*super::hdr_pipeline::build_lut_table(level));
-                    super::hdr_pipeline::set_active_sdr_white_level(level);
-                } else {
-                    self.active_sdr_white_level = 1.0;
-                }
+                    .map_err(|e| format!("DXGI output swap for rect failed: {e}"))?;
+            self.duplication = duplication;
+            self.width = width;
+            self.height = height;
+            self.output_bounds = bounds;
+            self.is_hdr_format = is_hdr;
+            self.staging_texture = None;
+            self.staging_atlas_textures = [None, None];
+            self.normalizer = None;
+            self.atlas_frames_captured = 0;
+            self.atlas_write_idx = 0;
+            self.device_name = device_name;
+            self.detected_max_lum = detected_max_lum;
+            if is_hdr {
+                let level =
+                    Self::resolve_sdr_white_level(self.configured_sdr_white_level, &device_name);
+                self.active_sdr_white_level = level;
+                self.hdr_lut = std::sync::Arc::new(*super::hdr_pipeline::build_lut_table(level));
+                super::hdr_pipeline::set_active_sdr_white_level(level);
+            } else {
+                self.active_sdr_white_level = 1.0;
             }
         }
         Ok(())
@@ -503,7 +499,11 @@ impl CaptureEngine for DxgiCaptureEngine {
             return Err("Capture rect must have positive dimensions".to_string());
         }
 
-        let _ = self.ensure_output_for_rect(rect);
+        // 출력 교체가 실패하면 옛 duplication 을 유지한 채 새 모니터 좌표로
+        // 크롭하게 되어 다른 모니터의 픽셀이 씬으로 유입된다. AcquireNextFrame
+        // 이 성공하면 Ok 가 반환되어 오염된 프레임이 정상 입력으로 처리되므로,
+        // 실패를 그대로 전파해 캡처를 중단시킨다.
+        self.ensure_output_for_rect(rect)?;
 
         unsafe {
             let use_atlas = self.enable_gpu_atlas;
