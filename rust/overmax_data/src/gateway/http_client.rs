@@ -50,7 +50,11 @@ impl GatewayHttpClient {
     }
 
     /// Prepares a GET request with standard headers and optional timeout override.
-    pub fn get(&self, url: &str, timeout: Option<Duration>) -> RequestBuilder {
+    ///
+    /// `url` 은 `IntoUrl` 을 받으므로 `&str` 과 이미 파싱된 `Url` 을 모두 넘길 수 있다.
+    /// 쿼리 파라미터를 값 단위로 안전하게 붙이려면 `reqwest::Url` 의
+    /// `query_pairs_mut` 로 만든 `Url` 을 넘기는 편이 `format!` 보간보다 정확하다.
+    pub fn get<U: reqwest::IntoUrl>(&self, url: U, timeout: Option<Duration>) -> RequestBuilder {
         let mut req = self
             .client
             .get(url)
