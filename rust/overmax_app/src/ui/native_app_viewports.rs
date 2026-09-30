@@ -609,6 +609,7 @@ impl NativeApp {
                 toast: self.toast.clone(),
                 window_snapshot: self.window_snapshot,
                 capture_fatal: self.capture_fatal.clone(),
+                overlay_visible_override: self.overlay_visible_override,
                 #[cfg(any(debug_assertions, feature = "telemetry"))]
                 delivery_telemetry: self
                     .last_detection_output

@@ -87,6 +87,9 @@ pub struct LinuxOverlaySnapshot {
     pub toast: Option<ToastMessage>,
     pub window_snapshot: Option<WindowSnapshot>,
     pub capture_fatal: Option<String>,
+    /// IPC `set_overlay_visibility` 로 강제된 표시 상태. `None` 이면 강제 없음.
+    /// Windows 렌더 경로(`native_app_viewports.rs` 의 `overlay_on`)와 동일한 계약이다.
+    pub overlay_visible_override: Option<bool>,
     #[cfg(any(debug_assertions, feature = "telemetry"))]
     pub delivery_telemetry: Option<overmax_engine::detector::telemetry::DetectionDeliveryTelemetry>,
 }
@@ -219,6 +222,7 @@ fn same_display_snapshot(
         && previous.toast == next.toast
         && previous.window_snapshot == next.window_snapshot
         && previous.capture_fatal == next.capture_fatal
+        && previous.overlay_visible_override == next.overlay_visible_override
 }
 
 pub type AppRepaintCallback = Arc<dyn Fn() + Send + Sync>;
@@ -1458,6 +1462,9 @@ fn is_degraded(snapshot: &LinuxOverlaySnapshot) -> bool {
 }
 
 fn is_hidden(snapshot: &LinuxOverlaySnapshot) -> bool {
+    if snapshot.overlay_visible_override == Some(false) {
+        return true;
+    }
     snapshot.capture_fatal.is_none()
         && snapshot.window_snapshot.is_some_and(|window| {
             !window.foreground
@@ -2151,6 +2158,7 @@ mod tests {
             toast: None,
             window_snapshot: None,
             capture_fatal: None,
+            overlay_visible_override: None,
             #[cfg(any(debug_assertions, feature = "telemetry"))]
             delivery_telemetry: None,
         };
@@ -2181,6 +2189,17 @@ mod tests {
             assert!(!super::is_hidden(&background));
             background.always_visible = false;
         }
+        // IPC set_overlay_visibility(false) 는 씬 상태와 무관하게 숨긴다.
+        background.state.scene = SceneType::Freestyle;
+        background.always_visible = true;
+        background.window_snapshot.as_mut().unwrap().foreground = true;
+        assert!(!super::is_hidden(&background));
+        background.overlay_visible_override = Some(false);
+        assert!(super::is_hidden(&background));
+        background.overlay_visible_override = Some(true);
+        assert!(!super::is_hidden(&background));
+        background.overlay_visible_override = None;
+        assert!(!super::is_hidden(&background));
         background.state.scene = SceneType::Freestyle;
         background.window_snapshot.as_mut().unwrap().fullscreen = false;
         background.snap = "bottom_right".to_string();
