@@ -473,7 +473,8 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 - **미완료 계획 항목**:
   - `docs/plans/2026-09-23-atlas-optimization-game-cycle-plan.md:26` — `### [ ] Step 4: 캡처 파이프라인 연동 검증`. 본문 판단("DXGI `copy_slots_to_atlas`는 `ATLAS_SLOTS` 순차 순회이므로 코드 수정 불필요")은 `docs/decisions/detection_pipeline.md` 2026-09-27 행에 이미 기록되었으나 계획 문서 체크박스가 미갱신. **신규 7개 ROI의 DXGI 실캡처 실측 검증은 한 번도 수행되지 않음.**
   - `docs/plans/2026-09-23-gameplay-scene-pipeline-redesign.md:156` — 실앱 GDI/DXGI 상태 전이 확인 미실행. 같은 문서 97행은 "실앱 런타임 연결은 별도 환경에서 검증 필요 → 가정으로 me우지 않고 기록함"이라고 적어 두었으나 이 미검증 사실이 `TASKS.md`/`CONTEXT.md`로 전파되지 않음.
-- **CONTEXT.md에 Gameplay ROI의 씬 독립(Global) 설명이 누락**: `a278aaf`/`21c9652`의 결정이 `docs/decisions/`에만 있고 `CONTEXT.md:132`에는 Global ROI(`gp_*`/`pause_title`가 `SceneType::Unknown` 스코프) 사실이 없다. CONTEXT.md에는 변경 이력 섹션 자체가 존재하지 않는다(grep `변경 이력|History` 0건) — AGENTS.md Release Protocol 체크리스트 4번이 요구하는 이력이 `docs/decisions/`에 위임된 구조인지 실제 누락인지는 사용자 판단 필요.
+- ~~**CONTEXT.md에 Gameplay ROI의 씬 독립(Global) 설명이 누락**~~ — **오탐(철회).** 정정 착수 중 `CONTEXT.md:131`에 이미 존재함을 확인했다: 「**씬 독립(Global) ROI**: 특정 씬에 속하지 않는 ROI는 `GlobalRoiConfig.rois`에 위치하며, 아틀라스 모드에서는 `SceneType::Unknown` 스코프로 조회됩니다. `RoiManager::get_global_roi()`가 이 경로를 캡슐화하여 아틀라스/전체 프레임 양쪽을 모두 처리합니다.」`a278aaf`(2026-09-27)가 반영한 내용이다. 리뷰 워커가 `grep 'gp_'` 위치를 잘못 좁혀 판단한 것으로 보인다. (단, 리뷰 문서에 이 항목을 남긴 것은 리뷰 워커가 같은 파일의 인접 행을 중복 확인하지 않은 채 넘어간 데 따른다. 재검토 시 `CONTEXT.md` 관련 서술은 130~134행 전체를 읽을 것.)
+- CONTEXT.md에는 변경 이력(History) 섹션 자체가 존재하지 않는다(grep `변경 이력|History` 0건). AGENTS.md Release Protocol 체크리스트 4번이 요구하는 이력이 `docs/decisions/`에 위임된 구조인지 실제 누락인지는 사용자 판단 필요.
 
 ---
 
