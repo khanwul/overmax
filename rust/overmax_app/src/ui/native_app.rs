@@ -288,6 +288,10 @@ pub struct NativeApp {
     pub(crate) exit_requested: Arc<AtomicBool>,
     pub(crate) ctx_holder: Arc<Mutex<Option<egui::Context>>>,
     pub(crate) session_initial_record: Option<overmax_data::RecordValue>,
+    /// 오버레이 렌더 경로가 매 프레임 재계산하지 않도록 캐시한 업로드 필요 여부.
+    /// 입력(`session.context` 의 rate/is_max_combo, `record_manager` 상태)은
+    /// `drain_detection_results` 에서만 변하므로 그 `changed` 지점에서 갱신한다.
+    pub(crate) overlay_upload_needed: bool,
     pub(crate) platform: platform::PlatformState,
     pub(crate) toast: Option<crate::ui::components::ToastMessage>,
     pub(crate) last_detection_output: Option<DetectionOutput>,
@@ -533,6 +537,7 @@ impl NativeApp {
             exit_requested: exit_requested.clone(),
             ctx_holder: ctx_holder.clone(),
             session_initial_record: None,
+            overlay_upload_needed: false,
             platform,
             toast: None,
             last_detection_output: None,

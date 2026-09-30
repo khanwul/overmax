@@ -88,6 +88,10 @@ impl NativeApp {
 
         if changed {
             self.refresh_overlay_data();
+            // 이 함수의 입력(세션 컨텍스트 rate/is_max_combo, record_manager 상태)은
+            // 위 루프에서만 변한다. 오버레이 렌더 경로가 매 프레임 DB 조회를
+            // 반복하지 않도록 여기서 1회만 계산해 캐시한다.
+            self.overlay_upload_needed = self.current_pattern_needs_upload();
             if let Ok(recs) = serde_json::to_value(&self.recommendations) {
                 crate::system::ipc_server::update_latest_recommendations(recs);
             }
