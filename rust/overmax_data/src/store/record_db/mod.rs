@@ -488,6 +488,81 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
+    /// 2026-04-24 Python 구현(`95048ec8^`)의 레거시 records 스키마.
+    /// `is_max_combo` 컬럼만 없고 나머지 컬럼은 현행과 동일하다.
+    const LEGACY_RECORDS_DDL: &str = "
+        CREATE TABLE records (
+            steam_id    TEXT NOT NULL,
+            song_id     TEXT NOT NULL,
+            button_mode TEXT NOT NULL,
+            difficulty  TEXT NOT NULL,
+            rate        REAL NOT NULL,
+            updated_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            PRIMARY KEY (steam_id, song_id, button_mode, difficulty)
+        );";
+
+    fn seed_legacy_db(db_path: &Path, rows: usize) {
+        let conn = Connection::open(db_path).unwrap();
+        conn.execute_batch(LEGACY_RECORDS_DDL).unwrap();
+        for i in 0..rows {
+            conn.execute(
+                "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    "76561198000000001",
+                    (1000 + i).to_string(),
+                    Mode::B4.as_str(),
+                    Difficulty::MX.as_str(),
+                    90.0 + i as f64
+                ],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn legacy_records_migration_preserves_existing_rows() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("legacy_record.db");
+        const ROWS: usize = 50;
+        seed_legacy_db(&db_path, ROWS);
+
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize(), "레거시 DB 초기화 실패");
+
+        // 마이그레이션은 성공 응답만 돌려주고 행을 지우면 안 된다.
+        let count: i64 = db
+            .open_conn()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM records", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, ROWS as i64, "레거시 기록이 삭제됨");
+
+        // 기존 행이 조회되고, 추가된 컬럼은 기본값으로 채워진다.
+        let rec = db
+            .get(1000, Mode::B4, Difficulty::MX)
+            .expect("레거시 행 조회 실패");
+        assert!((rec.0 - 90.0).abs() < 1e-4, "레거시 값 훼손: {}", rec.0);
+        assert!(!rec.1, "is_max_combo 기본값이 0 이어야 함");
+    }
+
+    #[test]
+    fn legacy_migrated_db_accepts_upsert_with_max_combo() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("legacy_upsert.db");
+        seed_legacy_db(&db_path, 1);
+
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        // 신규 행은 is_max_combo=true 로 기록되어야 한다(기본값 0 에 머무르지 않음).
+        assert!(db.upsert(7777, Mode::B6, Difficulty::HD, 99.5, true, false));
+        let rec = db
+            .get(7777, Mode::B6, Difficulty::HD)
+            .expect("신규 행 저장 실패");
+        assert!(rec.1, "is_max_combo=true 가 보존되지 않음");
+    }
+
     #[test]
     fn test_concurrent_record_db_writes() {
         let temp_dir = tempfile::tempdir().unwrap();
