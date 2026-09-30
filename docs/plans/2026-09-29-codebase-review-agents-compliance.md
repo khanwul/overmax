@@ -310,7 +310,7 @@ self.current_is_fullscreen = is_fs;         // ← 읽는 곳이 없음
 - **문제**: `is_fullscreen`은 `FindWindowW` + `GetWindowLongW` + `GetWindowRect` + `MonitorFromWindow` + `GetMonitorInfoW` 5회 win32u syscall을 수행한다(`window_tracker/windows.rs:41-86`). Decision Log 2026-05 "WindowTracker 동적 폴링 주기 — win32u 시스템 콜 오버헤드 해소"의 의도를 정면 우회한다. 동일 패턴이 `detection_worker.rs:476`에서도 재발생하며 이는 300ms 스로틀(`WindowQueryScheduler`)을 의도적으로 우회한다. 전역 grep 결과 `current_is_fullscreen`는 대입 2곳 외에 **어떤 읽기도 없다** — 순수 오버헤드.
 - **수정 방향**: `mod.rs`의 `is_fullscreen` 호출과 `current_is_fullscreen` 필드 삭제(dead). `detection_worker.rs:476`은 `WindowQueryScheduler::update()`가 이미 갱신하는 캐시된 값을 스케줄러에 저장해 재사용하도록 1줄 필드 추가.
 
-### 4.8 GDI `release_resources` 순서 오류로 HBITMAP 커널 객체 누수
+### 4.8 GDI `release_resources` 순서 오류로 HBITMAP 커널 객체 누수 — **오진, 수정하지 않음**
 
 - **파일**: `rust/overmax_engine/src/capture/capture_engine/windows/gdi.rs:76-91`
 ```rust
@@ -319,9 +319,19 @@ fn release_resources(&mut self) {
     if let Some(memory_dc) = self.memory_dc.take() { DeleteDC(memory_dc); } // ← 나중
 }
 ```
-- **문제**: `SelectObject(memory_dc, hbitmap)`의 이전 핸들은 저장·복원되지 않는다(`gdi.rs:67`). 비트맵이 DC에 **선택된 상태**에서 `DeleteObject`은 실패(HRESULT 0)하며 객체가 남는다. `:114-117`에서 창 크기가 바뀔 때마다 `release_resources` + `init_resources`가 반복되므로, GDI 백엔드 활성화 상태(기본값 `engine: "auto"` + 멀티모)에서 리사이즈마다 HBITMAP·DIB 섹션이 커널 GDI 객체로 누수된다.
-- **수정**: 순서만 교환 — `DeleteDC(memory_dc)`를 먼저, `DeleteObject(hbitmap)`를 뒤로. 2줄 diff.
-- **미재현**: GDI 객체 누수 재현을 하지 않았으며 `DeleteObject`이 실제로 0을 반환하는지는 해당 빌드에서 미확인.
+- **원래 주장**: `SelectObject(memory_dc, hbitmap)`의 이전 핸들이 저장·복원되지 않으므로(`gdi.rs:67`) 비트맵이 DC에 **선택된 상태**에서 `DeleteObject`이 실패하고, `:114-117`에서 창 크기가 바뀔 때마다 `release_resources` + `init_resources`가 반복되어 리사이즈마다 HBITMAP이 커널 GDI 객체로 누수된다.
+- **실측 반증**: `windows-sys 0.61.2` + `CreateDIBSection` 프로브로 검증했다. 시나리오별로 인스턴스를 분리해 측정한 결과:
+
+  | 측정 | 결과 |
+  |------|------|
+  | 현행 순서(`DeleteObject` → `DeleteDC`) | `DeleteObject=true`, `DeleteDC=true` |
+  | 제안 순서(`DeleteDC` → `DeleteObject`) | `DeleteDC=true`, `DeleteObject=true` |
+  | 현행 순서로 5회 연속 생성/해제 반복 | 5회 모두 `DeleteObject=true` |
+
+  **`DeleteObject`는 DC에 선택된 `CreateDIBSection` 비트맵에 대해 성공한다.** 누수가 관찰되지 않았다. 제안대로 순서를 바꾸어도 결과는 동일하므로 이득이 없다.
+- **왜 "선택된 객체는 삭제 불가"라는 상식이 성립하지 않는가**: GDI 문서의 "an object cannot be deleted while selected into a DC"는 **펜·팔레트·브러시처럼 DC가 상태로 보관하는 문서화된 객체**에 대한 것이다. `CreateDIBSection` 비트맵은 `DeleteDC` 시 DC가 참조를 정리하므로 순서와 무관하게 삭제된다.
+- **보정된 진짜 문제 (LOW)**: `gdi.rs:67`의 `SelectObject` 이전 핸들 `previous` 를 저장하지 않는다. 이 핸들은 DC가 파괴되므로 복원 불필요하지만, `init_resources` 재실행 시 이전 비트맵이 새 DC에 남아 있을 수 있다. 다만 5회 반복에서 누수가 관찰되지 않았으므로 **실측 근거가 없는 이상 수정하지 않는다.**
+- **결론**: AGENTS.md 「버그가 실제로 재현됨」 요건을 충족하지 못한다. **수정하지 않음.**
 
 ### 4.9 `image_index.db` 갱신이 파이프라인에 반영되지 않음
 
@@ -348,14 +358,33 @@ fn release_resources(&mut self) {
   | `한글아이디` | `/archive/%ED%95%9C...%EB%94%94/button/4` | `["since"]` — 한글은 정상 |
 
   즉 한글은 문제없고(UTF-8 퍼센트 인코딩), **구분자를 포함한 값이 경로/쿼리 구조를 조작한다**는 것이 실제 위험이다.
-- **`since` (완료)**: `query_pairs_mut().append_pair("since", s)` 로 교체. `abc&since=evil` 케이스에서 키가 `["since"]` 하나가 되고 값은 `abc%26since%3Devil` 로 이스케이프된다. `HttpClient::get` 을 `U: IntoUrl` 제네릭으로 바꿔 파싱된 `Url` 을 넘길 수 있게 했다. 회귀 테스트 4건(`v_id_keeps_non_ascii_verbatim` 포함). 커밋 `74094d8` 참고.
-- **`v_id` (미해결)**: 경로 세그먼트는 `query_pairs_mut` 로 고쳐지지 않는다(위 표 두 번째 행 — 경로가 여전히 절단된다). 올바른 해법은 `percent-encoding` 크레이트의 세그먼트 단위 인코딩이며, 이 크레이트는 이미 트리에 있다(reqwest 의존성, 새 의존성 추가 불필요). **다만 v_id 의 실제 값 분포를 모른 상태에서 스코프를 넓히지 않는 편이 맞다고 사용자 판단을 받아 보류했다.** 닫는 방법: 실제 v_id 샘플을 수집해 경로 조작이 가능한 입력(슬래시/물음표 포함)이 있는지 확인.
-- **`fetch_single_song_records` (미해결)**: `:151-161` 도 `?title={song_id}` 을 보간하지만 `song_id` 는 `i32` 타입이라 위험이 없다.
+- **`since` (완료, `74094d8`)**: `query_pairs_mut().append_pair("since", s)` 로 교체. `abc&since=evil` 케이스에서 키가 `["since"]` 하나가 되고 값은 `abc%26since%3Devil` 로 이스케이프된다. `HttpClient::get` 을 `U: IntoUrl` 제네릭으로 바꿔 파싱된 `Url` 을 넘길 수 있게 했다.
+- **`v_id` (완료, `8185d53`)**: 앞선 분석에서 "경로 세그먼트는 `query_pairs_mut` 로 고쳐지지 않으니 percent-encoding 크레이트가 필요하다"고 남겼으나, **그때 `path_segments_mut()` API를 찾지 못했다.** url 크레이트(새 의존성 아님, reqwest 의존성이 이미 트리에 있음)의 `Url::path_segments_mut().push()` 가 정확히 그 역할이다. 앞선 실측 표를 그대로 재현한 결과:
+
+  | v_id | `format!` | `path_segments_mut` |
+  |------|----------|-------------------|
+  | `a/b` | `a/b` — 경로가 2단 분리 | `a%2Fb` — 세그먼트 유지 |
+  | `a?x=1` | 키 `["x"]` — `since` 소실 | 키 `["since"]` |
+  | `a#f` | 키 `[]` — `since` 소실 | 키 `["since"]` |
+  | `한글아이디` | 정상 인코딩 | 정상 인코딩 (동일) |
+
+  따라서 **"v_id 값 분포 미확인이라 보류"할 이유가 사라졌다.** 값이 무엇이든 구조가 조작되지 않는다. 화이트리스트 필터는 계속 쓰지 않는다.
+  - `&` 만 예외: `path_segments_mut` 가 이스케이프하지 않는다(경로에서 합법 문자라 크레이트가 그대로 둔다). 쿼리가 없는 경로 위치라 구조 조작은 없고 값도 보존되므로 허용했다(테스트로 고정).
+- **`fetch_single_song_records` (완료, `8185d53`)**: 같은 헬퍼를 재사용해 `v_id` 보간을 없앴다. `song_id` 는 `i32` 이므로 `query_pairs_mut().append_pair("title", ...)` 로 처리.
+- **회귀 테스트 7건**, 옛 `format!` 구현으로 대조해 4개(`a/b`, `a?x=1`, `a#f`, `since` 인젝션)가 실제로 실패하고 신 구현에서 통과함을 확인했다.
 
 ### 4.12 V-Archive 토큰이 로그로 노출될 수 있는 Debug derive
 
 - **파일**: `rust/overmax_data/src/gateway/varchive.rs:13-17, 26-32, 77-84`
-- **문제**: 토큰 하드코딩은 없고 파일에서만 읽으므로 양호하나, `AccountInfo`가 `#[derive(Debug, Clone)]`라 `{:?}` 포맷으로 **토큰이 로그에 그대로 노출될 수 있다**. `RecordDB`에 이미 `masked_steam_id`(`mod.rs:71-83`) 마스킹 관례가 있는데 AccountInfo에는 없다. `UploadResult`도 `Debug` derive라 이것도 전파된다. 또한 `upload_score` 실패 시 `message: e.to_string()`(`:90`)이 reqwest 에러 문자열(URL 포함 가능)을 UI(`sync_ui`)로 흘려보낸다.
+- **원래 지적**: 토큰 하드코딩은 없고 파일에서만 읽으므로 양호하나, `AccountInfo`가 `#[derive(Debug, Clone)]`라 `{:?}` 포맷으로 **토큰이 로그에 그대로 노출될 수 있다**. `RecordDB`에 이미 `masked_steam_id`(`mod.rs:71-83`) 마스킹 관례가 있는데 AccountInfo에는 없다. `UploadResult`도 `Debug` derive라 이것도 전파된다.
+- **완료 (`b7147a8`)**: `#[derive(Debug)]` 를 제거하고 수동 `Debug` 구현으로 `user_no`/`token` 을 `<redacted>` 로 대체했다. `user_no` 는 토큰과 짝을 이루는 계정 식별자라 함께 숨긴다.
+- **잔여 (미해결)**: `upload_score` 실패 시 `message: e.to_string()`(`:102`)이 reqwest 에러 문자열을 UI(`sync_ui`)로 흘려보낸다. **reqwest 에러의 Display 는 URL 전체를 포함함을 실측 확인했다:**
+  ```
+  [DNS fail]  error sending request for url (https://this-host-does-not-exist-overmax.invalid/x)
+  [refused]  error sending request for url (http://127.0.0.1:9/secret-path?token=abc)
+  [timeout]  error sending request for url (https://httpbin.invalid/delay/30)
+  ```
+  V-Archive 는 토큰을 쿼리가 아닌 `Authorization` 헤더로 보내므로(`varchive.rs:92`) 실제 노출은 경로 정도로 제한되지만, **다른 게이트웨이(Provider 등)는 쿼리에 값을 실을 수 있어** `message` 에서 쿼리/프래그먼트를 제거하는 방어를 검토할 가치가 있다. 무조건 제거하면 진단 정보가 사라지므로 판단이 필요한 항목이다. 닫는 방법: `UploadResult.message` 를 UI 로 넘기기 전에 URL 부분만 마스킹하는 헬퍼 추가 여부 결정.
 - **수정**: `#[derive(Debug, Clone)]`를 `#[derive(Clone)]` + `impl fmt::Debug for AccountInfo`로 `token`을 `"***"` 마스킹. 기존 `masked_steam_id` 패턴 확장이며 추상 추가 아님.
 
 ### 4.13 `image_index.rs::load()`가 읽기 전용 경로에서 매번 DDL을 실행
