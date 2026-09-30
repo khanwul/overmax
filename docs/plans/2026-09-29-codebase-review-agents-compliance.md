@@ -319,15 +319,22 @@ fn release_resources(&mut self) {
 - **문제**: `title`이 임의 문자열이면 `song_id` TEXT로 그대로 저장되고, 생성 컬럼은 `json_extract(raw_data, '$.score'|...)`로 파생된다. 서버가 `title: "abc"`를 주면 `queries.rs:293`의 `song_id_str.parse().unwrap_or(0)`에 의해 **유효한 song_id 0으로 조용히 매핑**되어 실별 Top-50에 오염 데이터가 섞인다(CONTEXT.md 불변 조건 4). `difficulty`도 `Difficulty::from_str` 검증 없이 저장된다.
 - **수정**: `sync.rs:51` 직후 `if song_id.parse::<i32>().is_err() { continue; }`, `:56` 직후 `if Difficulty::from_str(difficulty).is_none() { continue; }`. `queries.rs:293`의 `unwrap_or(0)`은 `continue`로 교체.
 
-### 4.11 V-Archive API URL에 사용자 입력을 인코딩 없이 보간
+### 4.11 V-Archive API URL에 사용자 입력을 인코딩 없이 보간 — `since` 부분 해결, `v_id` 남음
 
-- **파일**: `rust/overmax_data/src/gateway/varchive.rs:126-137, 151-161`
-```rust
-let url = if let Some(s) = since {
-    format!("https://v-archive.net/api/v2/archive/{}/button/{}?since={}", v_id, button, s)
-```
-- **문제**: `v_id`는 `settings.user.json`의 `varchive.user_map[].v_id`에서 오고(기본값 `""`), `since`은 `varchive_records.updated_at` 생성 컬럼, 즉 **서버가 준 원본 JSON의 `$.updatedAt` 문자열**이다(`schema.rs:56`). 검증 없이 `?`/`#`/`&`를 포함할 수 있어 요청 파라미터 인젝션이 가능하다.
-- **수정**: 표준 라이브러리만으로 `&[char]` 필터링 헬퍼 3줄을 두어 `A-Za-z0-9-_.:`만 남기고 제거. (새 외부 의존성 금지 — ENGINEERING_TASTE.md 「의존성 및 인프라 추가」는 Red Flag)
+- **파일**: `rust/overmax_data/src/gateway/varchive.rs:126-137` (`fetch_records`)
+- **원래 진단 (오류였음)**: "`v_id`와 `since` 모두 화이트리스트 필터(`A-Za-z0-9-_.:`)로 제한하면 된다". 이 제안은 **철회**한다. `v_id`는 `settings_ui.rs:448` `v_archive_id_row`의 자유 입력 필드이고 `trim()`만 거친다. 실사용 값도 숫자가 아니다 — `settings.user.json`의 실제 값은 2글자 `og`다. 화이트리스트를 걸면 한글 등 정상 사용자를 차단한다.
+- **실측 정정**: `reqwest::Url::parse` 는 퍼센트 인코딩을 **하지 않는다**. 이미 존재하는 구분자를 URL 구조로 해석한다. Rust 프로브로 확인한 결과:
+
+  | 입력 | `format!("...?since={}")` 결과 | 쿼리 키 |
+  |------|----------------------------|---------|
+  | `abc&since=evil` | `...?since=abc&since=evil` | **`["since","since"]`** — 인젝션 성립 |
+  | `a/b?x=1#frag` | `/archive/a/b?x=1#frag/button/4` | **`["x"]`** — 경로가 `archive/a`로 절단 |
+  | `한글아이디` | `/archive/%ED%95%9C...%EB%94%94/button/4` | `["since"]` — 한글은 정상 |
+
+  즉 한글은 문제없고(UTF-8 퍼센트 인코딩), **구분자를 포함한 값이 경로/쿼리 구조를 조작한다**는 것이 실제 위험이다.
+- **`since` (완료)**: `query_pairs_mut().append_pair("since", s)` 로 교체. `abc&since=evil` 케이스에서 키가 `["since"]` 하나가 되고 값은 `abc%26since%3Devil` 로 이스케이프된다. `HttpClient::get` 을 `U: IntoUrl` 제네릭으로 바꿔 파싱된 `Url` 을 넘길 수 있게 했다. 회귀 테스트 4건(`v_id_keeps_non_ascii_verbatim` 포함). 커밋 `74094d8` 참고.
+- **`v_id` (미해결)**: 경로 세그먼트는 `query_pairs_mut` 로 고쳐지지 않는다(위 표 두 번째 행 — 경로가 여전히 절단된다). 올바른 해법은 `percent-encoding` 크레이트의 세그먼트 단위 인코딩이며, 이 크레이트는 이미 트리에 있다(reqwest 의존성, 새 의존성 추가 불필요). **다만 v_id 의 실제 값 분포를 모른 상태에서 스코프를 넓히지 않는 편이 맞다고 사용자 판단을 받아 보류했다.** 닫는 방법: 실제 v_id 샘플을 수집해 경로 조작이 가능한 입력(슬래시/물음표 포함)이 있는지 확인.
+- **`fetch_single_song_records` (미해결)**: `:151-161` 도 `?title={song_id}` 을 보간하지만 `song_id` 는 `i32` 타입이라 위험이 없다.
 
 ### 4.12 V-Archive 토큰이 로그로 노출될 수 있는 Debug derive
 
