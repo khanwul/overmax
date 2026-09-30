@@ -9,6 +9,7 @@ use overmax_core::{Difficulty, Mode};
 use std::path::Path;
 
 const BASE_URL: &str = "https://v-archive.net/client/open/{user_no}/score";
+const ARCHIVE_BASE: &str = "https://v-archive.net/api/v2/archive/";
 
 #[derive(Debug, Clone)]
 pub struct AccountInfo {
@@ -124,16 +125,9 @@ impl VArchiveGateway {
         button: i32,
         since: Option<&str>,
     ) -> GatewayResult<serde_json::Value> {
-        // `since` 은 서버가 준 `varchive_records.updatedAt` 원본 문자열이라 값에
-        // `&`/`#` 등이 포함될 수 있다. `format!("...?since={}", s)` 로 보간하면
-        // 그 구분자가 URL 구조로 파싱되어 쿼리 파라미터가 복제된다
-        // (예: `abc&since=evil` -> keys ["since","since"]). query_pairs_mut 는
-        // 값을 이스케이프해 키를 하나만 만든다.
-        //
-        // `v_id` 는 경로 세그먼트라 percent-encoding 이 별도로 필요하지만,
-        // 설정 UI 가 자유 입력(`settings_ui.rs:448` `v_archive_id_row`)이라
-        // 화이트리스트 필터로 좁히면 정상 사용자를 차단하게 된다. 이 문제는
-        // 별도 항목으로 남긴다(리뷰 §4.11 하단).
+        // URL 조립은 `build_records_url` 이 담당한다. v_id(경로 세그먼트)와
+        // since(쿼리 값)을 값 단위로 조립해, 값 안의 `/` `?` `#` `&` 가 URL
+        // 구조로 해석되는 것을 막는다.
         let url = build_records_url(v_id, button, since)?;
 
         let resp = self.client.get(url, Some(DEFAULT_TIMEOUT)).send()?;
@@ -154,12 +148,11 @@ impl VArchiveGateway {
         button: i32,
         song_id: i32,
     ) -> GatewayResult<serde_json::Value> {
-        let url = format!(
-            "https://v-archive.net/api/v2/archive/{}/button/{}?title={}",
-            v_id, button, song_id
-        );
+        let mut url = build_records_url(v_id, button, None)?;
+        url.query_pairs_mut()
+            .append_pair("title", &song_id.to_string());
 
-        let resp = self.client.get(&url, Some(DEFAULT_TIMEOUT)).send()?;
+        let resp = self.client.get(url, Some(DEFAULT_TIMEOUT)).send()?;
         if resp.status().is_success() {
             Ok(resp.json()?)
         } else {
@@ -201,20 +194,25 @@ pub fn upload_score_blocking(
 
 /// `fetch_records` 가 요청할 URL 을 구성한다.
 ///
-/// `since` 값은 이스케이프되므로 호출자가 서버 응답을 그대로 넣어도 쿼리
-/// 파라미터가 복제되지 않는다.
+/// `v_id` 는 경로 세그먼트, `since` 은 쿼리 값이다. 둘 다 값 단위로 조립해야
+/// `format!` 보간에서 URL 구조가 조작되지 않는다(아래 테스트 참조).
+/// v_id 는 설정 UI(`settings_ui.rs:448`)가 자유 입력이라 화이트리스트 필터로
+/// 좁히지 않고, 조립 단계에서 인코딩한다.
 fn build_records_url(
     v_id: &str,
     button: i32,
     since: Option<&str>,
 ) -> Result<reqwest::Url, GatewayError> {
-    let mut url = reqwest::Url::parse(&format!(
-        "https://v-archive.net/api/v2/archive/{v_id}/button/{button}"
-    ))
-    .map_err(|e| GatewayError::HttpError {
+    let mut url = reqwest::Url::parse(ARCHIVE_BASE).map_err(|e| GatewayError::HttpError {
         status: 0,
         message: format!("invalid V-Archive url: {e}"),
     })?;
+    if let Ok(mut segments) = url.path_segments_mut() {
+        segments.pop_if_empty();
+        segments.push(v_id);
+        segments.push("button");
+        segments.push(&button.to_string());
+    }
     if let Some(s) = since {
         url.query_pairs_mut().append_pair("since", s);
     }
@@ -300,5 +298,49 @@ mod tests {
         );
         // percent-encoding 만 적용되고 값 자체는 보존된다.
         assert!(url.path().ends_with("/button/4"));
+    }
+
+    /// v_id 안의 슬래시가 경로를 추가로 쪼개지 않아야 한다.
+    /// `format!` 보간이었다면 `archive/a/b/button/4` 로 경로가 2단 분리된다.
+    #[test]
+    fn v_id_slash_stays_single_segment() {
+        let url = build_records_url("a/b", 4, None).unwrap();
+        assert_eq!(url.path(), "/api/v2/archive/a%2Fb/button/4");
+    }
+
+    /// v_id 안의 물음표/샵이 쿼리와 프래그먼트를 만들지 않아야 한다.
+    /// `format!` 보간이었다면 `keys` 가 ["x","since"] 로 오염되고,
+    /// `#` 는 `since` 파라미터째 소실시켰다.
+    #[test]
+    fn v_id_question_mark_and_hash_stay_in_segment() {
+        let q = build_records_url("a?x=1", 4, Some("s")).unwrap();
+        assert_eq!(q.path(), "/api/v2/archive/a%3Fx=1/button/4");
+        assert_eq!(
+            q.query_pairs()
+                .map(|(k, _)| k.to_string())
+                .collect::<Vec<_>>(),
+            ["since"]
+        );
+
+        let h = build_records_url("a#f", 4, Some("s")).unwrap();
+        assert_eq!(h.path(), "/api/v2/archive/a%23f/button/4");
+        assert_eq!(
+            h.query_pairs()
+                .map(|(k, _)| k.to_string())
+                .collect::<Vec<_>>(),
+            ["since"]
+        );
+    }
+
+    /// v_id 안의 앰퍼샌드가 쿼리 구분자로 쓰이지 않아야 한다.
+    ///
+    /// `path_segments_mut` 는 `&` 를 이스케이프하지 않는다(경로에서 합법 문자라
+    /// 크레이트가 그대로 둔다). 다만 쿼리가 없는 경로 위치에 있으므로 URL 구조는
+    /// 조작되지 않으며, 값도 원본 그대로 보존된다.
+    #[test]
+    fn v_id_ampersand_stays_in_segment() {
+        let url = build_records_url("a&b", 4, None).unwrap();
+        assert_eq!(url.path(), "/api/v2/archive/a&b/button/4");
+        assert!(url.query().is_none(), "쿼리가 새로 생기면 안 됨");
     }
 }
