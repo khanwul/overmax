@@ -11,10 +11,22 @@ use std::path::Path;
 const BASE_URL: &str = "https://v-archive.net/client/open/{user_no}/score";
 const ARCHIVE_BASE: &str = "https://v-archive.net/api/v2/archive/";
 
-#[derive(Debug, Clone)]
+/// 계정 정보. `Debug` 출력에 인증 토큰이 노출되지 않도록 수동 구현한다
+/// (`RecordDB::masked_steam_id` 와 같은 마스킹 관례).
+#[derive(Clone)]
 pub struct AccountInfo {
     pub user_no: i64,
     pub token: String,
+}
+
+impl std::fmt::Debug for AccountInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // user_no 는 토큰과 짝을 이루는 계정 식별자이므로 함께 숨긴다.
+        f.debug_struct("AccountInfo")
+            .field("user_no", &"<redacted>")
+            .field("token", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
