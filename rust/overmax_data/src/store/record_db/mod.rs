@@ -690,6 +690,84 @@ mod tests {
         assert_eq!(rating_map.get(&(5, Mode::B4, Difficulty::SC)), Some(&105.0));
     }
 
+    /// 서버가 일시적으로 빈 목록을 주면 증분 동기화가 기존 Top-50 캐시를
+    /// 지워 버리면 안 된다. 빈 배열이면 기존 캐시를 보존하고 정상 종료한다.
+    #[test]
+    fn varchive_empty_merge_preserves_existing_cache() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("varchive_empty_merge.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let payload = serde_json::json!({
+            "records": [
+                {
+                    "title": "1234",
+                    "pattern": "SC",
+                    "score": 99.5,
+                    "maxCombo": true,
+                    "updatedAt": "2026-08-21T00:00:00.000Z",
+                    "rating": 155.0,
+                }
+            ]
+        });
+        db.merge_varchive_fetched_records("76561198000000001", 4, &payload, true)
+            .unwrap();
+
+        let before = db.get_varchive_rating_map(&[1234]);
+        assert_eq!(before.len(), 1, "초기 병합 실패");
+        assert_eq!(before.get(&(1234, Mode::B4, Difficulty::SC)), Some(&155.0));
+
+        // 서버가 빈 배열을 반환하는 상황(일시적 장애/레이트 한도 등)
+        let empty = serde_json::json!({ "records": [] });
+        db.merge_varchive_fetched_records("76561198000000001", 4, &empty, true)
+            .unwrap();
+
+        let after = db.get_varchive_rating_map(&[1234]);
+        assert_eq!(
+            after.len(),
+            1,
+            "빈 응답으로 캐시가 소실됨(공식 Top-50 랭크/레이팅 전량 손실)"
+        );
+        assert_eq!(after.get(&(1234, Mode::B4, Difficulty::SC)), Some(&155.0));
+    }
+
+    /// 비어 있지 않은 갱신은 기존 목록을 대체해야 한다(기존 동작 유지).
+    #[test]
+    fn varchive_non_empty_merge_replaces_previous_entries() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("varchive_replace.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let first = serde_json::json!({
+            "records": [{
+                "title": "111", "pattern": "SC", "score": 98.0,
+                "maxCombo": false, "updatedAt": "2026-08-21T00:00:00.000Z",
+                "rating": 150.0,
+            }]
+        });
+        db.merge_varchive_fetched_records("76561198000000001", 4, &first, true)
+            .unwrap();
+
+        let second = serde_json::json!({
+            "records": [{
+                "title": "222", "pattern": "SC", "score": 99.0,
+                "maxCombo": true, "updatedAt": "2026-08-22T00:00:00.000Z",
+                "rating": 151.0,
+            }]
+        });
+        db.merge_varchive_fetched_records("76561198000000001", 4, &second, true)
+            .unwrap();
+
+        let map = db.get_varchive_rating_map(&[111, 222]);
+        assert!(
+            !map.contains_key(&(111, Mode::B4, Difficulty::SC)),
+            "증분 동기화가 기존 항목을 대체해야 함"
+        );
+        assert_eq!(map.get(&(222, Mode::B4, Difficulty::SC)), Some(&151.0));
+    }
+
     #[test]
     fn test_get_recent_records() {
         let temp_dir = tempfile::tempdir().unwrap();
