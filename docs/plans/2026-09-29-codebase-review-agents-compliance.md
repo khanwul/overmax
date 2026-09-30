@@ -233,7 +233,23 @@ if path.exists() { std::fs::remove_file(path)?; }
 std::fs::rename(tmp, path)?;
 ```
 - **문제**: `image_index.db`를 remove→rename 2단계로 교체한다. 그 사이 프로세스가 죽거나 rename이 실패하면 `cache/image_index.db`가 **없는 상태로 남고**, `has_all_required_caches`(`:136-141`)가 false가 되어 다음 실행마다 Cold Start가 되어 자켓 매칭이 비활성화된다. 부수적으로 `path.with_extension("tmp")`는 stem이 다른 파일끼리는 안전하지만 `songs.json`과 `songs.db`가 공존하면 같은 `songs.tmp`로 충돌할 수 있으며, tmp 파일이 실패 시 정리되지 않는다.
-- **수정**: `remove_file` 분기 3줄을 제거하고 `std::fs::rename(tmp, path)?`만 남긴다. **Windows에서 대상이 있어도 rename이 성공함을 실측 확인했다**(`direct_rename_over_existing_ok=true`).
+- **수정**: ~~`remove_file` 분기 3줄을 제거하고 `std::fs::rename(tmp, path)?`만 남긴다.~~ **이 수정은 시도했다가 되돌렸다. 실측에서 반대 방향의 회귀가 나타났다.**
+
+### 4.3.1 수정 시도 결과: `remove_file` 제거는 read-only 대상에서 회귀를 만든다 (수정 안 함)
+
+- **제안했던 수정**: `remove_file` 3줄을 제거하고 rename 만 수행. Windows에서 rename-over-existing가 성공함을 실측 확인하고 이를 근거로 제안했다(`direct_rename_over_existing_ok=true`).
+- **시도 후 발견한 반증**: read-only 대상 파일에 대해 두 구현을 비교한 결과 **방향이 반대**였다.
+
+  | 대상 파일 | old (remove → rename) | new (remove 없는 rename) |
+  |-----------|----------------------|---------------------------|
+  | 일반 파일 | Ok, 내용 교체됨 | Ok, 내용 교체됨 |
+  | **read-only 파일** | **Ok, 내용 교체됨** | **Err(PermissionDenied)** |
+
+  Windows에서 `RemoveFile`은 read-only 속성을 무시하지만 `MoveFileEx`(rename)는 거부한다. 즉 수정은 "쓰기 실패 시 대상 소실"을 "read-only 대상에서 갱신 불가"로 바꾸는 것이다.
+- **왜 이래도 안 되는가**: 포터블 모드가 실사용 경로다. `config/paths.rs:87, 105-132`가 `.portable` 마커/`OVERMAX_PORTABLE` 환경변수로 포터블 모드를 지원하며, 외부에서 복사해 온 `cache/` 의 파일이 read-only attribute를 그대로 가질 수 있다. 이 경우 캐시 갱신이 영구히 실패한다.
+- **원래 문제 자체는 유효하다**: remove 성공 후 rename 실패 시 대상이 없는 상태로 남는 건 재현했다. 프로브 결과 `remove_file Ok -> rename Err(NotFound) -> target exists = false`. 다만 **이를 없애려면 rename 전에 대상을 삭제하지 않는 것 말고는 방법이 없는데**, 그건 위 회귀를 вместе 가져온다.
+- **올바른 해법 (미구현)**: Windows `ReplaceFileW` / `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` 사용해 read-only 를 무시하면서 원자적으로 교체. 이 경우엔 read-only 대상도 교체되므로 두 문제가 모두 사라진다. 다만 Win32 FFI 추가가 필요해 AGENTS.md 「추상 추가 금지」범위를 넘어선다. 닫는 방법: 포터블 모드에서 복사된 read-only 캐시가 실제로 존재하는지 확인 후 결정.
+- **부수 확인**: `x.json`과 `x.db`는 `with_extension("tmp")` 로 **같은 `x.tmp`에 수렴**함을 실측했다. 현재 파일 구성(`songs.json`, `image_index.db`)에서는 충돌하지 않지만 잠재 위험은 남는다.
 
 ### 4.4 DXGI가 ACCESS_LOST 한 번에도 즉시 GDI로 강등
 
