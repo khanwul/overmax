@@ -103,8 +103,8 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 ## 1. 초저지연 화면 캡처 및 아틀라스 파이프라인 (Sub-millisecond GPU ROI Atlas & Double Buffering)
 
-- **$512 \times 512$ GPU ROI Atlas**: 1080p 전체 화면(8.3MB)을 CPU RAM으로 전송하고 크롭하던 대역폭 병목을 원천 해소하기 위해, 디텍션에 필요한 43개 ROI(240,098 px)를 $512 \times 512$(1MB) 텍스처 내에 100% 무손실 1:1 패킹한 정적 슬롯 테이블(`atlas_layout.rs`) 및 $O(1)$ 정적 점프 테이블 트랜슬레이터(`atlas_translator.rs`)를 도입했습니다.
-- **D3D11 하드웨어 직접 복사 (Zero Draw Call)**: 1080p 16:9 환경에서는 셰이더 및 Render Target 없이, 백버퍼에서 Staging 텍스처로 `CopySubresourceRegion`을 43회 직행(< 50 µs)하여 VRAM 내부 복사 비용을 극소화했습니다.
+- **$512 \times 512$ GPU ROI Atlas**: 1080p 전체 화면(8.3MB)을 CPU RAM으로 전송하고 크롭하던 대역폭 병목을 원천 해소하기 위해, 디텍션에 필요한 47개 ROI(217,952 px)를 $512 \times 512$(1MB) 텍스처 내에 100% 무손실 1:1 패킹한 정적 슬롯 테이블(`atlas_layout.rs`) 및 $O(1)$ 정적 점프 테이블 트랜슬레이터(`atlas_translator.rs`)를 도입했습니다. (초기 43개/240,098 px에서 증가. `ResultFreestyle/mode` 미사용 슬롯 제거와 3개 결과 씬의 동일 좌표 `jacket` 슬롯 통합으로 32,700px를 확보해 `gp_*` 6개와 `pause_title`을 추가함. [Decision Log](docs/decisions/detection_pipeline.md) 2026-09-27 참조)
+- **D3D11 하드웨어 직접 복사 (Zero Draw Call)**: 1080p 16:9 환경에서는 셰이더 및 Render Target 없이, 백버퍼에서 Staging 텍스처로 `CopySubresourceRegion`을 47회 직행(< 50 µs)하여 VRAM 내부 복사 비용을 극소화했습니다.
 - **핑퐁 더블 버퍼링 (Double-Buffered Staging Textures) & GPU 스톨 0ms 소거**: 동기식 `context.Map`에 의한 4~5ms의 GPU 파이프라인 대기 스톨을 소거하기 위해 2개의 Staging 텍스처를 교대로 운용합니다. 새 프레임 획득 시 GPU 복사 후 `context.Flush()`로 비동기 DMA 전송을 시작하고, CPU는 이전 틱에 이미 복사가 완료된 Staging 버퍼를 즉시 `Map`하여 GPU 대기 시간을 0ms로 소거했습니다.
 - **3단계 정량 기여도 완전 분리 판정 (Attribution Analysis)**:
   - **[A] main (단일 1080p, 4.50ms) ➔ [B] fullframe-db (더블 1080p, 3.17ms)**: 더블버퍼링의 순수 기여도는 **-1.33ms (34.3% 비중)** 로 GPU 동기화 대기를 소거하지만, 8.3MB 풀프레임 복사 비용으로 인해 3.17ms 잔존.

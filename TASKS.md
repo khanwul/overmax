@@ -46,14 +46,14 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 ## 4. 캡처 파이프라인 초고속화 (GPU ROI Atlas & Adaptive Normalization)
 
 - [x] **4.1 컴파일 타임 아틀라스 레이아웃 & 트랜슬레이터 베이킹 (Step 1)**
-  - [x] 43개 ROI(240,098 px)의 $512 \times 512$ 아틀라스 상수 배열(`pub const ATLAS_SLOTS: [AtlasSlot; 43]`) 베이킹 (`atlas_layout.rs`)
+  - [x] 47개 ROI(217,952 px)의 $512 \times 512$ 아틀라스 상수 배열(`pub const ATLAS_SLOTS: [AtlasSlot; 47]`) 베이킹 (`atlas_layout.rs`) — 초기 43개(240,098 px)에서 `ResultFreestyle/mode` 제거와 결과 씬 `jacket` 3→1 통합으로 32,700px를 확보해 `gp_*` 6개와 `pause_title`을 추가 (`docs/decisions/detection_pipeline.md` 2026-09-27)
   - [x] `const fn get_roi_for_scene` 기반 $O(1)$ 정적 점프 테이블 트랜슬레이터 구현 (`atlas_translator.rs`)
-  - [x] 기하학적 완전성 단위 테스트: 512×512 경계 검사 및 43개 슬롯 간 상호 AABB Overlap 0건 전수 검증
+  - [x] 기하학적 완전성 단위 테스트: 512×512 경계 검사 및 47개 슬롯 간 상호 AABB Overlap 0건 전수 검증
 - [x] **4.2 오프라인 가상 아틀라스 CPU 무손실 검증 (Step 2)**
   - [x] 1080p 프레임을 $512 \times 512$ 가상 아틀라스로 조립하는 CPU 테스트 하네스 작성
   - [x] 가상 아틀라스 경유 디텍션 결과가 기존 파이프라인과 100% 일치함을 증명 (117개 테스트셋 및 `verify_pipeline`)
 - [x] **4.3 DXGI 1080p 순수 1:1 하드웨어 아틀라스 캡처 연동 (Step 3)**
-  - [x] 1080p 16:9 패스트패스: Draw Call 제로, 백버퍼 ➔ $512 \times 512$ VRAM Staging `CopySubresourceRegion` 43회 직행 (< 50 µs)
+  - [x] 1080p 16:9 패스트패스: Draw Call 제로, 백버퍼 ➔ $512 \times 512$ VRAM Staging `CopySubresourceRegion` 47회 직행 (< 50 µs)
   - [x] 단 1회 1MB `Map(D3D11_MAP_READ)` 전송 및 카테고리 띠(64x60) / 마진(22x96) 슬롯 확장 지원
   - [x] `settings.json` 안전 가드 플래그(`enable_gpu_atlas`) 및 예외 시 즉시 레거시 전체화면 캡처로 폴백 연동
   - [x] `RoiManager` 자동 아틀라스 어댑터 및 `DetectionPipeline` 즉시 연동 완료
