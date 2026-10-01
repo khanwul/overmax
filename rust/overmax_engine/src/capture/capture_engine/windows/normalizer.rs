@@ -4,7 +4,7 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11RenderTargetView,
     ID3D11SamplerState, ID3D11Texture2D, ID3D11VertexShader, D3D11_BIND_CONSTANT_BUFFER,
     D3D11_BIND_RENDER_TARGET, D3D11_BUFFER_DESC, D3D11_COMPARISON_NEVER,
-    D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FLOAT32_MAX, D3D11_SAMPLER_DESC, D3D11_TEXTURE2D_DESC,
+    D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_FLOAT32_MAX, D3D11_SAMPLER_DESC, D3D11_TEXTURE2D_DESC,
     D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
@@ -128,9 +128,9 @@ impl D3d11Normalizer {
                 .map_err(|e| format!("Create normalizer PS failed: {e}"))?;
             let pixel_shader = ps.ok_or("Normalizer PS is None")?;
 
-            // 4. Create Bilinear Clamp Sampler
+            // 4. Create Sampler
             let sampler_desc = D3D11_SAMPLER_DESC {
-                Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+                Filter: D3D11_FILTER_MIN_MAG_MIP_POINT,
                 AddressU: D3D11_TEXTURE_ADDRESS_CLAMP,
                 AddressV: D3D11_TEXTURE_ADDRESS_CLAMP,
                 AddressW: D3D11_TEXTURE_ADDRESS_CLAMP,
