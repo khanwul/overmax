@@ -24,8 +24,8 @@ impl RecordDB {
         };
         let button_mode = mode.as_str();
 
-        // 순서 주의: 증분 동기화(clear_first=true)는 기존 행을 전부 지운 뒤 새
-        // 목록으로 대체한다. 서버가 일시적으로 빈 목록을 주면 공식 Top-50
+        // 순서 주의: 전체 조회(since 없음, clear_first=true)는 기존 행을 전부 지운 뒤
+        // 새 목록으로 대체한다. 서버가 일시적으로 빈 목록을 주면 공식 Top-50
         // 랭크/레이팅이 통째로 소실되므로, 목록 추출을 먼저 수행하고 빈 배열이면
         // 기존 캐시를 그대로 보존한다.
         let new_records = data

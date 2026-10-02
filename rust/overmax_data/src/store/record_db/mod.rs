@@ -690,7 +690,7 @@ mod tests {
         assert_eq!(rating_map.get(&(5, Mode::B4, Difficulty::SC)), Some(&105.0));
     }
 
-    /// 서버가 일시적으로 빈 목록을 주면 증분 동기화가 기존 Top-50 캐시를
+    /// 서버가 일시적으로 빈 목록을 주면 전체 조회가 기존 Top-50 캐시를
     /// 지워 버리면 안 된다. 빈 배열이면 기존 캐시를 보존하고 정상 종료한다.
     #[test]
     fn varchive_empty_merge_preserves_existing_cache() {
@@ -763,7 +763,7 @@ mod tests {
         let map = db.get_varchive_rating_map(&[111, 222]);
         assert!(
             !map.contains_key(&(111, Mode::B4, Difficulty::SC)),
-            "증분 동기화가 기존 항목을 대체해야 함"
+            "전체 조회가 기존 항목을 대체해야 함"
         );
         assert_eq!(map.get(&(222, Mode::B4, Difficulty::SC)), Some(&151.0));
     }
