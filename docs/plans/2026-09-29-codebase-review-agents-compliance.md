@@ -32,8 +32,8 @@
 | §4.10 | MEDIUM | 서버 JSON 무검증 영속화 | ✅ 완료 | `e527501`, `58ead08` |
 | §4.11 | MEDIUM | V-Archive URL 보간 | ✅ 완료 | `74094d8`, `8185d53` |
 | §4.12 | MEDIUM | `AccountInfo` Debug로 토큰 노출 | ✅ 완료 (에러 메시지 URL 노출은 잔여) | `b7147a8` |
-| §4.13 | MEDIUM | `image_index` 로드마다 DDL | ⏳ 미착수 | |
-| §4.14 | MEDIUM | `user_version` 미사용 | ⏳ 미착수 | |
+| §4.13 | LOW | `image_index` 로드마다 DDL | ⬇️ 결함 없음, 수정 안 함 | |
+| §4.14 | — | `user_version` 미사용 | ⏸️ 근거 부족, 사용자 판단 대기 | |
 | §4.15 | MEDIUM | 마이그레이션 실패를 삼키고 `is_ready=true` | ✅ 완료 | `d6c2546`, `19457c1` |
 | §4.16 | MEDIUM | `upsert` 트랜잭션 부재 | ⏳ 미착수 (재현 실패) | |
 | §4.17 | MEDIUM | OCR 잔존 설정/문서 | ⏳ 미착수 | |
@@ -385,17 +385,28 @@ self.current_is_fullscreen = is_fs;         // ← 읽는 곳이 없음
   ```
   V-Archive는 토큰을 `Authorization` 헤더로 보내므로(`varchive.rs:92`) 실제 노출은 경로(`v_id`) 정도로 제한되지만, Provider 등 다른 게이트웨이는 쿼리에 값을 실을 수 있다. 무조건 제거하면 진단 정보가 사라지므로, `UploadResult.message`를 UI로 넘기기 전 URL의 쿼리/프래그먼트만 마스킹할지 결정이 필요하다.
 
-### 4.13 `image_index.rs::load()`가 매번 DDL을 실행
+### 4.13 `image_index.rs::load()`가 매번 DDL을 실행 — ⬇️ 관찰 가능한 결함 없음, 수정하지 않음
 
 - **파일**: `rust/overmax_data/src/store/image_index.rs:64-71`
 - **문제**: `load()`는 파이프라인 초기화 시(`detection_worker.rs:396`) 호출되는데 매번 `ALTER TABLE images ADD COLUMN metadata TEXT`를 시도하고 `let _ =`로 무시한다. **실측**: 첫 로드 후 `PRAGMA table_info(images)`에 이미 `metadata`가 있는데도 매번 실패하는 DDL을 던진다. 읽기 전용 파일에서도 오류가 조용히 사라진다. `ImageIndexDb`는 WAL/busy_timeout도 설정하지 않아 `RecordDB::open_conn`(`mod.rs:86-94`)과 다르다.
-- **수정**: 컬럼이 **없을 때만** ALTER하도록 파일 내부 private 헬퍼 1개 추가.
+- **최초 제안**: 컬럼이 **없을 때만** ALTER하도록 파일 내부 private 헬퍼 1개 추가.
+- **재검토 (2026-10-02)**: 관찰 가능한 결함이 없어 수정하지 않는다.
+  - **호출 빈도**: `load()`는 디텍션 파이프라인 초기화 시 1회 호출된다(`detection_worker.rs:396`). 프레임 경로가 아니다.
+  - **실패 비용**: 중복 컬럼 ALTER는 SQL 파싱 단계에서 `duplicate column name: metadata`로 즉시 실패한다. 실측: 다른 연결이 `BEGIN IMMEDIATE`로 쓰기 잠금을 쥔 상태에서도 잠금 대기 없이 같은 오류로 즉시 반환되었다. 파일을 수정하지 않고 잠금도 잡지 않는다.
+  - **현재 배포 DB**: 로컬 `cache/image_index.db`, `cache/image_index_orig.db` 모두 `metadata` 컬럼을 이미 갖고 있다. 이 ALTER가 의미 있는 경우는 `metadata` 이전(`f3adf09`, 2026-07-17 이전) DB뿐이다.
+  - **판단**: 제안된 헬퍼는 동작을 바꾸지 않고 실패하는 문장 1개만 없앤다. AGENTS.md 기준 "더 깔끔해 보여서"에 해당하므로 단독 근거가 되지 않는다.
+  - WAL/busy_timeout 미설정도 같은 이유로 결함이 아니다. 이 DB는 읽기 전용으로 1회 로드되고, 갱신은 파일 단위 교체(`write_atomic`)로 이루어진다.
 
-### 4.14 스키마 마이그레이션 버전 관리 부재 (`PRAGMA user_version` 미사용)
+### 4.14 스키마 마이그레이션 버전 관리 부재 (`PRAGMA user_version` 미사용) — ⏸️ 근거 부족, 사용자 판단 대기
 
 - **파일**: `rust/overmax_data/src/store/record_db/schema.rs` 전체 / `store/image_index.rs:64-71`
 - **문제**: `user_version` 사용 0건. 마이그레이션이 "컬럼이 있나?" 즉각 판정(`table_has_column`, `image_index.rs:66`)으로만 이루어진다. **실측**: `hog` 컬럼이 없는 구 스키마 DB에 `load()` → `Err("no such column: hog ...")` — `metadata`만 추가하므로 구 스키마를 복구하지 못한다.
-- **수정**: `RecordDB::initialize`와 `ImageIndexDb::load` 선두에 `PRAGMA user_version` read/write 추가. 기존 컬럼 판정 경로는 유지(호환).
+- **최초 제안**: `RecordDB::initialize`와 `ImageIndexDb::load` 선두에 `PRAGMA user_version` read/write 추가. 기존 컬럼 판정 경로는 유지(호환).
+- **재검토 (2026-10-02)**: 제안된 수정은 실측된 증상을 고치지 못한다.
+  - **`image_index.db`**: 클라이언트가 만드는 DB가 아니라 GitHub 릴리스에서 내려받는 산출물이고, 태그가 바뀌면 파일째 교체된다(`cache_downloader.rs:241-262`). `hog` 컬럼이 없는 구 DB는 해시·HOG 값을 다시 계산해야 하므로 클라이언트 측 마이그레이션으로는 복구할 수 없다. 버전 번호를 기록해도 `Err("no such column: hog")`는 그대로이며, 실제 복구 경로는 재다운로드다. 로컬 두 DB 모두 `user_version = 0`이며 현행 스키마다.
+  - **`record.db`**: 컬럼 존재 판정 마이그레이션은 §2.1·§4.15 이후 실패가 전파되고 회귀 테스트로 고정되어 있다. 재현된 결함이 없다.
+  - **판단**: `user_version` 도입은 마이그레이션 체계에 대한 **설계 결정**이며, 현재 재현된 버그나 측정된 회귀가 없다. 앞으로 컬럼 판정만으로 표현할 수 없는 마이그레이션(컬럼 의미 변경, 데이터 변환)이 필요해질 때 도입을 검토한다. 그전까지 수정하지 않는 것을 권장한다.
+  - **남는 실제 위험**: 구 스키마 `image_index.db`가 남아 있고 다운로드도 실패하면(§6-13 재시도 부재와 결합) 자켓 매칭이 비활성화된다. 이는 `user_version`이 아니라 다운로드 재시도 정책(§6-13)의 문제로 추적한다.
 
 ### 4.15 `initialize()`가 마이그레이션 실패를 삼키고 `is_ready = true`로 전환 — ✅ 완료 (`d6c2546`)
 
@@ -614,7 +625,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 1. ~~**§4.15**~~ — **완료** (`d6c2546`, 앱 로그 후속 `19457c1`).
 2. ~~**§4.1**~~ — **오진** (`e93176d`). 루프 밖 코드는 도달 불가, op은 정확히 3회 실행됨을 테스트로 고정.
 3. ~~**§4.10**~~ — **완료** (`e527501`, `58ead08`).
-4. **§4.13 → §4.14** — `image_index` DDL 조건화, 이후 `user_version` 도입.
+4. ~~**§4.13 → §4.14**~~ — **수정하지 않음.** §4.13은 관찰 가능한 결함 없음, §4.14는 실측 증상을 고치지 못하는 설계 결정이라 §7.4 보류로 이동.
 5. **§4.17** — OCR 잔존 문서/주석 정정(코드 로직 변경 없음).
 6. **§4.21** — 벤치 바이너리 feature 게이트.
 7. **§4.7, §4.2** — 프레임 경로 syscall/deep clone 제거. 계측 동반.
@@ -629,6 +640,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 - §4.23 Linux 정규화 (측정 선행)
 - §4.25 잔여: 버전 표기·릴리스 노트·TASKS.md 등록 (릴리스 전략)
 - §6-13 캐시 재시도 부재가 설계인지
+- §4.14 `user_version` 도입 여부 (권장: 컬럼 판정으로 표현 못 하는 마이그레이션이 생길 때까지 보류)
 
 **여러 finding을 한 커밋에 묶지 말 것.** 각 diff는 하나의 검증 가능한 주장만 담는다(AGENTS.md 「Diff & Commit Discipline」).
 
