@@ -18,7 +18,7 @@
 | §3.1 | HIGH | `hdr_replay_test` 실패 | ✅ 원인 규명, `#[ignore]` | `2ed4543` |
 | §3.2 | HIGH | DXGI 출력 교체 실패를 삼킴 | ✅ 완료 (부수 효과 주의) | `a58a502` |
 | §3.3 | HIGH | V-Archive 전체 조회 빈 응답 시 캐시 소실 | ✅ 완료 (트레이드오프 사용자 확인 대기) | `ef56960`, `44f2d5f` |
-| §3.4 | HIGH | Provider가 요청 대상 호스트 결정 + 비원자 쓰기 | ⚠️ 부분 완료 ((b) 재결정 대기) | `070cfa8`, `63ae6d4`, `24c8d4a` |
+| §3.4 | HIGH | Provider가 요청 대상 호스트 결정 + 비원자 쓰기 | ⚠️ 부분 완료 ((a) 완료, (b) 되돌림·§4.3 대기) | `070cfa8`, `24c8d4a` ((b) `63ae6d4` → revert `bd421d7`) |
 | §3.5 | HIGH | Linux 오버레이가 IPC 표시 명령 무시 | ✅ 완료 | `9a556ca` |
 | §4.1 | MEDIUM | `with_retry`가 op을 4번째 실행 | ⏳ 미착수 | |
 | §4.2 | MEDIUM | `get_merged()` 매 프레임 deep clone | ⏳ 미착수 | |
@@ -45,7 +45,7 @@
 | §4.23 | MEDIUM | Linux 정규화 부재 | ⏸️ 측정 전 보류 | |
 | §4.24 | MEDIUM | Linux 풀 프레임 2회 순회 | ⏳ 미착수 | |
 | §4.25 | MEDIUM | 문서-코드 드리프트 | ⚠️ 부분 완료 (슬롯 수만) | `4bcfbf2` |
-| §7.2 | — | 2026-10-02 후속 리뷰 지적 사항 | ⚠️ 진행 중 (1·2·4 완료) | |
+| §7.2 | — | 2026-10-02 후속 리뷰 지적 사항 | ⚠️ 진행 중 (5번만 남음) | |
 
 ---
 
@@ -172,7 +172,7 @@ fn ensure_schema(&self, conn: &mut Connection) {
 - **트레이드오프 (명시 필요)**: 전체 조회에서 빈 배열은 **정상 상태일 수도 있다**(해당 버튼 모드에 기록이 없거나, V-Archive 기록을 초기화한 경우). 현재 수정은 이 경우에도 옛 캐시를 영구 보존한다. "일시 장애로 인한 빈 응답이 정상적인 빈 상태보다 훨씬 흔하고, 오래된 캐시가 남는 비용이 캐시 소실보다 작다"는 판단에 근거한 것이며, 이 판단은 사용자 확인 대상이다.
 - **주석 정정 (완료, `44f2d5f`)**: `sync.rs:27` 주석과 회귀 테스트 docstring·assert 메시지의 "증분 동기화"를 "전체 조회"로 고쳤다. 코드 동작 변경 없음.
 
-### 3.4 외부 추천 Provider가 클라이언트의 요청 대상 호스트를 결정 — ⚠️ 부분 완료 (`070cfa8`, `24c8d4a`, `63ae6d4`), (b) 재결정 대기
+### 3.4 외부 추천 Provider가 클라이언트의 요청 대상 호스트를 결정 — ⚠️ 부분 완료: (a) 완료 (`070cfa8`, `24c8d4a`), (b) 되돌림 (`bd421d7`)
 
 - **파일**: `rust/overmax_data/src/gateway/recommend_provider.rs:138-176`
 - **문제**:
@@ -180,10 +180,15 @@ fn ensure_schema(&self, conn: &mut Connection) {
   - (b) 응답 본문이 **검증 없이** `save_path`에 비원자 `fs::write`로 기록되어, 응답이 잘리면 다음 읽기(`composite.rs:98`)에서 JSON 파싱이 실패한다. `ProviderCacheReader`에 파일 크기 상한도 없다.
 - **조치**:
   - (a) `http(s)://` 분기에서 `provider_url`과 `manifest.endpoint`의 **host만** 비교하여 다르면 `GatewayError::InvalidProtocol` 반환.
-  - (b) `fs::write`를 `save_path.with_extension("tmp")`에 쓴 뒤 `rename`하도록 변경.
+  - (b) `fs::write`를 `save_path.with_extension("tmp")`에 쓴 뒤 `rename`하도록 변경(`63ae6d4`) → **되돌림 (`bd421d7`).** 아래 재검토 사항 2 참조.
 - **재검토 사항**:
   1. ~~**host만 비교하고 scheme/port는 비교하지 않는다.**~~ — **해소 (`24c8d4a`).** `https` provider가 `http://같은호스트/...`를 지정하면 `v_id`가 평문으로 전송되는 문제였다. 해석 로직을 `resolve_endpoint`로 분리하고 `Url::origin()` 비교(scheme, host, port)로 강화했다. 한쪽이라도 파싱 실패 시 거부.
-  2. **(b)는 §4.3.1의 결론과 모순된다.** §4.3.1은 "remove 없이 rename만 하면 Windows read-only 대상에서 `PermissionDenied`가 난다"는 실측으로 동일 수정을 되돌렸는데, 이 커밋은 같은 패턴을 새로 도입했다. `with_extension("tmp")` 이름 충돌(§4.3)도 그대로 가져왔다. §4.3의 해법이 정해지면 같은 방식으로 맞춘다.
+  2. **(b)는 §4.3.1의 결론과 모순되어 되돌렸다 (`bd421d7`).** §4.3.1은 "remove 없이 rename만 하면 Windows read-only 대상에서 `PermissionDenied`가 난다"는 실측으로 동일 수정을 되돌렸는데, `63ae6d4`가 같은 패턴을 새로 도입했고 `with_extension("tmp")` 이름 충돌(§4.3)도 가져왔다. 사용자 결정(2026-10-02)에 따라 직접 `fs::write`로 복귀했다.
+     - **남은 위험 (수용)**:
+       - **잘린 쓰기**: 응답 본문 쓰기 도중 프로세스가 죽거나 디스크가 가득 차면 `save_path`에 잘린 JSON이 남는다. 파싱 실패 시 `ProviderCacheReader::recommend`(`composite.rs:128-137`)는 `SourceStatus::Error`와 빈 결과를 반환하므로 해당 곡/모드/난이도의 외부 추천 섹션이 비어 보인다. 같은 패턴을 다시 조회할 때 캐시 파일이 10초보다 오래됐으면 재요청해 덮어쓰므로(`native_app_recommend.rs:231-240`) 다음 갱신 성공 시 복구된다. 기록·설정 데이터에는 영향이 없다.
+       - **쓰기 중 동시 읽기 (미측정)**: 같은 호출부가 백그라운드 스레드로 `fetch_recommend_blocking`을 띄운 직후 UI 스레드에서 같은 파일을 읽는다(`native_app_recommend.rs:242-257`). `fs::write`는 truncate 후 쓰기이므로 읽기가 쓰기 도중에 겹치면 빈 파일이나 일부만 읽혀 같은 `Error` 경로를 탄다. 파일이 작아 겹칠 확률은 낮다고 보이나 측정하지 않았다. 원자 교체가 도입되면 이 경로도 함께 해소된다.
+     - **수용 근거**: read-only 회귀는 캐시 갱신을 **영구히** 막는 반면, 위 두 위험은 외부 추천 섹션 1건이 일시적으로 비는 정도이고 다음 갱신에서 복구된다.
+     - **닫는 방법**: §4.3에서 read-only 대응 교체 전략(§4.3.1 후보 1 또는 2)이 정해지면 `cache_downloader::write_atomic`과 이 쓰기 지점에 함께 적용한다. 파일 크기 상한 부재는 별도 항목으로 남는다.
   3. ~~**회귀 테스트가 없다.**~~ — **해소 (`24c8d4a`).** `resolve_endpoint` 테스트 6건 추가. host-only 비교로 되돌리면 scheme 다운그레이드·다른 포트 2건이 실패함을 확인했다.
   4. ~~**커밋 규율 위반**~~ — **해소.** 원래 `aeeb763` 한 커밋에 (a), (b), §4.18이 섞여 있었으나 push 전에 `070cfa8`(a), `63ae6d4`(b), `98c2a9f`(§4.18)로 분리했다.
 
@@ -250,7 +255,7 @@ std::fs::rename(tmp, path)?;
   1. rename 직전에 대상이 read-only면 `fs::set_permissions`로 속성을 해제 (std만 사용, FFI 불필요)
   2. `SetFileInformationByHandle(FileRenameInfoEx)` + `FILE_RENAME_FLAG_IGNORE_READONLY_ATTRIBUTE` (Win32 FFI, Windows 10 1809+)
 
-  1번이 diff가 가장 작다. 착수 전 두 후보 모두 read-only 대상 프로브로 확인한다. §3.4(b)의 `recommend_provider` 쓰기도 같은 방식으로 맞춘다.
+  1번이 diff가 가장 작다. 착수 전 두 후보 모두 read-only 대상 프로브로 확인한다. §3.4(b)의 `recommend_provider` 쓰기(현재 직접 `fs::write`, `bd421d7`)도 같은 방식으로 맞춘다.
 - **결정 선행 조건**: 포터블 모드에서 복사된 read-only 캐시가 실제로 존재할 수 있는지 사용자 확인.
 
 ### 4.4 DXGI가 오류 한 번에도 즉시 GDI로 강등
@@ -572,16 +577,17 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | 9 | §4.11 `v_id` 경로 세그먼트 | `8185d53` |
 | 10 | §4.12 `AccountInfo` Debug 마스킹 | `b7147a8` |
 | 11 | §3.4(a) 호스트 검증 | `070cfa8` |
-| 12 | §3.4(b) 임시 파일 + rename 쓰기 | `63ae6d4` |
+| 12 | §3.4(b) 임시 파일 + rename 쓰기 (이후 되돌림) | `63ae6d4` |
 | 13 | §4.18 이진화 대비율 문서 정정 | `98c2a9f` |
 | 14 | §3.3 주석·docstring 정정 | `44f2d5f` |
 | 15 | §3.4(a) origin 비교 강화 + 회귀 테스트 | `24c8d4a` |
+| 16 | §3.4(b) 되돌림 (read-only 회귀 위험) | `bd421d7` |
 
 ### 7.2 2026-10-02 후속 리뷰 지적 사항 (우선 처리)
 
 1. ~~**`aeeb763` 분리**~~ — **완료.** `070cfa8`, `63ae6d4`, `98c2a9f`로 분리(push 전, 사용자 승인).
 2. ~~**§3.4(a) origin 비교**~~ — **완료** (`24c8d4a`).
-3. **§3.4(b) 재결정** — §4.3 해법과 일관되게 맞춘다. §4.3이 미정인 동안 되돌릴지, 유지하고 read-only 위험을 기록할지 결정.
+3. ~~**§3.4(b) 재결정**~~ — **되돌림** (`bd421d7`). 잘린 쓰기 위험은 §3.4 재검토 사항 2에 수용 근거와 함께 기록.
 4. ~~**§3.3 주석·docstring 정정**~~ — **완료** (`44f2d5f`).
 5. **§3.3 트레이드오프 사용자 확인** — 전체 조회 빈 배열 시 옛 캐시 보존 방향 유지 여부(§6-19).
 
@@ -599,7 +605,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 
 ### 7.4 보류 (사용자 판단 필요)
 
-- §4.3 `write_atomic` 해법 (포터블 read-only 캐시 존재 가능성)
+- §4.3 `write_atomic` 해법 (포터블 read-only 캐시 존재 가능성). 정해지면 §3.4(b) `recommend_provider` 쓰기에도 적용
 - §4.12 잔여: 에러 메시지 URL 마스킹 여부
 - §4.20 IPC 인증/스레드 제한 (설계 의도)
 - §4.23 Linux 정규화 (측정 선행)
