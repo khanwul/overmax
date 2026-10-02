@@ -40,7 +40,7 @@
 | §4.18 | MEDIUM | 이진화 대비율 문서 72% → 65% | ✅ 완료 | `98c2a9f` |
 | §4.19 | MEDIUM | `detect_rect_edges` margin unscaled | ⏳ 미착수 (측정 선행) | |
 | §4.20 | MEDIUM | IPC 인증/스레드 제한 부재 | ⏸️ 설계 의도 확인 대기 | |
-| §4.21 | MEDIUM | 벤치 바이너리 릴리스 포함 | ⏳ 미착수 | |
+| §4.21 | LOW | 벤치 바이너리 릴리스 포함 | ⬇️ 배포물에 미포함(컴파일만), 수정 안 함 | |
 | §4.22 | MEDIUM | CV 중복 작업 | ⏳ 미착수 (계측 선행) | |
 | §4.23 | MEDIUM | Linux 정규화 부재 | ⏸️ 측정 전 보류 | |
 | §4.24 | MEDIUM | Linux 풀 프레임 2회 순회 | ⏳ 미착수 | |
@@ -470,11 +470,17 @@ fn detect_rect_edges(frame: &CapturedFrame, roi: crate::detector::roi::RoiRect) 
 - **수정 방향**: 연결별 스레드 수 제한(세마포어/풀). 인증 토큰은 `PROTOCOL_ID = "overmax-ipc/1"` 프로토콜 변경이므로 **사용자 사전 동의 필요**.
 - **선행 조건**: 로컬 전용 IPC + 기본 `enabled = false`라는 **설계 결정**일 가능성이 있어 조치 전 사용자 확인.
 
-### 4.21 벤치/검증 하네스가 릴리스 빌드에 포함
+### 4.21 벤치/검증 하네스가 릴리스 빌드에 포함 — ⬇️ 패키징 주장 오류, 수정하지 않음
 
 - **파일**: `rust/overmax_app/Cargo.toml:18-24`
 - **문제**: `build.bat:19`는 `cargo build -p overmax-app --release`만 수행하므로 `verify_pipeline`, `measure_breakdown`이 릴리스 빌드에 컴파일·패키징된다. `measure_breakdown.rs:23`은 Direct3D11 + Windows API를 직접 링크한다. `src/bin/benchmark_lowres.rs`는 `[[bin]]` 선언 없이 자동 탐색으로 빌드되어 동일 문제.
-- **수정**: 세 바이너리에 `required-features = ["bench-harness"]`, `[features] bench-harness = []` 추가.
+- **최초 제안**: 세 바이너리에 `required-features = ["bench-harness"]`, `[features] bench-harness = []` 추가.
+- **재검토 (2026-10-02)**: "패키징된다"는 사실이 아니다.
+  - **패키징 스크립트 3종 모두 `overmax-rs.exe`만 복사한다.** `scripts/package-rust.ps1`(`overmax.exe`로 복사 후 zip), `scripts/package-msix.ps1:109, 157`, `scripts/package-linux.sh` 모두 같다. 세 하네스는 `target/release/`에 **컴파일만** 되고 배포물(zip/MSIX/Linux 번들)에는 들어가지 않는다.
+  - **남는 실제 비용은 릴리스 빌드 시간뿐이다.** 정량 측정은 하지 않았다.
+  - **제안된 feature 게이트의 부작용**: `required-features`를 붙이면 CI(`ci.yml`, ubuntu-22.04·windows-latest 매트릭스)의 `cargo build --workspace`·`cargo clippy --workspace --all-targets`가 세 바이너리를 **건너뛴다.** 기본 feature에 넣지 않는 한 하네스가 컴파일 검증 없이 방치되어, 다음에 `verify_pipeline`을 쓰려 할 때 깨져 있을 수 있다. `verify_pipeline`은 Decision Log(2026-07-17)와 아틀라스 검증(`TASKS.md:54`)에서 회귀 확인 도구로 실제 쓰였다.
+  - **판단**: 배포물 영향이 없고 빌드 시간 외 측정된 비용이 없으며, 게이트는 검증 도구를 CI에서 빼는 부작용이 있다. **수정하지 않는다.** 릴리스 빌드 시간이 문제가 되면 `build.bat`/패키징 스크립트에서 `--bin overmax-rs`로 빌드 대상을 좁히는 쪽이 CI 커버리지를 유지하는 대안이다.
+  - **부수 발견**: `build.bat`은 `cargo build -p overmax-app --release` 후 `package-rust.ps1`을 호출하는데, 이 스크립트도 같은 빌드를 다시 실행한다(두 번째는 증분이라 사실상 no-op).
 
 ### 4.22 CV 파이프라인의 불필요 중복 작업 (성능 항목군)
 
@@ -634,7 +640,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 3. ~~**§4.10**~~ — **완료** (`e527501`, `58ead08`).
 4. ~~**§4.13 → §4.14**~~ — **수정하지 않음.** §4.13은 관찰 가능한 결함 없음, §4.14는 실측 증상을 고치지 못하는 설계 결정이라 §7.4 보류로 이동.
 5. ~~**§4.17**~~ — **완료** (`5a0c831`, `41b3dab`).
-6. **§4.21** — 벤치 바이너리 feature 게이트.
+6. ~~**§4.21**~~ — **수정하지 않음.** 패키징 스크립트가 `overmax-rs.exe`만 복사하므로 배포물 영향 없음. feature 게이트는 CI에서 하네스를 빼는 부작용이 있음.
 7. **§4.7, §4.2** — 프레임 경로 syscall/deep clone 제거. 계측 동반.
 8. **§4.4~§4.6** — DXGI 오류 분류·staging clear·reused 플래그. §3.2 부수 효과와 함께 검토.
 9. **§4.22, §4.24** — 성능 항목. 각각 수정 전 계측 필수.
@@ -688,5 +694,6 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | §3.3 | "증분 동기화" 문제 | 전체 조회 문제 | 호출부 `clear_first` 산출식 미확인 |
 | §4.3.1 | `MoveFileEx`/`ReplaceFileW`가 해법 | 해법 아닐 가능성 높음 | std `rename`의 내부 구현 미확인 |
 | §4.17 | "Rate는 ZNCC 기반", OCR 잔재 2곳 | Rate는 이진 매칭(ZNCC는 Score), 잔재 5곳 | 매칭 함수 호출부와 문서 전체를 확인하지 않음 |
+| §4.21 | 하네스가 릴리스에 패키징됨 | 컴파일만 되고 배포물엔 없음 | `cargo build` 대상과 패키징 스크립트의 복사 대상을 구분하지 않음 |
 | §4.1 | `with_retry`가 op을 4번째 실행 | 루프 밖 코드 도달 불가, 정확히 3회 | 분기 가드(`attempt < 2`)를 따라가지 않고 코드 모양으로 판단 |
 | 인용 | 「추상 추가 금지」(AGENTS.md) | AGENTS.md에 없는 조항 | 규약 원문 미대조 |
