@@ -26,7 +26,7 @@
 | §4.4 | MEDIUM | DXGI 오류 1회에 GDI 강등 | ⏳ 미착수 | |
 | §4.5 | MEDIUM | 아틀라스 staging 미초기화 | ⏳ 미착수 | |
 | §4.6 | MEDIUM | DXGI 타임아웃 동일 프레임 `Ok` 재전달 | ⏳ 미착수 | |
-| §4.7 | MEDIUM | 매 프레임 `is_fullscreen` syscall + dead 필드 | ⏳ 미착수 | |
+| §4.7 | MEDIUM | 매 프레임 `is_fullscreen` syscall + dead 필드 | ✅ 완료 (Linux 빌드는 CI 확인 대기) | `2218b89`, `505e691` |
 | §4.8 | — | GDI HBITMAP 누수 | ❌ 오진 (실측 반증) | |
 | §4.9 | MEDIUM | `image_index.db` 갱신 미반영 | ⏳ 미착수 | |
 | §4.10 | MEDIUM | 서버 JSON 무검증 영속화 | ✅ 완료 | `e527501`, `58ead08` |
@@ -301,7 +301,7 @@ for slot in ATLAS_SLOTS.iter() {
 - **수정 방향**: `CapturedFrame`에 `pub reused: bool` 추가, timeout 경로에서 `true`, 호출자는 `reused`일 때 `pipeline.detect`를 스킵하고 `SleepHint`만 갱신.
 - **미검증**: 동일 프레임 반복이 안정화 카운터를 실제로 오염시키는지 미확인.
 
-### 4.7 매 프레임 5회 win32 syscall + 읽히지 않는 필드
+### 4.7 매 프레임 5회 win32 syscall + 읽히지 않는 필드 — ✅ 완료 (`2218b89`, `505e691`)
 
 - **파일**: `rust/overmax_engine/src/capture/capture_engine/windows/mod.rs:130-131`, `:37`, `:50` 및 `detection_worker.rs:476`
 ```rust
@@ -310,6 +310,12 @@ self.current_is_fullscreen = is_fs;         // ← 읽는 곳이 없음
 ```
 - **문제**: `is_fullscreen`은 `FindWindowW` + `GetWindowLongW` + `GetWindowRect` + `MonitorFromWindow` + `GetMonitorInfoW` 5회 syscall을 수행한다(`window_tracker/windows.rs:41-86`). Decision Log 2026-05 "WindowTracker 동적 폴링 주기 — win32u 시스템 콜 오버헤드 해소"의 의도를 우회한다. `detection_worker.rs:476`도 300ms 스로틀(`WindowQueryScheduler`)을 우회한다. `current_is_fullscreen`은 대입 2곳 외에 읽기가 없다.
 - **수정 방향**: `mod.rs`의 `is_fullscreen` 호출과 `current_is_fullscreen` 필드 삭제(dead). `detection_worker.rs:476`은 `WindowQueryScheduler::update()`가 갱신하는 값을 스케줄러에 캐시해 재사용.
+- **정정**: syscall 수는 "5회"가 아니라 **2~5회**다. 창이 `WS_POPUP`이 아니면(창 모드) `FindWindowW` + `GetWindowLongW` 2회 후 조기 반환한다.
+- **조치**:
+  - `2218b89`: `AdaptiveCaptureEngine`에서 `is_fullscreen` 호출, `current_is_fullscreen` 필드, 이 호출에만 쓰이던 `tracker` 필드를 제거. 도입 이후 모든 버전(`954b884`, `4c36b87`, `dcc9015`, `297f07e`, `0d6a07d`)에서 이 필드를 읽은 적이 없음을 확인했다. 캡처 동작 변경 없음.
+  - `505e691`: Windows `tick`의 `is_fullscreen`을 `WindowQueryScheduler`의 조회 분기(rect/foreground와 같은 주기: 정지 300ms, 드래그 16ms)에서만 갱신하고 캐시값을 사용. 유일한 소비처는 IPC 스냅샷의 `fullscreen` 필드이며, Linux 경로(`:652`)는 이미 스케줄러 주기로 갱신되는 `WindowSnapshot` 값을 쓰므로 양 플랫폼의 갱신 주기가 같아졌다. 필드는 Windows `tick`에서만 쓰여 `cfg(target_os = "windows")`.
+- **git blame 게이트**: 필드 `954b884`(2026-06-04), 호출 `4c36b87`(2026-06-04) 이후 여러 차례 수정된 안정화 코드다. §4.7 작업 요구 + 읽는 곳 없는 코드 제거라는 근거로 수정했다.
+- **미검증**: 프레임 시간 개선량은 측정하지 않았다(주장 범위는 "캡처당 Win32 호출 2~5회 제거"). Linux 빌드는 로컬 크로스 체크가 openssl-sys 네이티브 의존성으로 불가해 CI(ubuntu-22.04)에 맡겼다.
 
 ### 4.8 GDI `release_resources` 순서 오류로 HBITMAP 누수 — ❌ 오진, 수정하지 않음
 
@@ -624,6 +630,8 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | 21 | §4.10 읽기 쪽: 저장된 해석 불가 song_id 건너뜀 | `58ead08` |
 | 22 | §4.17 CONTEXT.md OCR 잔재 정정 | `5a0c831` |
 | 23 | §4.17 테스트 주석 정정 | `41b3dab` |
+| 24 | §4.7 캡처 엔진 dead 필드와 매 프레임 조회 제거 | `2218b89` |
+| 25 | §4.7 Windows fullscreen 플래그를 조회 주기에 맞춤 | `505e691` |
 
 ### 7.2 2026-10-02 후속 리뷰 지적 사항 (우선 처리)
 
@@ -641,7 +649,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 4. ~~**§4.13 → §4.14**~~ — **수정하지 않음.** §4.13은 관찰 가능한 결함 없음, §4.14는 실측 증상을 고치지 못하는 설계 결정이라 §7.4 보류로 이동.
 5. ~~**§4.17**~~ — **완료** (`5a0c831`, `41b3dab`).
 6. ~~**§4.21**~~ — **수정하지 않음.** 패키징 스크립트가 `overmax-rs.exe`만 복사하므로 배포물 영향 없음. feature 게이트는 CI에서 하네스를 빼는 부작용이 있음.
-7. **§4.7, §4.2** — 프레임 경로 syscall/deep clone 제거. 계측 동반.
+7. ~~**§4.7**~~ — **완료** (`2218b89`, `505e691`). **§4.2** — 프레임 경로 deep clone 제거. 계측 동반.
 8. **§4.4~§4.6** — DXGI 오류 분류·staging clear·reused 플래그. §3.2 부수 효과와 함께 검토.
 9. **§4.22, §4.24** — 성능 항목. 각각 수정 전 계측 필수.
 
