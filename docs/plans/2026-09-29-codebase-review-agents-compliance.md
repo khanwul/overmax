@@ -20,7 +20,7 @@
 | §3.3 | HIGH | V-Archive 전체 조회 빈 응답 시 캐시 소실 | ✅ 완료 (빈 응답 시 캐시 보존 방향 유지 결정) | `ef56960`, `44f2d5f` |
 | §3.4 | HIGH | Provider가 요청 대상 호스트 결정 + 비원자 쓰기 | ⚠️ 부분 완료 ((a) 완료, (b) 되돌림·§4.3 대기) | `070cfa8`, `24c8d4a` ((b) `63ae6d4` → revert `bd421d7`) |
 | §3.5 | HIGH | Linux 오버레이가 IPC 표시 명령 무시 | ✅ 완료 | `9a556ca` |
-| §4.1 | MEDIUM | `with_retry`가 op을 4번째 실행 | ⏳ 미착수 | |
+| §4.1 | — | `with_retry`가 op을 4번째 실행 | ❌ 오진 (루프 밖 코드 도달 불가, 계약 테스트 추가) | `e93176d` |
 | §4.2 | MEDIUM | `get_merged()` 매 프레임 deep clone | ⏳ 미착수 | |
 | §4.3 | MEDIUM | `write_atomic` 비원자성 | ⛔ 수정 시도 후 되돌림, 해법 미정 | `30125d0` (문서) |
 | §4.4 | MEDIUM | DXGI 오류 1회에 GDI 강등 | ⏳ 미착수 | |
@@ -202,7 +202,7 @@ fn ensure_schema(&self, conn: &mut Connection) {
 
 ## 4. MEDIUM
 
-### 4.1 `with_retry`가 재시도 루프 밖에서 op을 4번째 실행
+### 4.1 `with_retry`가 재시도 루프 밖에서 op을 4번째 실행 — ❌ 오진, 수정하지 않음
 
 - **파일**: `rust/overmax_data/src/store/record_db/mod.rs:97-118`
 ```rust
@@ -213,8 +213,11 @@ for attempt in 0..3 {
 let conn = self.open_conn()?;   // ← 루프 밖 실행
 op(&conn)
 ```
-- **문제**: 루프 내 모든 분기가 `return`하거나 다음 시도로 넘어가므로 루프 밖 두 줄의 의도가 불분명하며, 도달하는 경우 **가드 없이 op을 한 번 더 실행**한다. `insert_play_event`(`:422-479`)는 op 안에 SELECT→UPDATE/INSERT를 담고 있어 재실행이 디바운스 윈도우를 다시 통과시키거나 `played_at`을 갱신할 수 있다. 문서화된 "exponential backoff retry" 계약과 실제 횟수가 불일치.
-- **수정**: `:116-117`을 명시적 `Err` 반환으로 교체. 착수 전 루프 밖 도달 경로를 테스트로 고정할 것.
+- **원래 주장**: 세 번 BUSY로 실패한 op을 루프 밖에서 가드 없이 4번째 실행하며, `insert_play_event`(`:422-479`)처럼 SELECT→UPDATE/INSERT를 담은 op은 재실행으로 디바운스 윈도우를 다시 통과할 수 있다.
+- **반증**: 루프 밖 두 줄은 **도달 불가**다. BUSY 재시도 분기는 `attempt < 2` 가드가 있으므로 `attempt == 2`(세 번째 시도)에서는 `Ok`든 `Err`든 루프 안에서 반환된다. `open_conn()` 실패도 `?`로 즉시 반환된다. 루프 밖 코드는 `for` 루프가 `!` 타입이 아니라 함수 끝에 반환 식이 필요해서 남은 것으로 보인다.
+- **실측 (`e93176d`)**: 항상 `SQLITE_BUSY`를 반환하는 op으로 테스트 `with_retry_runs_op_three_times_on_persistent_busy`를 추가했다. op은 **정확히 3회** 호출되고 마지막 BUSY 오류가 그대로 반환된다. 문서화된 재시도 계약과 실제 횟수가 일치한다. 이 테스트는 계약 고정용으로 남겼다(프로덕션 코드 변경 없음).
+- **git blame**: `with_retry`는 `22bcc56`(2026-08-18) 도입.
+- **결론**: 버그가 재현되지 않으므로 **수정하지 않음.** 도달 불가 코드를 `unreachable!()`이나 루프 재구성으로 정리하는 것은 취향 판단이라 AGENTS.md 기준으로 단독 근거가 되지 않는다. 특히 `unreachable!()`은 release 프로파일의 `panic = "abort"` 아래 새 패닉 지점을 만든다.
 
 ### 4.2 `get_merged()`가 매 프레임 settings 전체 JSON을 deep clone + 재파싱
 
@@ -587,6 +590,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | 16 | §3.4(b) 되돌림 (read-only 회귀 위험) | `bd421d7` |
 | 17 | §4.15 마이그레이션 실패를 `is_ready`에 반영 | `d6c2546` |
 | 18 | §4.15 후속: 앱 시작 시 초기화 실패 로그 | `19457c1` |
+| 19 | §4.1 오진 확인: `with_retry` 3회 계약 테스트 | `e93176d` |
 
 ### 7.2 2026-10-02 후속 리뷰 지적 사항 (우선 처리)
 
@@ -599,7 +603,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 ### 7.3 다음 착수 대상
 
 1. ~~**§4.15**~~ — **완료** (`d6c2546`, 앱 로그 후속 `19457c1`).
-2. **§4.1** — `with_retry` 루프 밖 재실행 제거.
+2. ~~**§4.1**~~ — **오진** (`e93176d`). 루프 밖 코드는 도달 불가, op은 정확히 3회 실행됨을 테스트로 고정.
 3. **§4.10** — V-Archive 응답 검증(song_id/difficulty).
 4. **§4.13 → §4.14** — `image_index` DDL 조건화, 이후 `user_version` 도입.
 5. **§4.17** — OCR 잔존 문서/주석 정정(코드 로직 변경 없음).
@@ -655,4 +659,5 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | §4.25 | Global ROI 문서 누락 | 이미 존재 | grep 범위를 좁혀 인접 행 미확인 |
 | §3.3 | "증분 동기화" 문제 | 전체 조회 문제 | 호출부 `clear_first` 산출식 미확인 |
 | §4.3.1 | `MoveFileEx`/`ReplaceFileW`가 해법 | 해법 아닐 가능성 높음 | std `rename`의 내부 구현 미확인 |
+| §4.1 | `with_retry`가 op을 4번째 실행 | 루프 밖 코드 도달 불가, 정확히 3회 | 분기 가드(`attempt < 2`)를 따라가지 않고 코드 모양으로 판단 |
 | 인용 | 「추상 추가 금지」(AGENTS.md) | AGENTS.md에 없는 조항 | 규약 원문 미대조 |
