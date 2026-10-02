@@ -136,29 +136,7 @@ impl RecommendProviderGateway {
         save_path: &Path,
     ) -> GatewayResult<()> {
         let clean_url = provider_url.trim_end_matches('/');
-        let endpoint = if manifest.endpoint.starts_with('/') {
-            format!("{}{}", clean_url, manifest.endpoint)
-        } else if manifest.endpoint.starts_with("http://")
-            || manifest.endpoint.starts_with("https://")
-        {
-            // Security: validate that the manifest endpoint host matches
-            // the provider URL host to prevent SSRF
-            let provider_host = reqwest::Url::parse(clean_url)
-                .ok()
-                .and_then(|u| u.host_str().map(|s| s.to_string()));
-            let endpoint_host = reqwest::Url::parse(&manifest.endpoint)
-                .ok()
-                .and_then(|u| u.host_str().map(|s| s.to_string()));
-            if provider_host != endpoint_host {
-                return Err(GatewayError::InvalidProtocol {
-                    expected: RECOMMEND_PROTOCOL_ID,
-                    actual: manifest.endpoint.clone(),
-                });
-            }
-            manifest.endpoint.clone()
-        } else {
-            format!("{}/{}", clean_url, manifest.endpoint)
-        };
+        let endpoint = resolve_endpoint(clean_url, &manifest.endpoint)?;
 
         let mode_str = ctx.button_mode.as_str();
         let diff_str = ctx.difficulty.as_str();
@@ -193,6 +171,36 @@ impl RecommendProviderGateway {
     }
 }
 
+/// manifest 의 `endpoint` 를 실제 요청 URL 로 해석한다.
+///
+/// 절대 URL 이면 provider URL 과 origin(scheme, host, port)이 같아야 한다.
+/// host 만 비교하면 `https` provider 가 `http://같은호스트` 를 지정해 `v_id` 를
+/// 평문으로 보내게 하거나, 같은 host 의 다른 포트로 요청을 돌릴 수 있다.
+/// 어느 한쪽이라도 파싱되지 않으면 opaque origin 이 되어 거부된다.
+fn resolve_endpoint(clean_url: &str, endpoint: &str) -> GatewayResult<String> {
+    if endpoint.starts_with('/') {
+        return Ok(format!("{}{}", clean_url, endpoint));
+    }
+    if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
+        return Ok(format!("{}/{}", clean_url, endpoint));
+    }
+
+    let same_origin = match (
+        reqwest::Url::parse(clean_url),
+        reqwest::Url::parse(endpoint),
+    ) {
+        (Ok(provider), Ok(target)) => provider.origin() == target.origin(),
+        _ => false,
+    };
+    if !same_origin {
+        return Err(GatewayError::InvalidProtocol {
+            expected: RECOMMEND_PROTOCOL_ID,
+            actual: endpoint.to_string(),
+        });
+    }
+    Ok(endpoint.to_string())
+}
+
 impl Default for RecommendProviderGateway {
     fn default() -> Self {
         Self::new(GatewayHttpClient::default())
@@ -224,4 +232,54 @@ pub fn fetch_recommend_blocking(
     RecommendProviderGateway::default()
         .fetch_recommendations(provider_url, manifest, ctx, save_path)
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_endpoint;
+
+    const PROVIDER: &str = "https://provider.example";
+
+    #[test]
+    fn relative_endpoints_are_joined_to_provider_url() {
+        assert_eq!(
+            resolve_endpoint(PROVIDER, "/recommend").unwrap(),
+            "https://provider.example/recommend"
+        );
+        assert_eq!(
+            resolve_endpoint(PROVIDER, "recommend").unwrap(),
+            "https://provider.example/recommend"
+        );
+    }
+
+    #[test]
+    fn same_origin_absolute_endpoint_is_accepted() {
+        assert_eq!(
+            resolve_endpoint(PROVIDER, "https://provider.example/v2/recommend").unwrap(),
+            "https://provider.example/v2/recommend"
+        );
+        // 기본 포트를 명시해도 같은 origin 이다.
+        assert!(resolve_endpoint(PROVIDER, "https://provider.example:443/recommend").is_ok());
+    }
+
+    #[test]
+    fn different_host_is_rejected() {
+        assert!(resolve_endpoint(PROVIDER, "https://attacker.example/collect").is_err());
+    }
+
+    /// host 만 비교하던 구현은 아래 두 경우를 통과시켰다.
+    #[test]
+    fn scheme_downgrade_on_same_host_is_rejected() {
+        assert!(resolve_endpoint(PROVIDER, "http://provider.example/recommend").is_err());
+    }
+
+    #[test]
+    fn different_port_on_same_host_is_rejected() {
+        assert!(resolve_endpoint(PROVIDER, "https://provider.example:8443/recommend").is_err());
+    }
+
+    #[test]
+    fn unparsable_provider_url_rejects_absolute_endpoint() {
+        assert!(resolve_endpoint("not a url", "https://provider.example/recommend").is_err());
+    }
 }
