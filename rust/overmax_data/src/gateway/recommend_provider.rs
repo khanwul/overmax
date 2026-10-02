@@ -184,7 +184,10 @@ impl RecommendProviderGateway {
             let _ = fs::create_dir_all(parent);
         }
 
-        fs::write(save_path, body)?;
+        // Atomic write: write to temp file then rename
+        let tmp_path = save_path.with_extension("tmp");
+        fs::write(&tmp_path, body)?;
+        std::fs::rename(tmp_path, save_path)?;
 
         Ok(())
     }
