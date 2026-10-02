@@ -17,7 +17,7 @@
 | §2.2 | CRITICAL | UI 렌더 경로 매 프레임 DB 조회 | ✅ 완료 (업로드 플래그만) | `ac1063b` |
 | §3.1 | HIGH | `hdr_replay_test` 실패 | ✅ 원인 규명, `#[ignore]` | `2ed4543` |
 | §3.2 | HIGH | DXGI 출력 교체 실패를 삼킴 | ✅ 완료 (부수 효과 주의) | `a58a502` |
-| §3.3 | HIGH | V-Archive 전체 조회 빈 응답 시 캐시 소실 | ✅ 완료 (트레이드오프 사용자 확인 대기) | `ef56960`, `44f2d5f` |
+| §3.3 | HIGH | V-Archive 전체 조회 빈 응답 시 캐시 소실 | ✅ 완료 (빈 응답 시 캐시 보존 방향 유지 결정) | `ef56960`, `44f2d5f` |
 | §3.4 | HIGH | Provider가 요청 대상 호스트 결정 + 비원자 쓰기 | ⚠️ 부분 완료 ((a) 완료, (b) 되돌림·§4.3 대기) | `070cfa8`, `24c8d4a` ((b) `63ae6d4` → revert `bd421d7`) |
 | §3.5 | HIGH | Linux 오버레이가 IPC 표시 명령 무시 | ✅ 완료 | `9a556ca` |
 | §4.1 | MEDIUM | `with_retry`가 op을 4번째 실행 | ⏳ 미착수 | |
@@ -34,7 +34,7 @@
 | §4.12 | MEDIUM | `AccountInfo` Debug로 토큰 노출 | ✅ 완료 (에러 메시지 URL 노출은 잔여) | `b7147a8` |
 | §4.13 | MEDIUM | `image_index` 로드마다 DDL | ⏳ 미착수 | |
 | §4.14 | MEDIUM | `user_version` 미사용 | ⏳ 미착수 | |
-| §4.15 | MEDIUM | 마이그레이션 실패를 삼키고 `is_ready=true` | ⏳ 미착수 (§2.1 후속) | |
+| §4.15 | MEDIUM | 마이그레이션 실패를 삼키고 `is_ready=true` | ✅ 완료 (앱 로그 후속 남음) | `d6c2546` |
 | §4.16 | MEDIUM | `upsert` 트랜잭션 부재 | ⏳ 미착수 (재현 실패) | |
 | §4.17 | MEDIUM | OCR 잔존 설정/문서 | ⏳ 미착수 | |
 | §4.18 | MEDIUM | 이진화 대비율 문서 72% → 65% | ✅ 완료 | `98c2a9f` |
@@ -45,7 +45,7 @@
 | §4.23 | MEDIUM | Linux 정규화 부재 | ⏸️ 측정 전 보류 | |
 | §4.24 | MEDIUM | Linux 풀 프레임 2회 순회 | ⏳ 미착수 | |
 | §4.25 | MEDIUM | 문서-코드 드리프트 | ⚠️ 부분 완료 (슬롯 수만) | `4bcfbf2` |
-| §7.2 | — | 2026-10-02 후속 리뷰 지적 사항 | ⚠️ 진행 중 (5번만 남음) | |
+| §7.2 | — | 2026-10-02 후속 리뷰 지적 사항 | ✅ 완료 | |
 
 ---
 
@@ -103,7 +103,7 @@ fn ensure_schema(&self, conn: &mut Connection) {
 - **AGENTS.md 근거**: Key Constraints 「기존 호환성 파괴 금지」, 「땜질식(대증요법) 코드 지양」
 - **git blame 게이트**: `f9776f1` (2026-08-26). 버그가 실제로 재현되었으므로 수정 근거 충족.
 - **조치**: `DROP TABLE` + recreate를 `ALTER TABLE records ADD COLUMN is_max_combo INTEGER NOT NULL DEFAULT 0`으로 교체. 레거시 스키마가 `is_max_combo`만 빠진 채 나머지는 현행과 동일함을 `95048ec8^:data/record_db.py` 히스토리에서 확인했다. 회귀 테스트 2건(`legacy_records_migration_preserves_existing_rows`, `legacy_migrated_db_accepts_upsert_with_max_combo`) 추가, 수정 전 코드에서 실패함을 확인.
-- **잔여**: `ALTER TABLE` 실패도 여전히 `let _ =`로 삼켜지고 `is_ready = true`가 된다 → §4.15에서 처리.
+- **잔여**: `ALTER TABLE` 실패도 여전히 `let _ =`로 삼켜지고 `is_ready = true`가 된다 → §4.15에서 처리 완료(`d6c2546`).
 
 ### 2.2 UI 렌더 경로가 매 프레임 SQLite Connection과 파일 stat을 수행 — ✅ 완료 (`ac1063b`, 업로드 플래그만)
 
@@ -169,7 +169,7 @@ fn ensure_schema(&self, conn: &mut Connection) {
 - **문제**: DELETE가 `records` 배열 추출보다 먼저 실행되어, 서버가 전체 조회에 `{"records":[]}`를 주면 공식 Top-50 랭크/레이팅/실력 프로필이 전부 소실되고 `get_top50_summary_with_fallback`(`record_manager.rs:168`)가 로컬 records로 대체되어 추천 실력 모델이 흔들린다. **재현 확인**: 1건 병합 후 빈 배열로 재호출 → `get_varchive_rating_map(&[1])`가 `{}` 반환.
 - **AGENTS.md 근거**: CONTEXT.md 불변 조건 7(추천 엔진 실력 모델 통계 일관성), 「기존 호환성 파괴 금지」
 - **조치**: `records` 추출을 DELETE 앞으로 옮기고, 빈 배열이면 트랜잭션을 커밋하지 않고 `Ok(())` 반환. 회귀 테스트 2건 추가.
-- **트레이드오프 (명시 필요)**: 전체 조회에서 빈 배열은 **정상 상태일 수도 있다**(해당 버튼 모드에 기록이 없거나, V-Archive 기록을 초기화한 경우). 현재 수정은 이 경우에도 옛 캐시를 영구 보존한다. "일시 장애로 인한 빈 응답이 정상적인 빈 상태보다 훨씬 흔하고, 오래된 캐시가 남는 비용이 캐시 소실보다 작다"는 판단에 근거한 것이며, 이 판단은 사용자 확인 대상이다.
+- **트레이드오프 (결정됨)**: 전체 조회에서 빈 배열은 **정상 상태일 수도 있다**(해당 버튼 모드에 기록이 없거나, V-Archive 기록을 초기화한 경우). 현재 수정은 이 경우에도 옛 캐시를 영구 보존한다. "일시 장애로 인한 빈 응답이 정상적인 빈 상태보다 훨씬 흔하고, 오래된 캐시가 남는 비용이 캐시 소실보다 작다"는 판단에 근거하며, **사용자 결정(2026-10-02)으로 이 방향을 유지한다.** V-Archive의 실제 응답 형태는 §6-19에서 계속 추적한다.
 - **주석 정정 (완료, `44f2d5f`)**: `sync.rs:27` 주석과 회귀 테스트 docstring·assert 메시지의 "증분 동기화"를 "전체 조회"로 고쳤다. 코드 동작 변경 없음.
 
 ### 3.4 외부 추천 Provider가 클라이언트의 요청 대상 호스트를 결정 — ⚠️ 부분 완료: (a) 완료 (`070cfa8`, `24c8d4a`), (b) 되돌림 (`bd421d7`)
@@ -387,7 +387,7 @@ self.current_is_fullscreen = is_fs;         // ← 읽는 곳이 없음
 - **문제**: `user_version` 사용 0건. 마이그레이션이 "컬럼이 있나?" 즉각 판정(`table_has_column`, `image_index.rs:66`)으로만 이루어진다. **실측**: `hog` 컬럼이 없는 구 스키마 DB에 `load()` → `Err("no such column: hog ...")` — `metadata`만 추가하므로 구 스키마를 복구하지 못한다.
 - **수정**: `RecordDB::initialize`와 `ImageIndexDb::load` 선두에 `PRAGMA user_version` read/write 추가. 기존 컬럼 판정 경로는 유지(호환).
 
-### 4.15 `initialize()`가 마이그레이션 실패를 삼키고 `is_ready = true`로 전환
+### 4.15 `initialize()`가 마이그레이션 실패를 삼키고 `is_ready = true`로 전환 — ✅ 완료 (`d6c2546`)
 
 - **파일**: `rust/overmax_data/src/store/record_db/schema.rs:6-23`
 ```rust
@@ -398,7 +398,10 @@ if self.create_records_table(&conn).is_ok() && ... {
 }
 ```
 - **문제**: `ensure_schema`가 `()`를 반환하고 내부 전부 `let _ =`이라 마이그레이션(§2.1 이후로는 `ALTER TABLE`)이 실패해도 `is_ready = true`가 된다. 이후 `upsert`/`get`이 "성공" 경로로 실행되며 `mod.rs:217 res.unwrap_or(false)`로 실패가 무변경과 구분되지 않는다.
-- **수정**: `ensure_schema`를 `Result<()>`로 바꾸고 `is_ready`를 그 결과로 설정. §2.1의 후속으로 바로 이어 착수하는 것이 자연스럽다.
+- **조치 (`d6c2546`)**: `ensure_schema`가 `Result<()>`를 반환하고 내부 `let _ =`를 전부 `?`로 바꿨다. `initialize`는 `is_ready = ensure_schema(..).is_ok()`로 설정하고 그 값을 반환한다. `initialize`의 시그니처는 그대로다.
+- **git blame 게이트**: 해당 라인의 마지막 수정은 `f9776f1`(2026-08-26, 모듈 분리)과 `d2954f9`(2026-09-30)이며, 로직 자체는 `cadad75`(2026-05-13)부터 존재했다. 버그 재현으로 수정 근거를 충족했다.
+- **재현·검증**: 테스트 `initialize_reports_failure_when_migration_cannot_alter` 추가. 현행 스키마에서 `is_max_combo`만 DROP한 DB에 다른 연결이 `BEGIN IMMEDIATE`로 쓰기 잠금을 쥔 상태에서 초기화하면, ALTER가 `busy_timeout`(5초) 후 실패하는데도 수정 전 코드는 `initialize() == true`를 반환했다(테스트 실패 확인). 수정 후 `false`를 반환하고, 잠금 해제 후 재초기화하면 정상 마이그레이션되어 `is_max_combo=true` upsert가 보존됨을 확인했다. 테스트가 busy_timeout만큼 약 5초 걸린다.
+- **후속 (미착수)**: 앱 호출부 `native_app.rs:367`이 `record_db.initialize()`의 반환값을 버린다. 이제 실패가 `false`로 정확히 보고되지만 로그로는 남지 않고, 직후 `migrate_json_cache_to_db`의 "DB is not ready" 로그로만 간접 노출된다. 실패 시 `log_tx`로 알리는 1줄 추가는 `overmax_app` 쪽 별도 커밋 대상이다(§7.3).
 
 ### 4.16 `upsert`가 트랜잭션 없는 read-modify-write
 
@@ -524,7 +527,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 
 ### 테스트 커버리지 갭
 
-리뷰 시점에 `store/record_db/{queries,schema,sync}.rs`와 `gateway/{asset_download,error,recommend_provider,varchive}.rs`에 `#[cfg(test)]` 모듈이 없었다. 통합 검증은 `record_db/mod.rs`의 테스트와 `recommend/tests.rs`(1966줄)가 담당한다. 이후 §2.1·§3.3 회귀 테스트가 `record_db/mod.rs`에, §4.11 회귀 테스트가 `varchive.rs`에 추가되었다. `recommend_provider.rs`의 endpoint 해석은 §3.4 후속(`24c8d4a`)에서 커버되었다. **스키마 DDL 실패 경로(§4.15)는 여전히 직접 커버되지 않는다.**
+리뷰 시점에 `store/record_db/{queries,schema,sync}.rs`와 `gateway/{asset_download,error,recommend_provider,varchive}.rs`에 `#[cfg(test)]` 모듈이 없었다. 통합 검증은 `record_db/mod.rs`의 테스트와 `recommend/tests.rs`(1966줄)가 담당한다. 이후 §2.1·§3.3 회귀 테스트가 `record_db/mod.rs`에, §4.11 회귀 테스트가 `varchive.rs`에 추가되었다. `recommend_provider.rs`의 endpoint 해석은 §3.4 후속(`24c8d4a`)에서 커버되었다. 스키마 마이그레이션 실패 경로는 §4.15(`d6c2546`)의 잠금 재현 테스트로 커버되었다.
 
 ---
 
@@ -550,7 +553,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 16. **`LATEST_STATE.try_lock` 갱신 누락의 실 영향.** `ipc_server.rs:355, 358`. IPC 전용 관찰자라 파이프라인 영향은 없음. 경합 빈도 미측정.
 17. **`dxgi.rs:644-648`의 `0x887A0027` 외** OS 버전별 다른 타임아웃 코드 존재 여부 미확인.
 18. **테스트 전용 `unwrap()`의 프로덕션 유입 가능성.** `include!` 경로를 전체 추적하지 않았다(현 구조상 불가능하나 명시 확인 안 함).
-19. **§3.3 전체 조회 빈 배열의 정상 발생 가능성.** V-Archive가 기록 없는 버튼 모드에 빈 배열을 주는지, 오류를 주는지 미확인. 닫는 방법: 기록 없는 모드로 실제 API 응답 확인.
+19. **§3.3 전체 조회 빈 배열의 정상 발생 가능성.** V-Archive가 기록 없는 버튼 모드에 빈 배열을 주는지, 오류를 주는지 미확인. 닫는 방법: 기록 없는 모드로 실제 API 응답 확인. (현재 방식 유지는 결정됨, 이 항목은 결정을 다시 검토할 근거 확보용이다.)
 20. **§4.3.1 해법 후보의 실효성.** `set_permissions` 해제 후 rename, `FILE_RENAME_FLAG_IGNORE_READONLY_ATTRIBUTE` 모두 read-only 대상 프로브로 확인하지 않았다.
 
 ### 해소된 미검증 항목
@@ -582,6 +585,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | 14 | §3.3 주석·docstring 정정 | `44f2d5f` |
 | 15 | §3.4(a) origin 비교 강화 + 회귀 테스트 | `24c8d4a` |
 | 16 | §3.4(b) 되돌림 (read-only 회귀 위험) | `bd421d7` |
+| 17 | §4.15 마이그레이션 실패를 `is_ready`에 반영 | `d6c2546` |
 
 ### 7.2 2026-10-02 후속 리뷰 지적 사항 (우선 처리)
 
@@ -589,11 +593,11 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 2. ~~**§3.4(a) origin 비교**~~ — **완료** (`24c8d4a`).
 3. ~~**§3.4(b) 재결정**~~ — **되돌림** (`bd421d7`). 잘린 쓰기 위험은 §3.4 재검토 사항 2에 수용 근거와 함께 기록.
 4. ~~**§3.3 주석·docstring 정정**~~ — **완료** (`44f2d5f`).
-5. **§3.3 트레이드오프 사용자 확인** — 전체 조회 빈 배열 시 옛 캐시 보존 방향 유지 여부(§6-19).
+5. ~~**§3.3 트레이드오프 사용자 확인**~~ — **결정: 현재 방식 유지** (2026-10-02).
 
 ### 7.3 다음 착수 대상
 
-1. **§4.15** — `ensure_schema` 실패를 `is_ready`에 반영. §2.1의 `ALTER TABLE` 실패 은폐를 닫는 후속.
+1. ~~**§4.15**~~ — **완료** (`d6c2546`). 후속: `native_app.rs:367`에서 `initialize()` 실패를 로그로 알리기(앱 크레이트 별도 커밋).
 2. **§4.1** — `with_retry` 루프 밖 재실행 제거.
 3. **§4.10** — V-Archive 응답 검증(song_id/difficulty).
 4. **§4.13 → §4.14** — `image_index` DDL 조건화, 이후 `user_version` 도입.
