@@ -831,6 +831,33 @@ mod tests {
         assert!(map.contains_key(&(7, Mode::B4, Difficulty::MX)));
     }
 
+    /// 쓰기 검증 이전에 이미 저장된 잘못된 행도 읽기에서 song_id 0 으로
+    /// 둔갑하면 안 된다(기존 사용자 DB 호환).
+    #[test]
+    fn load_varchive_records_skips_stored_unparsable_song_id() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("varchive_legacy_invalid.db");
+        let steam = "76561198000000001";
+        let mut db = RecordDB::new(&db_path, Some(steam));
+        assert!(db.initialize());
+
+        let raw = r#"{"title":"abc","pattern":"SC","score":99.0,"maxCombo":true,"updatedAt":"2026-08-21T00:00:00.000Z","rating":150.0}"#;
+        db.open_conn()
+            .unwrap()
+            .execute(
+                "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+                 VALUES (?1, 'abc', ?2, 'SC', ?3)",
+                params![steam, Mode::B4.as_str(), raw],
+            )
+            .unwrap();
+
+        let map = db.load_varchive_records(steam).unwrap();
+        assert!(
+            !map.contains_key(&(0, Mode::B4, Difficulty::SC)),
+            "저장된 잘못된 title 이 song_id 0 으로 매핑됨"
+        );
+    }
+
     /// 비어 있지 않은 갱신은 기존 목록을 대체해야 한다(기존 동작 유지).
     #[test]
     fn varchive_non_empty_merge_replaces_previous_entries() {
