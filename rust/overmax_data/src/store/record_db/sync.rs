@@ -63,6 +63,13 @@ impl RecordDB {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "missing pattern (difficulty)".to_string())?;
 
+            // 읽기 경로는 song_id 를 i32, difficulty 를 Difficulty 로 해석한다.
+            // 해석할 수 없는 행을 저장하면 song_id 0(실존 곡)으로 매핑되는 등
+            // 기록이 오염되므로 저장 단계에서 건너뛴다.
+            if song_id.parse::<i32>().is_err() || Difficulty::from_str(difficulty).is_none() {
+                continue;
+            }
+
             let raw_data_str = serde_json::to_string(rec).map_err(|e| e.to_string())?;
 
             tx.execute(

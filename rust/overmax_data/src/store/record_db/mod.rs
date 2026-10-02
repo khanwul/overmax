@@ -788,6 +788,49 @@ mod tests {
         assert_eq!(after.get(&(1234, Mode::B4, Difficulty::SC)), Some(&155.0));
     }
 
+    /// 숫자가 아닌 title 이나 알 수 없는 pattern 은 저장하지 않는다.
+    /// 저장하면 읽기 경로에서 song_id 0(실존 곡 "비상 ~Stay With Me~")으로 매핑된다.
+    #[test]
+    fn varchive_merge_skips_invalid_song_id_and_difficulty() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("varchive_invalid.db");
+        let steam = "76561198000000001";
+        let mut db = RecordDB::new(&db_path, Some(steam));
+        assert!(db.initialize());
+
+        let payload = serde_json::json!({
+            "records": [
+                { "title": "abc", "pattern": "SC", "score": 99.0, "maxCombo": true,
+                  "updatedAt": "2026-08-21T00:00:00.000Z", "rating": 150.0 },
+                { "title": "42", "pattern": "XX", "score": 98.0, "maxCombo": false,
+                  "updatedAt": "2026-08-21T00:00:00.000Z", "rating": 140.0 },
+                { "title": 7, "pattern": "MX", "score": 97.0, "maxCombo": false,
+                  "updatedAt": "2026-08-21T00:00:00.000Z", "rating": 130.0 }
+            ]
+        });
+        db.merge_varchive_fetched_records(steam, 4, &payload, true)
+            .unwrap();
+
+        let stored: Vec<(String, String)> = {
+            let conn = db.open_conn().unwrap();
+            let mut stmt = conn
+                .prepare("SELECT song_id, difficulty FROM varchive_records ORDER BY song_id")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        assert_eq!(stored, vec![("7".to_string(), "MX".to_string())]);
+
+        let map = db.load_varchive_records(steam).unwrap();
+        assert!(
+            !map.keys().any(|(sid, _, _)| *sid == 0),
+            "잘못된 title 이 song_id 0 으로 매핑됨"
+        );
+        assert!(map.contains_key(&(7, Mode::B4, Difficulty::MX)));
+    }
+
     /// 비어 있지 않은 갱신은 기존 목록을 대체해야 한다(기존 동작 유지).
     #[test]
     fn varchive_non_empty_merge_replaces_previous_entries() {
