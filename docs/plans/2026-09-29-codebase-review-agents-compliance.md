@@ -34,7 +34,7 @@
 | §4.12 | MEDIUM | `AccountInfo` Debug로 토큰 노출 | ✅ 완료 (에러 메시지 URL 노출은 잔여) | `b7147a8` |
 | §4.13 | MEDIUM | `image_index` 로드마다 DDL | ⏳ 미착수 | |
 | §4.14 | MEDIUM | `user_version` 미사용 | ⏳ 미착수 | |
-| §4.15 | MEDIUM | 마이그레이션 실패를 삼키고 `is_ready=true` | ✅ 완료 (앱 로그 후속 남음) | `d6c2546` |
+| §4.15 | MEDIUM | 마이그레이션 실패를 삼키고 `is_ready=true` | ✅ 완료 | `d6c2546`, `19457c1` |
 | §4.16 | MEDIUM | `upsert` 트랜잭션 부재 | ⏳ 미착수 (재현 실패) | |
 | §4.17 | MEDIUM | OCR 잔존 설정/문서 | ⏳ 미착수 | |
 | §4.18 | MEDIUM | 이진화 대비율 문서 72% → 65% | ✅ 완료 | `98c2a9f` |
@@ -401,7 +401,7 @@ if self.create_records_table(&conn).is_ok() && ... {
 - **조치 (`d6c2546`)**: `ensure_schema`가 `Result<()>`를 반환하고 내부 `let _ =`를 전부 `?`로 바꿨다. `initialize`는 `is_ready = ensure_schema(..).is_ok()`로 설정하고 그 값을 반환한다. `initialize`의 시그니처는 그대로다.
 - **git blame 게이트**: 해당 라인의 마지막 수정은 `f9776f1`(2026-08-26, 모듈 분리)과 `d2954f9`(2026-09-30)이며, 로직 자체는 `cadad75`(2026-05-13)부터 존재했다. 버그 재현으로 수정 근거를 충족했다.
 - **재현·검증**: 테스트 `initialize_reports_failure_when_migration_cannot_alter` 추가. 현행 스키마에서 `is_max_combo`만 DROP한 DB에 다른 연결이 `BEGIN IMMEDIATE`로 쓰기 잠금을 쥔 상태에서 초기화하면, ALTER가 `busy_timeout`(5초) 후 실패하는데도 수정 전 코드는 `initialize() == true`를 반환했다(테스트 실패 확인). 수정 후 `false`를 반환하고, 잠금 해제 후 재초기화하면 정상 마이그레이션되어 `is_max_combo=true` upsert가 보존됨을 확인했다. 테스트가 busy_timeout만큼 약 5초 걸린다.
-- **후속 (미착수)**: 앱 호출부 `native_app.rs:367`이 `record_db.initialize()`의 반환값을 버린다. 이제 실패가 `false`로 정확히 보고되지만 로그로는 남지 않고, 직후 `migrate_json_cache_to_db`의 "DB is not ready" 로그로만 간접 노출된다. 실패 시 `log_tx`로 알리는 1줄 추가는 `overmax_app` 쪽 별도 커밋 대상이다(§7.3).
+- **후속 (완료, `19457c1`)**: 앱 호출부 `native_app.rs:367`이 `record_db.initialize()`의 반환값을 버려, 실패가 직후 `migrate_json_cache_to_db`의 "DB is not ready" 로그로만 간접 노출되었다. 실패 시 `log_tx`로 `[RecordDB] 기록 DB 초기화 실패` 로그를 남기도록 했다. git blame: `0140d56d`(2026-05-18), §4.15 후속으로 명시된 변경이라 수정 근거 충족. `NativeApp` 생성 경로라 단위 테스트는 붙이지 않았다(fmt·clippy만 확인).
 
 ### 4.16 `upsert`가 트랜잭션 없는 read-modify-write
 
@@ -586,6 +586,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | 15 | §3.4(a) origin 비교 강화 + 회귀 테스트 | `24c8d4a` |
 | 16 | §3.4(b) 되돌림 (read-only 회귀 위험) | `bd421d7` |
 | 17 | §4.15 마이그레이션 실패를 `is_ready`에 반영 | `d6c2546` |
+| 18 | §4.15 후속: 앱 시작 시 초기화 실패 로그 | `19457c1` |
 
 ### 7.2 2026-10-02 후속 리뷰 지적 사항 (우선 처리)
 
@@ -597,7 +598,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 
 ### 7.3 다음 착수 대상
 
-1. ~~**§4.15**~~ — **완료** (`d6c2546`). 후속: `native_app.rs:367`에서 `initialize()` 실패를 로그로 알리기(앱 크레이트 별도 커밋).
+1. ~~**§4.15**~~ — **완료** (`d6c2546`, 앱 로그 후속 `19457c1`).
 2. **§4.1** — `with_retry` 루프 밖 재실행 제거.
 3. **§4.10** — V-Archive 응답 검증(song_id/difficulty).
 4. **§4.13 → §4.14** — `image_index` DDL 조건화, 이후 `user_version` 도입.
