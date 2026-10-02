@@ -563,6 +563,39 @@ mod tests {
         assert!(rec.1, "is_max_combo=true 가 보존되지 않음");
     }
 
+    /// 마이그레이션(ALTER TABLE)이 실패하면 초기화도 실패로 보고해야 한다.
+    /// 과거에는 실패를 삼키고 is_ready=true 가 되어, 이후 is_max_combo 를 쓰는
+    /// 모든 조회/기록이 "성공" 경로에서 조용히 실패했다.
+    #[test]
+    fn initialize_reports_failure_when_migration_cannot_alter() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("locked_migration.db");
+
+        // 현행 스키마(테이블·인덱스 전부)를 만든 뒤 is_max_combo 만 제거해
+        // 마이그레이션 대상인 레거시 records 형태로 만든다.
+        assert!(RecordDB::new(&db_path, None).initialize());
+        Connection::open(&db_path)
+            .unwrap()
+            .execute("ALTER TABLE records DROP COLUMN is_max_combo", [])
+            .unwrap();
+
+        // 다른 연결이 쓰기 잠금을 쥐고 있으면 ALTER 는 busy_timeout 후 실패한다.
+        // CREATE ... IF NOT EXISTS 는 전부 no-op 이라 잠금 없이 통과한다.
+        let locker = Connection::open(&db_path).unwrap();
+        locker.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let mut db = RecordDB::new(&db_path, None);
+        assert!(!db.initialize(), "ALTER 실패를 삼키고 초기화 성공을 보고함");
+        assert!(!db.is_ready);
+
+        // 잠금이 풀리면 다시 초기화해 정상적으로 마이그레이션된다.
+        locker.execute_batch("ROLLBACK").unwrap();
+        assert!(db.initialize());
+        assert!(db.is_ready);
+        assert!(db.upsert(1, Mode::B4, Difficulty::MX, 99.0, true, false));
+        assert!(db.get(1, Mode::B4, Difficulty::MX).unwrap().1);
+    }
+
     #[test]
     fn test_concurrent_record_db_writes() {
         let temp_dir = tempfile::tempdir().unwrap();
