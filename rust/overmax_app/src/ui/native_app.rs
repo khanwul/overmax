@@ -364,7 +364,12 @@ impl NativeApp {
 
         let recent_steam = steam_session::most_recent_steam_id();
         let mut record_db = RecordDB::new(paths.record_db(), recent_steam.as_deref());
-        record_db.initialize();
+        if !record_db.initialize() {
+            let _ = log_tx.send(
+                "[RecordDB] 기록 DB 초기화 실패: 플레이 기록 저장/조회가 비활성화됩니다"
+                    .to_string(),
+            );
+        }
         let record_db = Arc::new(record_db);
 
         // JSON 캐시 파일이 있다면 SQLite DB로 마이그레이션 실행
