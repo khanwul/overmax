@@ -6,7 +6,7 @@ pub mod shader_bytes;
 
 use crate::capture::capture_engine::CaptureEngine;
 use crate::capture::frame::CapturedFrame;
-use crate::capture::window_tracker::{WindowRect, WindowTracker};
+use crate::capture::window_tracker::WindowRect;
 use dxgi::DxgiCaptureEngine;
 use gdi::GdiCaptureEngine;
 
@@ -31,10 +31,8 @@ impl std::str::FromStr for PreferredCaptureEngine {
 }
 
 pub struct AdaptiveCaptureEngine {
-    tracker: WindowTracker,
     gdi_backend: Option<GdiCaptureEngine>,
     dxgi_backend: Option<DxgiCaptureEngine>,
-    current_is_fullscreen: bool,
     last_dxgi_init_attempt: std::time::Instant,
     preferred_engine: PreferredCaptureEngine,
     enable_gpu_atlas: bool,
@@ -44,10 +42,8 @@ pub struct AdaptiveCaptureEngine {
 impl AdaptiveCaptureEngine {
     pub fn new() -> Result<Self, String> {
         Ok(Self {
-            tracker: WindowTracker::new("DJMAX RESPECT V"),
             gdi_backend: Some(GdiCaptureEngine::new()?),
             dxgi_backend: None,
-            current_is_fullscreen: false,
             last_dxgi_init_attempt: std::time::Instant::now()
                 .checked_sub(std::time::Duration::from_secs(5))
                 .unwrap_or_else(std::time::Instant::now),
@@ -127,9 +123,6 @@ impl CaptureEngine for AdaptiveCaptureEngine {
         rect: WindowRect,
         out_frame: &mut CapturedFrame,
     ) -> Result<(), String> {
-        let is_fs = self.tracker.is_fullscreen();
-        self.current_is_fullscreen = is_fs;
-
         let try_dxgi = match self.preferred_engine {
             PreferredCaptureEngine::Gdi => false,
             PreferredCaptureEngine::Dxgi => true,
