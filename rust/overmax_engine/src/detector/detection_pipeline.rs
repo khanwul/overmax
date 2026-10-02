@@ -1241,7 +1241,7 @@ mod tests {
                 continue;
             }
 
-            // Create a fresh pipeline for each image to isolate OCR checksum bypass caches
+            // Create a fresh pipeline for each image to isolate ROI checksum caches (mode/diff, rate)
             let mut pipeline = DetectionPipeline::new(ImageIndexDb::new(db_path_str, 0.6));
             let _ = pipeline.image_db.load();
 
