@@ -36,7 +36,7 @@
 | §4.14 | — | `user_version` 미사용 | ⏸️ 근거 부족, 사용자 판단 대기 | |
 | §4.15 | MEDIUM | 마이그레이션 실패를 삼키고 `is_ready=true` | ✅ 완료 | `d6c2546`, `19457c1` |
 | §4.16 | MEDIUM | `upsert` 트랜잭션 부재 | ⏳ 미착수 (재현 실패) | |
-| §4.17 | MEDIUM | OCR 잔존 설정/문서 | ⏳ 미착수 | |
+| §4.17 | MEDIUM | OCR 잔존 설정/문서 | ✅ 완료 (필드는 호환성 위해 유지) | `5a0c831`, `41b3dab` |
 | §4.18 | MEDIUM | 이진화 대비율 문서 72% → 65% | ✅ 완료 | `98c2a9f` |
 | §4.19 | MEDIUM | `detect_rect_edges` margin unscaled | ⏳ 미착수 (측정 선행) | |
 | §4.20 | MEDIUM | IPC 인증/스레드 제한 부재 | ⏸️ 설계 의도 확인 대기 | |
@@ -431,11 +431,16 @@ if self.create_records_table(&conn).is_ok() && ... {
 - **수정**: 클로저 내부를 `BEGIN IMMEDIATE` … `COMMIT`으로 감싼다.
 - **재현 실패**: 4스레드 × 50회 프로브에서 `raced_final_rate=93.49`로 정상 수렴. WAL + `busy_timeout=5000`이 자연 직렬화한 결과로 보이며, **재현 실패는 버그 부재를 증명하지 않는다.** 재현 전에는 착수하지 않는다.
 
-### 4.17 OCR 제거 후 남은 죽은 설정 필드와 잘못된 문서 서술
+### 4.17 OCR 제거 후 남은 죽은 설정 필드와 잘못된 문서 서술 — ✅ 완료 (`5a0c831`, `41b3dab`)
 
 - **파일**: `rust/overmax_data/src/config/settings.rs:456-457`, `settings.json:8`, `CONTEXT.md:11, 177`, `detection_pipeline.rs:1244`
 - **문제**: `logo_ocr_cooldown_sec`를 읽는 소비자가 없다(정의 `settings.rs:457, 651`와 `settings.json:8`만 존재). `CONTEXT.md:11`의 "+ OCR (Windows OCR)", `CONTEXT.md:177`의 "Rate OCR 텔레메트리 지원", `detection_pipeline.rs:1244` 테스트 주석 "isolate OCR checksum bypass caches"는 2026-07-28 OCR 완전 제거 이후 유효하지 않다.
-- **수정**: 필드는 유지(호환성 — 「기존 호환성 파괴 금지」). CONTEXT.md 두 곳에서 OCR 서술을 제거하고 "Rate는 Pure Rust 템플릿 매칭(ZNCC) 기반"으로 갱신, 테스트 주석의 "OCR"를 "template cache"로 수정. **코드 로직 변경 없음.**
+- **최초 제안**: 필드는 유지, CONTEXT.md 두 곳의 OCR 서술을 "Rate는 Pure Rust 템플릿 매칭(ZNCC) 기반"으로 갱신, 테스트 주석의 "OCR"를 "template cache"로 수정.
+- **정정**: 제안 문구 "Rate는 ZNCC 기반"은 틀렸다. `templates/matching.rs` 기준 **Rate는 이진 템플릿 매칭**(`match_digits_template` → `overmax_cv::match_character`), **ZNCC 소프트 매칭은 Score**(`match_character_soft`, `:51`)에만 쓰인다. 또한 OCR 잔재는 2곳이 아니라 5곳이었다(`CONTEXT.md:11, 61, 64, 84, 177`). `:177`이 서술한 "Rate OCR 텔레메트리" 뷰는 `debug_ui.rs`에 존재하지 않는다.
+- **조치**:
+  - `5a0c831`: CONTEXT.md 5곳 정정. 인식 방식·엔진 구성·`overmax_cv` 역할·파이프라인 다이어그램(`OcrDetector` → `templates`)을 실제 코드대로 바꾸고, 존재하지 않는 텔레메트리 서술은 삭제. 남은 OCR 언급 3곳(`:11` 제거 시점 주기, `:128` 제거 이력, `:188` 1-Pass 규칙)은 정확한 서술이라 유지.
+  - `41b3dab`: `detection_pipeline.rs:1244` 테스트 주석을 실제로 격리하는 대상인 `PlayStateDetector`의 ROI 체크섬 캐시(`mode_diff_cache`, `rate_cache`)로 수정.
+  - `logo_ocr_cooldown_sec` 필드는 `settings.user.json` 호환을 위해 유지(「기존 호환성 파괴 금지」). **코드 로직 변경 없음.**
 
 ### 4.18 이진화 대비율 72% 롤백이 문서에 미반영 — ✅ 완료 (`98c2a9f`)
 
@@ -611,6 +616,8 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | 19 | §4.1 오진 확인: `with_retry` 3회 계약 테스트 | `e93176d` |
 | 20 | §4.10 쓰기 쪽: 해석 불가 V-Archive 행 저장 안 함 | `e527501` |
 | 21 | §4.10 읽기 쪽: 저장된 해석 불가 song_id 건너뜀 | `58ead08` |
+| 22 | §4.17 CONTEXT.md OCR 잔재 정정 | `5a0c831` |
+| 23 | §4.17 테스트 주석 정정 | `41b3dab` |
 
 ### 7.2 2026-10-02 후속 리뷰 지적 사항 (우선 처리)
 
@@ -626,7 +633,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 2. ~~**§4.1**~~ — **오진** (`e93176d`). 루프 밖 코드는 도달 불가, op은 정확히 3회 실행됨을 테스트로 고정.
 3. ~~**§4.10**~~ — **완료** (`e527501`, `58ead08`).
 4. ~~**§4.13 → §4.14**~~ — **수정하지 않음.** §4.13은 관찰 가능한 결함 없음, §4.14는 실측 증상을 고치지 못하는 설계 결정이라 §7.4 보류로 이동.
-5. **§4.17** — OCR 잔존 문서/주석 정정(코드 로직 변경 없음).
+5. ~~**§4.17**~~ — **완료** (`5a0c831`, `41b3dab`).
 6. **§4.21** — 벤치 바이너리 feature 게이트.
 7. **§4.7, §4.2** — 프레임 경로 syscall/deep clone 제거. 계측 동반.
 8. **§4.4~§4.6** — DXGI 오류 분류·staging clear·reused 플래그. §3.2 부수 효과와 함께 검토.
@@ -680,5 +687,6 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | §4.25 | Global ROI 문서 누락 | 이미 존재 | grep 범위를 좁혀 인접 행 미확인 |
 | §3.3 | "증분 동기화" 문제 | 전체 조회 문제 | 호출부 `clear_first` 산출식 미확인 |
 | §4.3.1 | `MoveFileEx`/`ReplaceFileW`가 해법 | 해법 아닐 가능성 높음 | std `rename`의 내부 구현 미확인 |
+| §4.17 | "Rate는 ZNCC 기반", OCR 잔재 2곳 | Rate는 이진 매칭(ZNCC는 Score), 잔재 5곳 | 매칭 함수 호출부와 문서 전체를 확인하지 않음 |
 | §4.1 | `with_retry`가 op을 4번째 실행 | 루프 밖 코드 도달 불가, 정확히 3회 | 분기 가드(`attempt < 2`)를 따라가지 않고 코드 모양으로 판단 |
 | 인용 | 「추상 추가 금지」(AGENTS.md) | AGENTS.md에 없는 조항 | 규약 원문 미대조 |
