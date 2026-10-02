@@ -141,6 +141,20 @@ impl RecommendProviderGateway {
         } else if manifest.endpoint.starts_with("http://")
             || manifest.endpoint.starts_with("https://")
         {
+            // Security: validate that the manifest endpoint host matches
+            // the provider URL host to prevent SSRF
+            let provider_host = reqwest::Url::parse(clean_url)
+                .ok()
+                .and_then(|u| u.host_str().map(|s| s.to_string()));
+            let endpoint_host = reqwest::Url::parse(&manifest.endpoint)
+                .ok()
+                .and_then(|u| u.host_str().map(|s| s.to_string()));
+            if provider_host != endpoint_host {
+                return Err(GatewayError::InvalidProtocol {
+                    expected: RECOMMEND_PROTOCOL_ID,
+                    actual: manifest.endpoint.clone(),
+                });
+            }
             manifest.endpoint.clone()
         } else {
             format!("{}/{}", clean_url, manifest.endpoint)
