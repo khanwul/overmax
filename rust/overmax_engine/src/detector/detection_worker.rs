@@ -425,6 +425,7 @@ impl DetectionWorker {
             }
             self.cached_window_id = id;
             let f = tracker.is_foreground();
+            self.window_scheduler.cached_fullscreen = tracker.is_fullscreen();
             self.window_scheduler.update(r, f);
             (r, f)
         } else {
@@ -473,7 +474,7 @@ impl DetectionWorker {
                     self.log_telemetry_snapshot(snap);
                 }
                 out.game_rect = Some(rect);
-                out.state.is_fullscreen = tracker.is_fullscreen();
+                out.state.is_fullscreen = self.window_scheduler.cached_fullscreen;
                 self.log_detection_summary(&out);
                 self.check_and_log_scene_transition(&out);
 
@@ -1050,6 +1051,10 @@ struct WindowQueryScheduler {
     last_query_ts: Instant,
     cached_rect: Option<crate::capture::window_tracker::WindowRect>,
     cached_foreground: bool,
+    /// rect/foreground 와 같은 조회 주기로 갱신한다. `is_fullscreen` 은 Win32 호출을
+    /// 최대 5회 수행하므로 매 프레임 호출하지 않는다(Linux 는 `WindowSnapshot` 사용).
+    #[cfg(target_os = "windows")]
+    cached_fullscreen: bool,
     is_window_moving: bool,
     enabled: bool,
 }
@@ -1062,6 +1067,8 @@ impl WindowQueryScheduler {
                 .unwrap_or_else(Instant::now),
             cached_rect: None,
             cached_foreground: false,
+            #[cfg(target_os = "windows")]
+            cached_fullscreen: false,
             is_window_moving: false,
             enabled,
         }

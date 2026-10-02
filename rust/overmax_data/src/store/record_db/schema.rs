@@ -14,9 +14,8 @@ impl RecordDB {
                 && self.create_varchive_records_table(&conn).is_ok()
                 && self.create_play_events_table(&conn).is_ok()
             {
-                self.ensure_schema(&mut conn);
-                self.is_ready = true;
-                return true;
+                self.is_ready = self.ensure_schema(&mut conn).is_ok();
+                return self.is_ready;
             }
         }
         false
@@ -112,26 +111,34 @@ impl RecordDB {
         Ok(false)
     }
 
-    fn ensure_schema(&self, conn: &mut Connection) {
-        if let Ok(has_col) = self.table_has_column(conn, "records", "is_max_combo") {
-            if !has_col {
-                let _ = conn.execute("DROP TABLE records", []);
-                let _ = self.create_records_table(conn);
-            }
+    /// 마이그레이션 실패는 호출자(`initialize`)가 `is_ready` 에 반영할 수 있도록
+    /// 그대로 전파한다. 삼키면 이후 is_max_combo 를 쓰는 조회/기록이 전부
+    /// "성공" 경로에서 조용히 실패한다.
+    fn ensure_schema(&self, conn: &mut Connection) -> Result<()> {
+        // 레거시 records 테이블(2026-04-24 이전 Python 구현)은 is_max_combo 컬럼이
+        // 없다. 과거에는 DROP TABLE 로 스키마를 재생성해 초기화했으나, 이는 사용자의
+        // 플레이 기록 전체를 조용히 삭제했다(성공 응답만 반환). 레거시 스키마는
+        // 이 컬럼만 빠진 나머지 컬럼은 현행과 동일하므로, 컬럼 추가로 복구한다.
+        if !self.table_has_column(conn, "records", "is_max_combo")? {
+            conn.execute(
+                "ALTER TABLE records ADD COLUMN is_max_combo INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
         }
-        let _ = self.create_play_events_table(conn);
-        let _ = conn.execute(
+        self.create_play_events_table(conn)?;
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_records_recent ON records (steam_id, button_mode, updated_at DESC)",
             [],
-        );
-        let _ = conn.execute(
+        )?;
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_varchive_top50 ON varchive_records (steam_id, button_mode, rating DESC)",
             [],
-        );
-        let _ = conn.execute(
+        )?;
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_play_events_recent ON play_events (steam_id, button_mode, played_at DESC)",
             [],
-        );
+        )?;
+        Ok(())
     }
 
     pub fn migrate_json_cache_to_db(&self, cache_root: &Path) -> Result<(), String> {

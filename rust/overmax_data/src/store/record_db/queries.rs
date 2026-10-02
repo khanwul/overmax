@@ -290,7 +290,10 @@ impl RecordDB {
         let mut rows = stmt.query(params![steam_id])?;
         while let Some(row) = rows.next()? {
             let song_id_str: String = row.get(0)?;
-            let song_id: i32 = song_id_str.parse().unwrap_or(0);
+            // unwrap_or(0) 은 실존 곡(song_id 0)으로 둔갑시키므로 건너뛴다.
+            let Ok(song_id) = song_id_str.parse::<i32>() else {
+                continue;
+            };
             let button_mode: String = row.get(1)?;
             let difficulty: String = row.get(2)?;
             let score: f64 = row.get(3)?;

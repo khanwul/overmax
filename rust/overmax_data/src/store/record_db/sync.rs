@@ -24,6 +24,19 @@ impl RecordDB {
         };
         let button_mode = mode.as_str();
 
+        // 순서 주의: 전체 조회(since 없음, clear_first=true)는 기존 행을 전부 지운 뒤
+        // 새 목록으로 대체한다. 서버가 일시적으로 빈 목록을 주면 공식 Top-50
+        // 랭크/레이팅이 통째로 소실되므로, 목록 추출을 먼저 수행하고 빈 배열이면
+        // 기존 캐시를 그대로 보존한다.
+        let new_records = data
+            .get("records")
+            .and_then(|r| r.as_array())
+            .ok_or_else(|| "records field missing or not an array".to_string())?;
+
+        if new_records.is_empty() {
+            return Ok(());
+        }
+
         if clear_first {
             tx.execute(
                 "DELETE FROM varchive_records WHERE steam_id = ?1 AND button_mode = ?2",
@@ -31,11 +44,6 @@ impl RecordDB {
             )
             .map_err(|e| e.to_string())?;
         }
-
-        let new_records = data
-            .get("records")
-            .and_then(|r| r.as_array())
-            .ok_or_else(|| "records field missing or not an array".to_string())?;
 
         for rec in new_records {
             let Some(obj) = rec.as_object() else {
@@ -54,6 +62,13 @@ impl RecordDB {
                 .get("pattern")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "missing pattern (difficulty)".to_string())?;
+
+            // 읽기 경로는 song_id 를 i32, difficulty 를 Difficulty 로 해석한다.
+            // 해석할 수 없는 행을 저장하면 song_id 0(실존 곡)으로 매핑되는 등
+            // 기록이 오염되므로 저장 단계에서 건너뛴다.
+            if song_id.parse::<i32>().is_err() || Difficulty::from_str(difficulty).is_none() {
+                continue;
+            }
 
             let raw_data_str = serde_json::to_string(rec).map_err(|e| e.to_string())?;
 

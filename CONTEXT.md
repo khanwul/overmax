@@ -8,8 +8,8 @@
 
 Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선택된 곡의 난이도별 정보를 오버레이로 보여주는 도구이다.
 
-- **현재 Windows 인식 방식**: 화면 캡처 + Rust 네이티브 CV 이미지 매칭 (`overmax_cv`) + OCR (Windows OCR)
-  - _Windows 캡처 엔진_: GDI 캡처 엔진 및 DXGI Desktop Duplication 캡처 엔진을 감싸는 `AdaptiveCaptureEngine` Facade 구성. GDI 백엔드가 안정성 기본값으로 작동하며 설정창에서 DXGI로 런타임 스위칭 가능. DXGI 캡처 시 DXGI 1.6 `IDXGIOutput6::GetDesc1()`을 통해 디스플레이의 실시간 색역(ColorSpace) 및 하드웨어 피크 휘도(`MaxLuminance`)를 사전 감지하여, SDR 환경에서는 네이티브 `B8G8R8A8_UNORM` 무변환 1:1 직행을 보장함. Windows HDR 활성화 디스플레이(scRGB `R16G16B16A16_FLOAT`)에서는 DJMAX 엔진의 내부 DCI-P3 (D65) 렌더링 색역에 맞춘 $\mathbf{M}_{709 \to \text{P3}}$ 역변환 행렬과 **$C^1$ 연속 2-Stage Rational Spline 역톤매핑 커브** 및 1,025-엔트리 Fast sRGB OETF 테이블(1KB L1 캐시 상주)을 결합함. 특히 단일 피크 비례식의 로컬 과적합을 방지하기 위해 Windows OS의 SDR 콘텐츠 백색 레벨(Anchor 1: Win32 CCD `detect_monitor_sdr_white_level`, 기본값 3.0 = 240 nits)과 패널 피크 휘도(Anchor 2: DXGI 1.6 `MaxLuminance`, 기본값 4.88)를 분리하는 **2-Anchor 일반화 파이프라인**을 구축함. 이를 통해 임의의 피크 패널(DisplayHDR 1000 등)에서도 중간톤 자켓 복원 기준($scale_{mid} = A_{\text{sdr}} \times \frac{4.0}{3.0}$, $V_{knee} = A_{\text{sdr}} \times \frac{2.2}{3.0}$)이 흔들리지 않고 고휘도 폰트(Score 1,000,000점 / Rate 100.00%) 주변 블룸을 점근 숄더로 매끄럽게 수렴 압축하여 scRGB 음수 채널 클리핑 방지와 100% 전수 인식을 완벽 달성함. 또한 자켓 매칭 파이프라인에 **동적 신뢰도 결합(Dynamic Confidence Fusion)** 및 현실화된 L1 정규화 분모(4096.0)를 도입하여, 단색 배경 로고형 자켓(메이플스토리2 등)에서 양자화 단층으로 인한 히스토그램 페널티를 방어하고 형태 지문(pHash/dHash/aHash) 신뢰도에 따라 자켓 평균 유사도를 0.9257로 극대화함. 또한 글로벌 콘트라스트 이진화 비율을 72%로 정밀 튜닝하여 1440p 다운샘플링 블러 시 '8'의 가로 허리선 보존과 100만 점/Rate 소수점 분리를 동시에 완벽 달성함. 프리스타일 결과창의 상단 `mode_colorbar` 일치성 우선 판정을 통해 PlayerPanel 엣지 간섭으로 인한 오픈매치(`ResultOpen2`) 거짓 양성을 원천 차단함. `CreateDXGIFactory1` 기반 활성 디스플레이 어댑터 자동 탐색을 통해 듀얼 GPU(iGPU + 외장 dGPU) 환경을 완벽 지원하며, multi-monitor Output 자동 탐색 및 가상 스크린 좌표 오프셋 변환을 통해 서브 모니터 구동을 완벽 지원함. 여기에 512×512 GPU ROI Atlas와 핑퐁 더블 버퍼링(Double-Buffered Staging Textures)을 구축하여 1080p(8.3MB) 복사 병목 및 GPU 스톨을 소거, 실측 캡처 지연을 4.50ms에서 0.62ms(86.2% 단축, 7.2배 고속화)로 서브밀리초화함. 비-1080p 환경(1440p, 4K, 울트라와이드)은 단일 패스 GPU Normalizer(Draw Quad)를 통해 CPU 전송량을 1MB로 고정함.
+- **현재 Windows 인식 방식**: 화면 캡처 + Rust 네이티브 CV 이미지 매칭 (`overmax_cv`) + Pure Rust 템플릿 매칭 (`detector::templates`, Windows OCR은 2026-07-28 완전 제거)
+  - _Windows 캡처 엔진_: GDI 캡처 엔진 및 DXGI Desktop Duplication 캡처 엔진을 감싸는 `AdaptiveCaptureEngine` Facade 구성. GDI 백엔드가 안정성 기본값으로 작동하며 설정창에서 DXGI로 런타임 스위칭 가능. DXGI 캡처 시 DXGI 1.6 `IDXGIOutput6::GetDesc1()`을 통해 디스플레이의 실시간 색역(ColorSpace) 및 하드웨어 피크 휘도(`MaxLuminance`)를 사전 감지하여, SDR 환경에서는 네이티브 `B8G8R8A8_UNORM` 무변환 1:1 직행을 보장함. Windows HDR 활성화 디스플레이(scRGB `R16G16B16A16_FLOAT`)에서는 DJMAX 엔진의 내부 DCI-P3 (D65) 렌더링 색역에 맞춘 $\mathbf{M}_{709 \to \text{P3}}$ 역변환 행렬과 **$C^1$ 연속 2-Stage Rational Spline 역톤매핑 커브** 및 1,025-엔트리 Fast sRGB OETF 테이블(1KB L1 캐시 상주)을 결합함. 특히 단일 피크 비례식의 로컬 과적합을 방지하기 위해 Windows OS의 SDR 콘텐츠 백색 레벨(Anchor 1: Win32 CCD `detect_monitor_sdr_white_level`, 기본값 3.0 = 240 nits)과 패널 피크 휘도(Anchor 2: DXGI 1.6 `MaxLuminance`, 기본값 4.88)를 분리하는 **2-Anchor 일반화 파이프라인**을 구축함. 이를 통해 임의의 피크 패널(DisplayHDR 1000 등)에서도 중간톤 자켓 복원 기준($scale_{mid} = A_{\text{sdr}} \times \frac{4.0}{3.0}$, $V_{knee} = A_{\text{sdr}} \times \frac{2.2}{3.0}$)이 흔들리지 않고 고휘도 폰트(Score 1,000,000점 / Rate 100.00%) 주변 블룸을 점근 숄더로 매끄럽게 수렴 압축하여 scRGB 음수 채널 클리핑 방지와 100% 전수 인식을 완벽 달성함. 또한 자켓 매칭 파이프라인에 **동적 신뢰도 결합(Dynamic Confidence Fusion)** 및 현실화된 L1 정규화 분모(4096.0)를 도입하여, 단색 배경 로고형 자켓(메이플스토리2 등)에서 양자화 단층으로 인한 히스토그램 페널티를 방어하고 형태 지문(pHash/dHash/aHash) 신뢰도에 따라 자켓 평균 유사도를 0.9257로 극대화함. 또한 글로벌 콘트라스트 이진화 비율을 65%(ZNCC 소프트 매칭 채택으로 e3c1884의 72% 롤백)로 정밀 튜닝하여 1440p 다운샘플링 블러 시 '8'의 가로 허리선 보존과 100만 점/Rate 소수점 분리를 동시에 완벽 달성함. 프리스타일 결과창의 상단 `mode_colorbar` 일치성 우선 판정을 통해 PlayerPanel 엣지 간섭으로 인한 오픈매치(`ResultOpen2`) 거짓 양성을 원천 차단함. `CreateDXGIFactory1` 기반 활성 디스플레이 어댑터 자동 탐색을 통해 듀얼 GPU(iGPU + 외장 dGPU) 환경을 완벽 지원하며, multi-monitor Output 자동 탐색 및 가상 스크린 좌표 오프셋 변환을 통해 서브 모니터 구동을 완벽 지원함. 여기에 512×512 GPU ROI Atlas와 핑퐁 더블 버퍼링(Double-Buffered Staging Textures)을 구축하여 1080p(8.3MB) 복사 병목 및 GPU 스톨을 소거, 실측 캡처 지연을 4.50ms에서 0.62ms(86.2% 단축, 7.2배 고속화)로 서브밀리초화함. 비-1080p 환경(1440p, 4K, 울트라와이드)은 단일 패스 GPU Normalizer(Draw Quad)를 통해 CPU 전송량을 1MB로 고정함.
 - **현재 Windows UI**: egui / winit (하드웨어 가속 활용 멀티 뷰포트 네이티브 UI)
   - _ODDS 다이얼로그 디자인 시스템 분리_: 240x160 인게임 HUD 전용 컴팩트 테마(`overlay_theme.rs`)와 독립된 데스크톱 다이얼로그 시스템(`dialog_theme.rs` - Overmax Desktop Dialog System)을 구축하여 14px/12px 타이포그래피, 32px 표준 컨트롤 높이, 카드 배경 및 2행 전폭 입력 폼(`field_row`), RTL 슬라이더(`rtl_slider`)를 표준화함.
   - _4대 탭 IA 구조화_: 설정창을 일반/추천/V-Archive/고급 4개 탭으로 분리하고, V-Archive 연결/업로드 섹션 분리, 세그먼트 버튼 1열 선택 등 깔끔한 데스크톱 사용자 경험을 제공함.
@@ -58,10 +58,10 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 ## Workspace Crate 구조
 
 - `overmax_app`: 메인 GUI 애플리케이션 (`egui/winit` 기반 멀티 뷰포트 오버레이 UI, 설정/동기화/디버그 창 및 윈도우 스타일 제어)
-- `overmax_engine`: 화면 캡처 및 실시간 디텍션 핵심 엔진 (GDI/DXGI 캡처, OCR 디텍터, Hysteresis 버퍼, ROI 관리 및 템플릿 데이터)
+- `overmax_engine`: 화면 캡처 및 실시간 디텍션 핵심 엔진 (GDI/DXGI 캡처, 템플릿 매칭 디텍터, Hysteresis 버퍼, ROI 관리 및 템플릿 데이터)
 - `overmax_core`: 공통 데이터 모델 및 핵심 상태 구조체 (`GameSessionState`, `PlayContext`, `SceneType`)
 - `overmax_data`: 설정 파싱, SQLite DB (`RecordDB`), V-Archive API 클라이언트, 추천 정렬 로직 및 유사도 검색 알고리즘
-- `overmax_cv`: 이미지 매칭(HOG, Perceptual Hash), OCR 전처리(Grayscale, Upscale, Otsu 이진화, 컬러 패스 등)
+- `overmax_cv`: 이미지 매칭(HOG, Perceptual Hash), 템플릿 매칭 전처리(휘도/글로벌 콘트라스트 이진화, 문자 분할) 및 문자 매칭(이진 매칭, ZNCC 소프트 매칭)
 
 ## 데이터 흐름 및 스레드 구조
 
@@ -81,7 +81,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
    ├── WindowTracker: Win32 또는 X11/XWayland exact-title 추적
    ├── ScreenCapture: Windows GDI/DXGI 또는 Linux XComposite + MIT-SHM
    └── DetectionPipeline
-        ├── OcrDetector: 1-pass OCR fallback/검증 → rate 등 제한된 텍스트 값 추출
+        ├── templates: 1-pass 템플릿 매칭 → Rate(이진 템플릿 매칭), Score(ZNCC 소프트 매칭), 모드/난이도 등 판정
         ├── ImageIndexDb: overmax_cv (HOG + Hash 매칭 -> song_id 탐색)
         └── PlayStateDetector: (버튼 모드, 난이도, 맥스콤보 감지)
 
@@ -103,8 +103,8 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 ## 1. 초저지연 화면 캡처 및 아틀라스 파이프라인 (Sub-millisecond GPU ROI Atlas & Double Buffering)
 
-- **$512 \times 512$ GPU ROI Atlas**: 1080p 전체 화면(8.3MB)을 CPU RAM으로 전송하고 크롭하던 대역폭 병목을 원천 해소하기 위해, 디텍션에 필요한 43개 ROI(240,098 px)를 $512 \times 512$(1MB) 텍스처 내에 100% 무손실 1:1 패킹한 정적 슬롯 테이블(`atlas_layout.rs`) 및 $O(1)$ 정적 점프 테이블 트랜슬레이터(`atlas_translator.rs`)를 도입했습니다.
-- **D3D11 하드웨어 직접 복사 (Zero Draw Call)**: 1080p 16:9 환경에서는 셰이더 및 Render Target 없이, 백버퍼에서 Staging 텍스처로 `CopySubresourceRegion`을 43회 직행(< 50 µs)하여 VRAM 내부 복사 비용을 극소화했습니다.
+- **$512 \times 512$ GPU ROI Atlas**: 1080p 전체 화면(8.3MB)을 CPU RAM으로 전송하고 크롭하던 대역폭 병목을 원천 해소하기 위해, 디텍션에 필요한 47개 ROI(217,952 px)를 $512 \times 512$(1MB) 텍스처 내에 100% 무손실 1:1 패킹한 정적 슬롯 테이블(`atlas_layout.rs`) 및 $O(1)$ 정적 점프 테이블 트랜슬레이터(`atlas_translator.rs`)를 도입했습니다. (초기 43개/240,098 px에서 증가. `ResultFreestyle/mode` 미사용 슬롯 제거와 3개 결과 씬의 동일 좌표 `jacket` 슬롯 통합으로 32,700px를 확보해 `gp_*` 6개와 `pause_title`을 추가함. [Decision Log](docs/decisions/detection_pipeline.md) 2026-09-27 참조)
+- **D3D11 하드웨어 직접 복사 (Zero Draw Call)**: 1080p 16:9 환경에서는 셰이더 및 Render Target 없이, 백버퍼에서 Staging 텍스처로 `CopySubresourceRegion`을 47회 직행(< 50 µs)하여 VRAM 내부 복사 비용을 극소화했습니다.
 - **핑퐁 더블 버퍼링 (Double-Buffered Staging Textures) & GPU 스톨 0ms 소거**: 동기식 `context.Map`에 의한 4~5ms의 GPU 파이프라인 대기 스톨을 소거하기 위해 2개의 Staging 텍스처를 교대로 운용합니다. 새 프레임 획득 시 GPU 복사 후 `context.Flush()`로 비동기 DMA 전송을 시작하고, CPU는 이전 틱에 이미 복사가 완료된 Staging 버퍼를 즉시 `Map`하여 GPU 대기 시간을 0ms로 소거했습니다.
 - **3단계 정량 기여도 완전 분리 판정 (Attribution Analysis)**:
   - **[A] main (단일 1080p, 4.50ms) ➔ [B] fullframe-db (더블 1080p, 3.17ms)**: 더블버퍼링의 순수 기여도는 **-1.33ms (34.3% 비중)** 로 GPU 동기화 대기를 소거하지만, 8.3MB 풀프레임 복사 비용으로 인해 3.17ms 잔존.
@@ -174,7 +174,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 # Debug Strategy
 
-- **Debug UI**: `debug_ui.rs`를 통해 모듈별 실시간 디버그 로그 표시, 카테고리 필터링, 일시정지, 비우기 기능 제공. Rate OCR 텔레메트리(OCR에 전달된 실제 이미지 컬러/그레이스케일 미리보기, Threshold/BgMean/Invert 수치) 지원.
+- **Debug UI**: `debug_ui.rs`를 통해 모듈별 실시간 디버그 로그 표시, 카테고리 필터링, 일시정지, 비우기 기능 제공.
 
 ---
 

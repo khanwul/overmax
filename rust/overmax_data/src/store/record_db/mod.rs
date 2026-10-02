@@ -488,6 +488,137 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
+    /// 2026-04-24 Python 구현(`95048ec8^`)의 레거시 records 스키마.
+    /// `is_max_combo` 컬럼만 없고 나머지 컬럼은 현행과 동일하다.
+    const LEGACY_RECORDS_DDL: &str = "
+        CREATE TABLE records (
+            steam_id    TEXT NOT NULL,
+            song_id     TEXT NOT NULL,
+            button_mode TEXT NOT NULL,
+            difficulty  TEXT NOT NULL,
+            rate        REAL NOT NULL,
+            updated_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            PRIMARY KEY (steam_id, song_id, button_mode, difficulty)
+        );";
+
+    fn seed_legacy_db(db_path: &Path, rows: usize) {
+        let conn = Connection::open(db_path).unwrap();
+        conn.execute_batch(LEGACY_RECORDS_DDL).unwrap();
+        for i in 0..rows {
+            conn.execute(
+                "INSERT INTO records (steam_id, song_id, button_mode, difficulty, rate)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    "76561198000000001",
+                    (1000 + i).to_string(),
+                    Mode::B4.as_str(),
+                    Difficulty::MX.as_str(),
+                    90.0 + i as f64
+                ],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn legacy_records_migration_preserves_existing_rows() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("legacy_record.db");
+        const ROWS: usize = 50;
+        seed_legacy_db(&db_path, ROWS);
+
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize(), "레거시 DB 초기화 실패");
+
+        // 마이그레이션은 성공 응답만 돌려주고 행을 지우면 안 된다.
+        let count: i64 = db
+            .open_conn()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM records", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, ROWS as i64, "레거시 기록이 삭제됨");
+
+        // 기존 행이 조회되고, 추가된 컬럼은 기본값으로 채워진다.
+        let rec = db
+            .get(1000, Mode::B4, Difficulty::MX)
+            .expect("레거시 행 조회 실패");
+        assert!((rec.0 - 90.0).abs() < 1e-4, "레거시 값 훼손: {}", rec.0);
+        assert!(!rec.1, "is_max_combo 기본값이 0 이어야 함");
+    }
+
+    #[test]
+    fn legacy_migrated_db_accepts_upsert_with_max_combo() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("legacy_upsert.db");
+        seed_legacy_db(&db_path, 1);
+
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        // 신규 행은 is_max_combo=true 로 기록되어야 한다(기본값 0 에 머무르지 않음).
+        assert!(db.upsert(7777, Mode::B6, Difficulty::HD, 99.5, true, false));
+        let rec = db
+            .get(7777, Mode::B6, Difficulty::HD)
+            .expect("신규 행 저장 실패");
+        assert!(rec.1, "is_max_combo=true 가 보존되지 않음");
+    }
+
+    /// BUSY 가 계속되면 op 은 정확히 3회 실행되고 마지막 BUSY 를 그대로 돌려준다.
+    /// (루프 뒤의 `op(&conn)` 은 도달 불가: attempt == 2 의 모든 결과가 루프 안에서 반환된다.)
+    #[test]
+    fn with_retry_runs_op_three_times_on_persistent_busy() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = RecordDB::new(temp_dir.path().join("retry.db"), None);
+
+        let mut calls = 0;
+        let res: Result<()> = db.with_retry(|_| {
+            calls += 1;
+            Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(5 /* SQLITE_BUSY */),
+                None,
+            ))
+        });
+
+        assert_eq!(calls, 3, "재시도 계약(최대 3회)과 실행 횟수가 다름");
+        assert!(matches!(
+            res,
+            Err(rusqlite::Error::SqliteFailure(e, _)) if e.extended_code == 5
+        ));
+    }
+
+    /// 마이그레이션(ALTER TABLE)이 실패하면 초기화도 실패로 보고해야 한다.
+    /// 과거에는 실패를 삼키고 is_ready=true 가 되어, 이후 is_max_combo 를 쓰는
+    /// 모든 조회/기록이 "성공" 경로에서 조용히 실패했다.
+    #[test]
+    fn initialize_reports_failure_when_migration_cannot_alter() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("locked_migration.db");
+
+        // 현행 스키마(테이블·인덱스 전부)를 만든 뒤 is_max_combo 만 제거해
+        // 마이그레이션 대상인 레거시 records 형태로 만든다.
+        assert!(RecordDB::new(&db_path, None).initialize());
+        Connection::open(&db_path)
+            .unwrap()
+            .execute("ALTER TABLE records DROP COLUMN is_max_combo", [])
+            .unwrap();
+
+        // 다른 연결이 쓰기 잠금을 쥐고 있으면 ALTER 는 busy_timeout 후 실패한다.
+        // CREATE ... IF NOT EXISTS 는 전부 no-op 이라 잠금 없이 통과한다.
+        let locker = Connection::open(&db_path).unwrap();
+        locker.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let mut db = RecordDB::new(&db_path, None);
+        assert!(!db.initialize(), "ALTER 실패를 삼키고 초기화 성공을 보고함");
+        assert!(!db.is_ready);
+
+        // 잠금이 풀리면 다시 초기화해 정상적으로 마이그레이션된다.
+        locker.execute_batch("ROLLBACK").unwrap();
+        assert!(db.initialize());
+        assert!(db.is_ready);
+        assert!(db.upsert(1, Mode::B4, Difficulty::MX, 99.0, true, false));
+        assert!(db.get(1, Mode::B4, Difficulty::MX).unwrap().1);
+    }
+
     #[test]
     fn test_concurrent_record_db_writes() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -613,6 +744,154 @@ mod tests {
         );
         assert_eq!(rating_map.get(&(6, Mode::B4, Difficulty::SC)), Some(&106.0));
         assert_eq!(rating_map.get(&(5, Mode::B4, Difficulty::SC)), Some(&105.0));
+    }
+
+    /// 서버가 일시적으로 빈 목록을 주면 전체 조회가 기존 Top-50 캐시를
+    /// 지워 버리면 안 된다. 빈 배열이면 기존 캐시를 보존하고 정상 종료한다.
+    #[test]
+    fn varchive_empty_merge_preserves_existing_cache() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("varchive_empty_merge.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let payload = serde_json::json!({
+            "records": [
+                {
+                    "title": "1234",
+                    "pattern": "SC",
+                    "score": 99.5,
+                    "maxCombo": true,
+                    "updatedAt": "2026-08-21T00:00:00.000Z",
+                    "rating": 155.0,
+                }
+            ]
+        });
+        db.merge_varchive_fetched_records("76561198000000001", 4, &payload, true)
+            .unwrap();
+
+        let before = db.get_varchive_rating_map(&[1234]);
+        assert_eq!(before.len(), 1, "초기 병합 실패");
+        assert_eq!(before.get(&(1234, Mode::B4, Difficulty::SC)), Some(&155.0));
+
+        // 서버가 빈 배열을 반환하는 상황(일시적 장애/레이트 한도 등)
+        let empty = serde_json::json!({ "records": [] });
+        db.merge_varchive_fetched_records("76561198000000001", 4, &empty, true)
+            .unwrap();
+
+        let after = db.get_varchive_rating_map(&[1234]);
+        assert_eq!(
+            after.len(),
+            1,
+            "빈 응답으로 캐시가 소실됨(공식 Top-50 랭크/레이팅 전량 손실)"
+        );
+        assert_eq!(after.get(&(1234, Mode::B4, Difficulty::SC)), Some(&155.0));
+    }
+
+    /// 숫자가 아닌 title 이나 알 수 없는 pattern 은 저장하지 않는다.
+    /// 저장하면 읽기 경로에서 song_id 0(실존 곡 "비상 ~Stay With Me~")으로 매핑된다.
+    #[test]
+    fn varchive_merge_skips_invalid_song_id_and_difficulty() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("varchive_invalid.db");
+        let steam = "76561198000000001";
+        let mut db = RecordDB::new(&db_path, Some(steam));
+        assert!(db.initialize());
+
+        let payload = serde_json::json!({
+            "records": [
+                { "title": "abc", "pattern": "SC", "score": 99.0, "maxCombo": true,
+                  "updatedAt": "2026-08-21T00:00:00.000Z", "rating": 150.0 },
+                { "title": "42", "pattern": "XX", "score": 98.0, "maxCombo": false,
+                  "updatedAt": "2026-08-21T00:00:00.000Z", "rating": 140.0 },
+                { "title": 7, "pattern": "MX", "score": 97.0, "maxCombo": false,
+                  "updatedAt": "2026-08-21T00:00:00.000Z", "rating": 130.0 }
+            ]
+        });
+        db.merge_varchive_fetched_records(steam, 4, &payload, true)
+            .unwrap();
+
+        let stored: Vec<(String, String)> = {
+            let conn = db.open_conn().unwrap();
+            let mut stmt = conn
+                .prepare("SELECT song_id, difficulty FROM varchive_records ORDER BY song_id")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        assert_eq!(stored, vec![("7".to_string(), "MX".to_string())]);
+
+        let map = db.load_varchive_records(steam).unwrap();
+        assert!(
+            !map.keys().any(|(sid, _, _)| *sid == 0),
+            "잘못된 title 이 song_id 0 으로 매핑됨"
+        );
+        assert!(map.contains_key(&(7, Mode::B4, Difficulty::MX)));
+    }
+
+    /// 쓰기 검증 이전에 이미 저장된 잘못된 행도 읽기에서 song_id 0 으로
+    /// 둔갑하면 안 된다(기존 사용자 DB 호환).
+    #[test]
+    fn load_varchive_records_skips_stored_unparsable_song_id() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("varchive_legacy_invalid.db");
+        let steam = "76561198000000001";
+        let mut db = RecordDB::new(&db_path, Some(steam));
+        assert!(db.initialize());
+
+        let raw = r#"{"title":"abc","pattern":"SC","score":99.0,"maxCombo":true,"updatedAt":"2026-08-21T00:00:00.000Z","rating":150.0}"#;
+        db.open_conn()
+            .unwrap()
+            .execute(
+                "INSERT INTO varchive_records (steam_id, song_id, button_mode, difficulty, raw_data)
+                 VALUES (?1, 'abc', ?2, 'SC', ?3)",
+                params![steam, Mode::B4.as_str(), raw],
+            )
+            .unwrap();
+
+        let map = db.load_varchive_records(steam).unwrap();
+        assert!(
+            !map.contains_key(&(0, Mode::B4, Difficulty::SC)),
+            "저장된 잘못된 title 이 song_id 0 으로 매핑됨"
+        );
+    }
+
+    /// 비어 있지 않은 갱신은 기존 목록을 대체해야 한다(기존 동작 유지).
+    #[test]
+    fn varchive_non_empty_merge_replaces_previous_entries() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("varchive_replace.db");
+        let mut db = RecordDB::new(&db_path, Some("76561198000000001"));
+        assert!(db.initialize());
+
+        let first = serde_json::json!({
+            "records": [{
+                "title": "111", "pattern": "SC", "score": 98.0,
+                "maxCombo": false, "updatedAt": "2026-08-21T00:00:00.000Z",
+                "rating": 150.0,
+            }]
+        });
+        db.merge_varchive_fetched_records("76561198000000001", 4, &first, true)
+            .unwrap();
+
+        let second = serde_json::json!({
+            "records": [{
+                "title": "222", "pattern": "SC", "score": 99.0,
+                "maxCombo": true, "updatedAt": "2026-08-22T00:00:00.000Z",
+                "rating": 151.0,
+            }]
+        });
+        db.merge_varchive_fetched_records("76561198000000001", 4, &second, true)
+            .unwrap();
+
+        let map = db.get_varchive_rating_map(&[111, 222]);
+        assert!(
+            !map.contains_key(&(111, Mode::B4, Difficulty::SC)),
+            "전체 조회가 기존 항목을 대체해야 함"
+        );
+        assert_eq!(map.get(&(222, Mode::B4, Difficulty::SC)), Some(&151.0));
     }
 
     #[test]

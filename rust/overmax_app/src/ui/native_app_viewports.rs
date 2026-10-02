@@ -598,7 +598,7 @@ impl NativeApp {
                 sync_open: self.ui_state.sync_open.clone(),
                 scale: overlay.scale as f32,
                 opacity: overlay.base_opacity as f32,
-                varchive_upload_needed: self.current_pattern_needs_upload(),
+                varchive_upload_needed: self.overlay_upload_needed,
                 varchive_account_configured: self.is_varchive_account_configured(),
                 lite_mode: overlay.lite_mode,
                 always_visible: overlay.always_visible,
@@ -609,6 +609,7 @@ impl NativeApp {
                 toast: self.toast.clone(),
                 window_snapshot: self.window_snapshot,
                 capture_fatal: self.capture_fatal.clone(),
+                overlay_visible_override: self.overlay_visible_override,
                 #[cfg(any(debug_assertions, feature = "telemetry"))]
                 delivery_telemetry: self
                     .last_detection_output
@@ -884,7 +885,7 @@ impl NativeApp {
                 sync_open: self.ui_state.sync_open.clone(),
                 scale,
                 opacity,
-                varchive_upload_needed: self.current_pattern_needs_upload(),
+                varchive_upload_needed: self.overlay_upload_needed,
                 varchive_account_configured: self.is_varchive_account_configured(),
                 lite_mode: height == overlay_ui::LITE_BASE_HEIGHT,
                 is_snap_manual: snap_position == "manual",
