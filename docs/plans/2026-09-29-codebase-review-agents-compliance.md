@@ -29,7 +29,7 @@
 | §4.7 | MEDIUM | 매 프레임 `is_fullscreen` syscall + dead 필드 | ⏳ 미착수 | |
 | §4.8 | — | GDI HBITMAP 누수 | ❌ 오진 (실측 반증) | |
 | §4.9 | MEDIUM | `image_index.db` 갱신 미반영 | ⏳ 미착수 | |
-| §4.10 | MEDIUM | 서버 JSON 무검증 영속화 | ⏳ 미착수 | |
+| §4.10 | MEDIUM | 서버 JSON 무검증 영속화 | ✅ 완료 | `e527501`, `58ead08` |
 | §4.11 | MEDIUM | V-Archive URL 보간 | ✅ 완료 | `74094d8`, `8185d53` |
 | §4.12 | MEDIUM | `AccountInfo` Debug로 토큰 노출 | ✅ 완료 (에러 메시지 URL 노출은 잔여) | `b7147a8` |
 | §4.13 | MEDIUM | `image_index` 로드마다 DDL | ⏳ 미착수 | |
@@ -332,11 +332,18 @@ self.current_is_fullscreen = is_fs;         // ← 읽는 곳이 없음
 - **문제**: `refresh_image_index`는 `StartupCacheManager` 백그라운드 스레드에서 실행되고, `ImageIndexDb::load`(`store/image_index.rs:65`)는 엔트리를 `Arc<Vec<ImageEntry>>`로 메모리에 복사한 뒤 커넥션을 닫는다. `poll_updates`(`:102-119`)는 `updated_varchive_db`/`updated_sheet_meta`만 swap하고 `image_db`는 건드리지 않는다. 그 결과 `image_db_version.txt`에는 새 tag가 기록되어 다음 실행은 "최신 버전 유지 중"으로 로그하면서, **새 자켓 DB는 재시작 전까지 반영되지 않는다.** 사용자에게는 갱신 성공 로그만 보인다.
 - **수정 방향**: 기존 `CacheUpdateResult`에 `updated_image_index: Option<PathBuf>` 필드 1개 추가 후 `poll_updates`에서 호출측에 알린다. 반영 호출부(엔진 파이프라인)는 미검증.
 
-### 4.10 서버 JSON을 검증 없이 `raw_data`로 영속화
+### 4.10 서버 JSON을 검증 없이 `raw_data`로 영속화 — ✅ 완료 (`e527501`, `58ead08`)
 
-- **파일**: `rust/overmax_data/src/store/record_db/sync.rs:44-65`
-- **문제**: `title`이 임의 문자열이면 `song_id` TEXT로 그대로 저장되고, 생성 컬럼은 `json_extract(raw_data, ...)`로 파생된다. 서버가 `title: "abc"`를 주면 `queries.rs:293`의 `song_id_str.parse().unwrap_or(0)`에 의해 **song_id 0으로 조용히 매핑**되어 Top-50에 오염 데이터가 섞인다(CONTEXT.md 불변 조건 4). `difficulty`도 `Difficulty::from_str` 검증 없이 저장된다.
-- **수정**: song_id 파싱 실패 시 `continue`, `Difficulty::from_str` 실패 시 `continue`, `queries.rs:293`의 `unwrap_or(0)`을 `continue`로 교체.
+- **파일**: `rust/overmax_data/src/store/record_db/sync.rs:44-65`, `queries.rs:293`
+- **문제**: `title`이 임의 문자열이면 `song_id` TEXT로 그대로 저장되고, `difficulty`도 `Difficulty::from_str` 검증 없이 저장된다. 서버가 `title: "abc"`를 주면 `load_varchive_records`(`queries.rs:293`)의 `parse().unwrap_or(0)`이 이를 **song_id 0으로 조용히 매핑**한다.
+- **영향 정정 (2026-10-02)**: 최초 서술의 "Top-50에 오염 데이터가 섞인다"는 부정확하다. Top-50·레이팅 조회(`queries.rs:159, 211, 445`)는 이미 `parse::<i32>()`와 `Difficulty::from_str` 실패 행을 건너뛴다. 실제 오염 경로는 `load_varchive_records` → `RecordManager::refresh`(`record_manager.rs:61`)의 `varchive_cache` 하나다. 다만 **song_id 0은 실존 곡**(`cache/songs.json`의 기본 수록곡 "비상 ~Stay With Me~")이라, 잘못된 행이 이 곡의 V-Archive 기록(점수·맥스 콤보)으로 둔갑해 로컬 기록과 병합되는 rate map에 섞인다. 영향은 작지 않다.
+- **조치**:
+  - 쓰기 쪽 (`e527501`): 병합 시 `song_id.parse::<i32>()` 또는 `Difficulty::from_str` 실패 행을 `continue`. 테스트 `varchive_merge_skips_invalid_song_id_and_difficulty` — 수정 전 코드는 잘못된 행 2건(`"abc"`/`SC`, `"42"`/`XX`)을 그대로 저장했다.
+  - 읽기 쪽 (`58ead08`): 기존 사용자 DB에 이미 저장된 행을 위해 `unwrap_or(0)`을 `let Ok(..) else { continue; }`로 교체(같은 파일의 다른 쿼리와 동일한 관용구). 테스트 `load_varchive_records_skips_stored_unparsable_song_id` — 수정 전 코드는 raw 삽입한 `"abc"` 행을 `(0, B4, SC)`로 반환했다.
+- **git blame 게이트**: 병합 루프는 `e2875d3`(2026-07-16), 읽기 줄은 `0140d56`(2026-05-18)에서 유래하며 둘 다 `f9776f1`(2026-08-26, 모듈 분리)로 이동됐다. 버그 재현으로 수정 근거 충족.
+- **남은 사항**:
+  - difficulty는 검증만 하고 정규화(`as_str()`)하지 않는다. `Difficulty::from_str`은 `"normal"`, `"mx"` 등도 받으므로 소문자 값이 저장될 수 있고, 이 경우 `query_sync_candidates`(`queries.rs:336`)의 `r.difficulty = v.difficulty` 조인에서 로컬 기록(`as_str()` 대문자로 저장)과 짝이 맞지 않는다. V-Archive가 실제로 대문자 약어 외의 값을 보내는지는 미확인이라 정규화는 하지 않았다.
+  - 전체 조회 응답의 **모든** 행이 무효면, 빈 배열 검사(§3.3)는 통과한 뒤 DELETE만 실행되어 캐시가 비워진다. 이전에는 쓰레기 행으로 채워졌으므로 악화는 아니다.
 
 ### 4.11 V-Archive API URL에 사용자 입력을 인코딩 없이 보간 — ✅ 완료 (`74094d8`, `8185d53`)
 
@@ -591,6 +598,8 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 | 17 | §4.15 마이그레이션 실패를 `is_ready`에 반영 | `d6c2546` |
 | 18 | §4.15 후속: 앱 시작 시 초기화 실패 로그 | `19457c1` |
 | 19 | §4.1 오진 확인: `with_retry` 3회 계약 테스트 | `e93176d` |
+| 20 | §4.10 쓰기 쪽: 해석 불가 V-Archive 행 저장 안 함 | `e527501` |
+| 21 | §4.10 읽기 쪽: 저장된 해석 불가 song_id 건너뜀 | `58ead08` |
 
 ### 7.2 2026-10-02 후속 리뷰 지적 사항 (우선 처리)
 
@@ -604,7 +613,7 @@ for (source, destination) in generation.map.chunks_exact(generation.stride)
 
 1. ~~**§4.15**~~ — **완료** (`d6c2546`, 앱 로그 후속 `19457c1`).
 2. ~~**§4.1**~~ — **오진** (`e93176d`). 루프 밖 코드는 도달 불가, op은 정확히 3회 실행됨을 테스트로 고정.
-3. **§4.10** — V-Archive 응답 검증(song_id/difficulty).
+3. ~~**§4.10**~~ — **완료** (`e527501`, `58ead08`).
 4. **§4.13 → §4.14** — `image_index` DDL 조건화, 이후 `user_version` 도입.
 5. **§4.17** — OCR 잔존 문서/주석 정정(코드 로직 변경 없음).
 6. **§4.21** — 벤치 바이너리 feature 게이트.
