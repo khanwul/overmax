@@ -563,6 +563,29 @@ mod tests {
         assert!(rec.1, "is_max_combo=true 가 보존되지 않음");
     }
 
+    /// BUSY 가 계속되면 op 은 정확히 3회 실행되고 마지막 BUSY 를 그대로 돌려준다.
+    /// (루프 뒤의 `op(&conn)` 은 도달 불가: attempt == 2 의 모든 결과가 루프 안에서 반환된다.)
+    #[test]
+    fn with_retry_runs_op_three_times_on_persistent_busy() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = RecordDB::new(temp_dir.path().join("retry.db"), None);
+
+        let mut calls = 0;
+        let res: Result<()> = db.with_retry(|_| {
+            calls += 1;
+            Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(5 /* SQLITE_BUSY */),
+                None,
+            ))
+        });
+
+        assert_eq!(calls, 3, "재시도 계약(최대 3회)과 실행 횟수가 다름");
+        assert!(matches!(
+            res,
+            Err(rusqlite::Error::SqliteFailure(e, _)) if e.extended_code == 5
+        ));
+    }
+
     /// 마이그레이션(ALTER TABLE)이 실패하면 초기화도 실패로 보고해야 한다.
     /// 과거에는 실패를 삼키고 is_ready=true 가 되어, 이후 is_max_combo 를 쓰는
     /// 모든 조회/기록이 "성공" 경로에서 조용히 실패했다.
