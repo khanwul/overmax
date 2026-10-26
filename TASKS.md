@@ -135,17 +135,19 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 
 ## 7. 기록 수집 및 V-Archive 자동 연동 (Record Automation)
 
-- [ ] **7.1 선곡창/결과창 V-Archive 자동 업로드 지원**
+- [x] **7.1 선곡창/결과창 V-Archive 자동 업로드 지원**
   - [x] 설정 스키마 `varchive.auto_upload` (`enabled` 기본 OFF / `scope`: `result_only`·`select_and_result` / `delay_sec`: 0·3) 및 normalize 교정
   - [x] V-Archive 기록 대비 Rate +0.01 이상 또는 MAX COMBO 신규 달성 시에만 업로드 (⬆ 버튼 표시 조건과 동일)
   - [x] 안정 확정 값(곡/모드/난이도/Rate/MAX COMBO)이 `delay_sec` 동안 변하지 않을 때 업로드하는 `AutoUploadScheduler` — 값 변화·안정 이탈 시 타이머 리셋, 결과창 이탈 시 즉시 flush, 선곡창 커서 이동 시 취소, 같은 값 재시도 방지
   - [x] 즉시 모드의 결과창: MAX COMBO 확정 시 즉시, 미확정 시 최대 3초 대기 (인게임 실측에서 MAX COMBO 연출 전·후 2회 업로드 확인 후 반영)
   - [x] ⬆ 버튼 아래→위 차오름 대기 연출 (헤더 / 라이트 패널)
   - [x] 설정 창 V-Archive 탭 토글·범위·대기 시간 UI 및 ko/en/ja 문구
-  - [ ] 실측: 결과창 Rate 정지 → MAX COMBO 표시 간격을 디버그 로그로 측정해 3초 대기 적정성 검증
+  - [x] 실측: 결과창 Rate 정지 → MAX COMBO 표시 간격을 디버그 로그로 측정해 3초 대기 적정성 검증
   - [x] 업로드 토스트에 곡명(길면 페이드 클립)·패턴 표기 및 디버그 로그에 곡명 포함 업로드 결과 기록
 - [ ] **7.2 플레이어용 업로드 기록 로그창**
   - [ ] 디버그 로그 대신 플레이어가 볼 수 있는 업로드 기록 창 (곡명 / 패턴 / Rate / MAX COMBO / 결과 / 시각) — 연속 자동 업로드 후 무엇이 올라갔는지 확인 용도
+- [ ] **7.3 플레이어 편의기능**
+  - [ ] 업로드 할 때 Rate 얼마올랐는지 표시 하도록
 
 ---
 
@@ -174,3 +176,61 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [ ] (보류) 방어 로직 도입: 오탐 증거가 없어 근거 없는 땜질을 피하기 위해 보류. 실플레이 라이브 로그에서 기록이 있는 패턴이 선곡 화면 `Rate: 0.00%`로 확정되는 사례가 확인되면 재개. 후보: 삭제 조건 강화(미플레이 지속 시간) / 독립 샘플 검증. 구조적 약점은 그대로임: `(score, rate) = (None, None)`이 `Unplayed`로 처리되어 "읽기 실패"와 "기록 없음"이 구분되지 않음 (`play_state.rs` `process_rate_detection`)
   - [ ] 관련: `handle_verified_play`가 실패(DB busy 등)와 "변경 없음"을 모두 `false`로 반환해, 이벤트 1회 방출 구조에서는 실패 재시도가 불가함 — 반환값 의미 분리 검토
 
+---
+
+## 11. 리눅스 창 추적 모듈 분리 (Linux Window Tracking Module Split)
+
+- 근거: [orphera/overmax#35](https://github.com/orphera/overmax/issues/35) — 기여자가 환경별 구현을 붙일 수 있도록 모듈 경계를 먼저 정리
+- 제약: Windows 동작은 변경하지 않음. 변경은 작은 커밋으로 나누고, 안정화 코드는 git blame 게이트를 따름 (AGENTS.md)
+
+- [ ] **11.1 현재 Linux 창 추적·캡처·오버레이 경계 조사**
+  - [ ] `rust/overmax_engine/src/capture/capture_engine/linux.rs`와 `rust/overmax_app/src/ui/linux_layer_overlay.rs`의 책임 범위 정리
+  - [ ] 창 위치·크기·포커스 정보가 어디서 생기고 어디로 흐르는지 목록화
+
+- [ ] **11.2 창 geometry 인터페이스 도입 (동작 불변)**
+  - [ ] 창 위치·크기 변경을 받는 trait 경계 정의
+  - [ ] Linux 기존 경로를 새 경계 뒤에 두되, 현재 동작은 그대로 유지
+  - [ ] Windows 구현은 경계만 맞추고 로직은 변경하지 않음
+
+- [ ] **11.3 오버레이 쪽 입력 지점 분리**
+  - [ ] `linux_layer_overlay.rs`에 외부 좌표를 받는 입구를 추가하되, 기본값은 현재 수동 배치
+  - [ ] 위치 정보가 없는 환경은 기존 동작을 유지 (fail-closed)
+
+- [ ] **11.4 검증 계약 문서화**
+  - [ ] 기여자가 구현할 때 맞춰야 할 trait 시그니처와 입출력 계약 정리
+  - [ ] 통과해야 하는 테스트 명시 (Xvfb+Openbox lifecycle 게이트 포함)
+  - [ ] 검증 보고 양식 정의 (배포판·컴포지터·실행 방식)
+
+- [ ] **11.5 이슈 #35 답변 및 정리**
+  - [ ] 모듈 분리 준비 중임을 답변하고 기여 요청은 분리 완료 후로 안내
+  - [ ] 이슈를 TASKS 11번 및 후속 12번 항목과 연결 후 닫기
+
+---
+
+## 12. 리눅스 환경에서 창모드 자동 배치 (11번 이후 후속)
+
+- 근거: [orphera/overmax#35](https://github.com/orphera/overmax/issues/35) — 게임 창 이동·크기 변경 시 Linux 오버레이가 따라가지 않음
+- 제약: 단일 Source of Truth는 `CONTEXT.md`, 지원 범위는 `docs/guides/linux-support.md`. 지원 범위 밖 환경(native Wayland, Gamescope, GNOME)은 이 작업에서 보장하지 않음
+- 선행: 11번 모듈 분리 완료
+
+- [ ] **12.1 지원 범위 확정 및 문서화**
+  - [ ] 현재 지원 조합(Proton/XWayland + wlr-layer-shell + 테두리 없는 전체화면) 기준으로 자동 배치 대상 범위 명시
+  - [ ] 미지원 환경을 `docs/guides/linux-support.md`에 명시 (native Wayland, Gamescope, GNOME, X11 데스크톱)
+
+- [ ] **12.2 컴포지터별 위치 소스 조사 (검증 가능한 환경부터)**
+  - [ ] niri IPC 창 위치·크기 이벤트 조사 (기여자 환경 기준, 실제 검증은 제보 받기)
+  - [ ] KWin 스크립트 geometry 신호 경로 조사 및 설치·유지보수 부담 평가
+  - [ ] 좌표 변환·배율·창 장식·workspace 전환 영향 확인
+
+- [ ] **12.3 오버레이 위치 갱신 연결**
+  - [ ] 11.3의 입력 지점에 컴포지터별 위치 소스 연결
+  - [ ] 위치 정보가 없는 환경은 현재 수동 배치 유지
+
+- [ ] **12.4 검증 및 회귀 방지**
+  - [ ] Xvfb+Openbox 기반 lifecycle 게이트에 창 이동·크기 변경 시나리오 추가
+  - [ ] 인게임 성능 영향 확인 (Windows 및 Linux 모두)
+
+- [ ] **12.5 (보류) 후속 검토 항목**
+  - [ ] 오버레이 포함 스크린샷 캡처 버튼 (단축키 연동은 6.1과 연결)
+  - [ ] Gamescope 외부 오버레이 경로 (실행 구성 변경 범위가 커서 별도 검토)
+  - [ ] Vulkan 레이어 방식 — 프로젝트 원칙(화면 캡처·OS 창 API만 사용)과 충돌하므로 보류
