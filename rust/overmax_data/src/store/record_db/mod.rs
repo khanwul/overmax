@@ -49,6 +49,9 @@ pub struct RecordDB {
 mod queries;
 mod schema;
 mod sync;
+mod upload_history;
+
+pub use upload_history::{UploadHistoryRecord, UPLOAD_HISTORY_LIMIT};
 
 impl RecordDB {
     const UNKNOWN_STEAM_ID: &'static str = "__unknown__";

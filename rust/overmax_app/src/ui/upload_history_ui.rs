@@ -5,51 +5,54 @@ use crate::ui::overlay_theme::Theme;
 use eframe::egui::{
     self, Align, CornerRadius, FontId, Frame, Layout, Margin, RichText, Sense, ViewportCommand,
 };
+use overmax_data::{UploadHistoryRecord, UPLOAD_HISTORY_LIMIT};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const MAX_ENTRIES: usize = 200;
 pub const WINDOW_SIZE: [f32; 2] = [360.0, 480.0];
 
-#[derive(Clone, Debug)]
-pub struct UploadHistoryEntry {
-    pub at: Instant,
-    pub song: String,
-    pub pattern: String,
-    pub rate: f64,
-    pub max_combo: bool,
-    pub success: bool,
-    pub message: String,
+/// 현재 시각 (Unix 초). 시계가 뒤로 가도 0을 반환해 패닉하지 않는다.
+pub fn now_unix() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
-/// 업로드 결과 기록 (메모리 전용, 앱 실행 중에만 유지). 최신 항목이 앞에 온다.
+/// 업로드 기록 목록의 메모리 사본. DB(`record.db`)가 원본이고, 여기서는 창 표시용으로만 든다.
+/// 최신 항목이 앞에 온다.
 #[derive(Clone, Default)]
 pub struct SharedUploadHistory {
-    entries: Arc<Mutex<VecDeque<UploadHistoryEntry>>>,
+    entries: Arc<Mutex<VecDeque<UploadHistoryRecord>>>,
 }
 
 impl SharedUploadHistory {
-    pub fn push(&self, entry: UploadHistoryEntry) {
+    pub fn push(&self, record: UploadHistoryRecord) {
         let mut guard = overmax_core::lock_or_recover(&self.entries);
-        guard.push_front(entry);
-        guard.truncate(MAX_ENTRIES);
+        guard.push_front(record);
+        guard.truncate(UPLOAD_HISTORY_LIMIT);
     }
 
-    pub fn snapshot(&self) -> Vec<UploadHistoryEntry> {
+    /// DB에서 다시 읽어 전체를 교체한다 (앱 기동 시, 사용자가 바뀔 때).
+    pub fn replace(&self, records: Vec<UploadHistoryRecord>) {
+        let mut guard = overmax_core::lock_or_recover(&self.entries);
+        *guard = VecDeque::from(records);
+    }
+
+    pub fn snapshot(&self) -> Vec<UploadHistoryRecord> {
         Vec::from(overmax_core::lock_clone_or_default(&self.entries))
     }
 }
 
-fn format_elapsed(elapsed: Duration) -> String {
-    let secs = elapsed.as_secs();
+fn format_elapsed(secs: i64) -> String {
     if secs < 60 {
         crate::t!("upload-history-just-now").to_string()
     } else if secs < 3600 {
-        crate::t!("upload-history-minutes-ago", n = (secs / 60) as i64)
+        crate::t!("upload-history-minutes-ago", n = secs / 60)
     } else {
-        crate::t!("upload-history-hours-ago", n = (secs / 3600) as i64)
+        crate::t!("upload-history-hours-ago", n = secs / 3600)
     }
 }
 
@@ -64,7 +67,7 @@ pub fn close_if_requested(ctx: &egui::Context, open: &Arc<AtomicBool>) {
 /// 창 본문. 헤더(제목 드래그 · ✕ 닫기)와 기록 카드 목록을 그린다.
 pub fn render_upload_history(
     ui: &mut egui::Ui,
-    entries: &[UploadHistoryEntry],
+    entries: &[UploadHistoryRecord],
     open: &Arc<AtomicBool>,
     scale: f32,
 ) {
@@ -119,7 +122,7 @@ pub fn render_upload_history(
                 return;
             }
 
-            let now = Instant::now();
+            let now = now_unix();
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
@@ -131,7 +134,7 @@ pub fn render_upload_history(
         });
 }
 
-fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryEntry, now: Instant, scale: f32) {
+fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, now: i64, scale: f32) {
     Frame::new()
         .fill(Theme::SECTION_BG)
         .corner_radius(CornerRadius::same((8.0 * scale) as u8))
@@ -141,7 +144,7 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryEntry, now: Instant, scale: 
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.label(
-                        RichText::new(&entry.song)
+                        RichText::new(&entry.song_name)
                             .color(Theme::TEXT_PRIMARY)
                             .font(FontId::proportional(13.0 * scale))
                             .strong(),
@@ -158,7 +161,7 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryEntry, now: Instant, scale: 
                                 .font(FontId::proportional(11.0 * scale))
                                 .strong(),
                         );
-                        if entry.max_combo {
+                        if entry.is_max_combo {
                             ui.label(
                                 RichText::new("MAX COMBO")
                                     .color(Theme::OK)
@@ -184,11 +187,9 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryEntry, now: Instant, scale: 
                             )
                             .on_hover_text(entry.message.as_str());
                             ui.label(
-                                RichText::new(format_elapsed(
-                                    now.saturating_duration_since(entry.at),
-                                ))
-                                .color(Theme::TEXT_MUTED)
-                                .font(FontId::proportional(10.5 * scale)),
+                                RichText::new(format_elapsed((now - entry.uploaded_at).max(0)))
+                                    .color(Theme::TEXT_MUTED)
+                                    .font(FontId::proportional(10.5 * scale)),
                             );
                         });
                     });

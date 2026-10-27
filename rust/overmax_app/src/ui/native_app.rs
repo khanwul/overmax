@@ -385,6 +385,8 @@ impl NativeApp {
             );
         }
         let record_db = Arc::new(record_db);
+        let upload_history = upload_history_ui::SharedUploadHistory::default();
+        upload_history.replace(record_db.load_upload_history());
 
         // JSON 캐시 파일이 있다면 SQLite DB로 마이그레이션 실행
         let cache_root = paths.varchive_cache_dir();
@@ -537,7 +539,7 @@ impl NativeApp {
             settings,
             ui_state,
             debug_state,
-            upload_history: upload_history_ui::SharedUploadHistory::default(),
+            upload_history,
             sync_state,
             log_rx: Some(log_rx),
             game_rect: Arc::new(Mutex::new(None)),
@@ -737,16 +739,17 @@ impl NativeApp {
                     matched_candidate = true;
                 }
             }
-            self.upload_history
-                .push(upload_history_ui::UploadHistoryEntry {
-                    at: std::time::Instant::now(),
-                    song: self.upload_song_name(key.0),
-                    pattern: format!("{} {}", key.1, key.2),
-                    rate,
-                    max_combo: mc,
-                    success,
-                    message: result_msg.clone(),
-                });
+            let history_record = overmax_data::UploadHistoryRecord {
+                uploaded_at: upload_history_ui::now_unix(),
+                song_name: self.upload_song_name(key.0),
+                pattern: format!("{} {}", key.1, key.2),
+                rate,
+                is_max_combo: mc,
+                success,
+                message: result_msg.clone(),
+            };
+            self.record_db.insert_upload_history(&history_record);
+            self.upload_history.push(history_record);
             if is_quick_upload || !matched_candidate {
                 let result_text = if success {
                     result_msg
@@ -790,6 +793,8 @@ impl NativeApp {
         }
 
         if changed {
+            self.upload_history
+                .replace(self.record_db.load_upload_history());
             debug_ui::push_log(
                 &self.debug_state.log_lines,
                 self.max_log_lines(),
