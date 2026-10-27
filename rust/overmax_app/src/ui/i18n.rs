@@ -103,6 +103,57 @@ macro_rules! t {
         }
     };
 
+    // 업로드 기록 창
+    ("upload-history-title") => {
+        $crate::t_select!(
+            Ko => "업로드 기록",
+            En => "Upload History",
+            Ja => "アップロード履歴"
+        )
+    };
+    ("upload-history-empty") => {
+        $crate::t_select!(
+            Ko => "아직 업로드 기록이 없습니다.",
+            En => "No uploads yet.",
+            Ja => "まだアップロード履歴がありません。"
+        )
+    };
+    ("upload-history-just-now") => {
+        $crate::t_select!(
+            Ko => "방금",
+            En => "Just now",
+            Ja => "たった今"
+        )
+    };
+    ("upload-history-result-ok") => {
+        $crate::t_select!(
+            Ko => "완료",
+            En => "Done",
+            Ja => "完了"
+        )
+    };
+    ("upload-history-result-failed") => {
+        $crate::t_select!(
+            Ko => "실패",
+            En => "Failed",
+            Ja => "失敗"
+        )
+    };
+    ("upload-history-minutes-ago", n = $n:expr) => {
+        $crate::t_select!(
+            Ko => format!("{}분 전", $n),
+            En => format!("{} min ago", $n),
+            Ja => format!("{}分前", $n)
+        )
+    };
+    ("upload-history-hours-ago", n = $n:expr) => {
+        $crate::t_select!(
+            Ko => format!("{}시간 전", $n),
+            En => format!("{} h ago", $n),
+            Ja => format!("{}時間前", $n)
+        )
+    };
+
     // 2) Dynamic Format Keys (Arg-based formatting)
     ("candidate-count", n = $n:expr) => {
         $crate::t_select!(

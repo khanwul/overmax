@@ -12,6 +12,10 @@ pub fn vp_sync() -> ViewportId {
     ViewportId::from_hash_of("overmax_sync_vp")
 }
 
+pub fn vp_upload_history() -> ViewportId {
+    ViewportId::from_hash_of("overmax_upload_history_vp")
+}
+
 pub fn first_steam_from_settings(settings: &overmax_data::Settings) -> String {
     let varchive = settings.varchive();
     varchive.user_map.keys().next().cloned().unwrap_or_default()

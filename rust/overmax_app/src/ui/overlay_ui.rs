@@ -130,6 +130,7 @@ pub fn draw_overlay_panel(ui: &mut egui::Ui, props: &OverlayProps) -> OverlayAct
                 &px,
             )
             .sync_open(&props.sync_open)
+            .upload_history_button()
             .varchive_upload_needed(props.varchive_upload_needed)
             .varchive_upload_progress(props.varchive_upload_progress)
             .varchive_account_configured(props.varchive_account_configured)

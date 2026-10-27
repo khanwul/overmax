@@ -25,6 +25,7 @@ use crate::ui::debug_ui;
 use crate::ui::overlay_ui;
 use crate::ui::platform;
 use crate::ui::ui_command::UiCommand;
+use crate::ui::upload_history_ui;
 use eframe::egui;
 use overmax_engine::detector::detection_pipeline::DetectionOutput;
 use overmax_engine::detector::detection_worker;
@@ -167,6 +168,7 @@ pub struct SharedUiState {
     pub debug_open: Arc<AtomicBool>,
     pub settings_open: Arc<AtomicBool>,
     pub sync_open: Arc<AtomicBool>,
+    pub upload_history_open: Arc<AtomicBool>,
     pub scan_pending: Arc<AtomicBool>,
 }
 
@@ -274,6 +276,7 @@ pub struct NativeApp {
     pub(crate) settings: SharedSettings,
     pub(crate) ui_state: SharedUiState,
     pub(crate) debug_state: SharedDebugState,
+    pub(crate) upload_history: upload_history_ui::SharedUploadHistory,
     pub(crate) sync_state: SharedSyncState,
     pub(crate) log_rx: Option<Receiver<String>>,
     pub(crate) game_rect: Arc<Mutex<Option<overmax_engine::capture::window_tracker::WindowRect>>>,
@@ -423,6 +426,7 @@ impl NativeApp {
         let exit_requested = Arc::new(AtomicBool::new(false));
         let settings_open = Arc::new(AtomicBool::new(false));
         let sync_open = Arc::new(AtomicBool::new(false));
+        let upload_history_open = Arc::new(AtomicBool::new(false));
         let debug_open = Arc::new(AtomicBool::new(false));
 
         let sync_channels = SyncWorkerChannels::new();
@@ -505,6 +509,7 @@ impl NativeApp {
             debug_open: debug_open.clone(),
             settings_open: settings_open.clone(),
             sync_open: sync_open.clone(),
+            upload_history_open: upload_history_open.clone(),
             scan_pending: Arc::new(AtomicBool::new(false)),
         };
 
@@ -532,6 +537,7 @@ impl NativeApp {
             settings,
             ui_state,
             debug_state,
+            upload_history: upload_history_ui::SharedUploadHistory::default(),
             sync_state,
             log_rx: Some(log_rx),
             game_rect: Arc::new(Mutex::new(None)),
@@ -731,6 +737,16 @@ impl NativeApp {
                     matched_candidate = true;
                 }
             }
+            self.upload_history
+                .push(upload_history_ui::UploadHistoryEntry {
+                    at: std::time::Instant::now(),
+                    song: self.upload_song_name(key.0),
+                    pattern: format!("{} {}", key.1, key.2),
+                    rate,
+                    max_combo: mc,
+                    success,
+                    message: result_msg.clone(),
+                });
             if is_quick_upload || !matched_candidate {
                 let result_text = if success {
                     result_msg

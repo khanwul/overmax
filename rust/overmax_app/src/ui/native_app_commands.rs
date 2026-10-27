@@ -62,6 +62,7 @@ impl NativeApp {
             UiCommand::OpenSettings => self.open_settings(),
             UiCommand::OpenDebug => self.open_debug(),
             UiCommand::OpenSync => self.open_sync(),
+            UiCommand::OpenUploadHistory => self.open_upload_history(),
             UiCommand::Exit => self.exit_requested.store(true, Ordering::Relaxed),
             UiCommand::UploadCurrentPattern => {
                 if let Ok(holder) = self.ctx_holder.lock() {
@@ -147,6 +148,23 @@ impl NativeApp {
             self.max_log_lines(),
             "[UI] open debug",
         );
+    }
+
+    fn open_upload_history(&self) {
+        if self.ui_state.upload_history_open.load(Ordering::Relaxed) {
+            if let Ok(guard) = self.ctx_holder.lock() {
+                if let Some(ctx) = guard.as_ref() {
+                    ctx.send_viewport_cmd_to(
+                        crate::system::native_helpers::vp_upload_history(),
+                        eframe::egui::ViewportCommand::Focus,
+                    );
+                }
+            }
+            return;
+        }
+        self.ui_state
+            .upload_history_open
+            .store(true, Ordering::Relaxed);
     }
 
     fn open_sync(&self) {

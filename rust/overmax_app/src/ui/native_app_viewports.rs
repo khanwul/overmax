@@ -13,6 +13,7 @@ use crate::ui::native_app::NativeApp;
 use crate::ui::overlay_ui;
 use crate::ui::settings_ui;
 use crate::ui::sync_ui;
+use crate::ui::upload_history_ui;
 use overmax_engine::capture::window_tracker;
 
 fn game_window_title(settings: &overmax_data::Settings) -> &str {
@@ -319,6 +320,32 @@ impl NativeApp {
         );
     }
 
+    /// 업로드 기록 창: 제목표시줄 없이 메인 오버레이와 같은 카드 룩으로 그린다 (헤더 드래그 · ✕ 닫기).
+    fn show_upload_history_viewport(&self, ctx: &egui::Context) {
+        if !self.ui_state.upload_history_open.load(Ordering::Relaxed) {
+            return;
+        }
+        let open = self.ui_state.upload_history_open.clone();
+        let history = self.upload_history.clone();
+        let scale = self.settings.get_merged().overlay().scale as f32;
+
+        ctx.show_viewport_deferred(
+            native_helpers::vp_upload_history(),
+            ViewportBuilder::default()
+                .with_title(crate::t!("upload-history-title"))
+                .with_inner_size(upload_history_ui::WINDOW_SIZE)
+                .with_decorations(false)
+                .with_transparent(true)
+                .with_resizable(true)
+                .with_taskbar(true),
+            move |ui, _class| {
+                let entries = history.snapshot();
+                upload_history_ui::render_upload_history(ui, &entries, &open, scale);
+                upload_history_ui::close_if_requested(ui.ctx(), &open);
+            },
+        );
+    }
+
     fn show_sync_viewport(&self, ctx: &egui::Context) {
         if !self.ui_state.sync_open.load(Ordering::Relaxed) {
             return;
@@ -486,6 +513,7 @@ impl eframe::App for NativeApp {
         self.show_debug_viewport(&ctx);
         self.show_settings_viewport(&ctx);
         self.show_sync_viewport(&ctx);
+        self.show_upload_history_viewport(&ctx);
 
         self.update_platform_overlay(ui);
     }
