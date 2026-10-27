@@ -1235,9 +1235,9 @@ macro_rules! t {
 
     ("tray-open-log") => {
         $crate::t_select!(
-            Ko => "로그 창 열기",
-            En => "Open Log Window",
-            Ja => "ログウィンドウを開く"
+            Ko => "업로드 기록 열기",
+            En => "Open Upload History",
+            Ja => "アップロード履歴を開く"
         )
     };
     ("tray-exit") => {

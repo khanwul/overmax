@@ -319,7 +319,7 @@ fn handle_menu_command(cmd: usize) {
     match cmd {
         CMD_SETTINGS => send_command(actions, UiCommand::OpenSettings),
         CMD_SYNC => send_command(actions, UiCommand::OpenSync),
-        CMD_DEBUG => send_command(actions, UiCommand::OpenDebug),
+        CMD_DEBUG => send_command(actions, UiCommand::OpenUploadHistory),
         CMD_EXIT => send_command(actions, UiCommand::Exit),
         _ => {}
     }
