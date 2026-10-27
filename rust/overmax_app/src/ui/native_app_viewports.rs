@@ -4,7 +4,7 @@
 use eframe::egui::Vec2;
 use eframe::egui::{self, RichText, ViewportBuilder, ViewportCommand};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::system::native_helpers;
 use crate::ui::debug_ui;
@@ -334,6 +334,9 @@ impl NativeApp {
         let title = crate::t!("upload-history-title").to_string();
         // 창이 생성된 뒤 첫 프레임에 한 번만 Win32 프레임리스/투명 스타일을 입힌다.
         let style_applied = Arc::new(AtomicBool::new(false));
+        // 헤더 드래그는 메인 오버레이와 같이 마우스 스크린 좌표로 창을 옮긴다 (드래그 시작 앵커 보관).
+        #[cfg(target_os = "windows")]
+        let drag_anchor = Arc::new(Mutex::new(None));
 
         ctx.show_viewport_deferred(
             native_helpers::vp_upload_history(),
@@ -352,7 +355,13 @@ impl NativeApp {
                     style_applied.store(true, Ordering::Relaxed);
                 }
                 let entries = history.snapshot();
-                upload_history_ui::render_upload_history(ui, &entries, &open, scale);
+                let dragging = upload_history_ui::render_upload_history(ui, &entries, &open, scale);
+                #[cfg(target_os = "windows")]
+                if let Ok(mut anchor) = drag_anchor.lock() {
+                    platform::drag_window_by_title(&title, &mut anchor, dragging);
+                }
+                #[cfg(not(target_os = "windows"))]
+                let _ = dragging;
                 upload_history_ui::close_if_requested(ui.ctx(), &open);
             },
         );

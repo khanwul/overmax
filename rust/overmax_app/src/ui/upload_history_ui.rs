@@ -4,8 +4,7 @@
 
 use crate::ui::overlay_theme::Theme;
 use eframe::egui::{
-    self, Align, Align2, CornerRadius, FontId, Frame, Layout, Margin, RichText, Sense,
-    TextWrapMode, ViewportCommand,
+    self, Align, Align2, CornerRadius, FontId, Frame, Layout, Margin, RichText, Sense, TextWrapMode,
 };
 use overmax_data::{UploadHistoryRecord, UPLOAD_HISTORY_LIMIT};
 use std::collections::VecDeque;
@@ -72,12 +71,13 @@ pub fn close_if_requested(ctx: &egui::Context, open: &Arc<AtomicBool>) {
 }
 
 /// 창 본문. 창 전체를 패널 색으로 채운 뒤 헤더(제목 드래그 · ✕ 닫기)와 기록 카드 목록을 그린다.
+/// 반환값은 이번 프레임에 헤더를 드래그 중인지 여부이다 (창 이동은 호출 쪽에서 처리한다).
 pub fn render_upload_history(
     ui: &mut egui::Ui,
     entries: &[UploadHistoryRecord],
     open: &Arc<AtomicBool>,
     scale: f32,
-) {
+) -> bool {
     // 내용이 짧아도 창 바닥이 검게 남지 않도록 창 전체 영역을 먼저 채운다.
     let window_rect = ui.max_rect();
     ui.painter().rect_filled(
@@ -86,10 +86,11 @@ pub fn render_upload_history(
         Theme::PANEL_BG,
     );
 
+    let mut dragging = false;
     Frame::new()
         .inner_margin(Margin::same((8.0 * scale) as i8))
         .show(ui, |ui| {
-            render_header(ui, open, scale);
+            dragging = render_header(ui, open, scale);
             ui.add_space(6.0 * scale);
 
             if entries.is_empty() {
@@ -112,12 +113,12 @@ pub fn render_upload_history(
                     }
                 });
         });
+    dragging
 }
 
 /// 헤더: 메인 오버레이 헤더와 같은 색·라운드·버튼 크기를 쓴다. 제목 영역 전체가 드래그 핸들이고,
 /// 오른쪽 ✕ 버튼만 닫기 동작을 가진다 (드래그 영역은 버튼을 덮지 않도록 버튼 왼쪽까지만 잡는다).
-fn render_header(ui: &mut egui::Ui, open: &Arc<AtomicBool>, scale: f32) {
-    let ctx = ui.ctx().clone();
+fn render_header(ui: &mut egui::Ui, open: &Arc<AtomicBool>, scale: f32) -> bool {
     let button_size = 18.0 * scale;
     Frame::new()
         .fill(Theme::HEADER_BG)
@@ -136,9 +137,7 @@ fn render_header(ui: &mut egui::Ui, open: &Arc<AtomicBool>, scale: f32) {
                     FontId::proportional(14.0 * scale),
                     Theme::TEXT_PRIMARY,
                 );
-                if drag.drag_started() {
-                    ctx.send_viewport_cmd(ViewportCommand::StartDrag);
-                }
+                let dragging = drag.dragged();
 
                 let close = egui::Button::new(
                     RichText::new("✕")
@@ -155,8 +154,11 @@ fn render_header(ui: &mut egui::Ui, open: &Arc<AtomicBool>, scale: f32) {
                 {
                     open.store(false, Ordering::Relaxed);
                 }
-            });
-        });
+                dragging
+            })
+            .inner
+        })
+        .inner
 }
 
 fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOffset, scale: f32) {
