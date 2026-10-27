@@ -125,13 +125,6 @@ macro_rules! t {
             Ja => "まだアップロード履歴がありません。"
         )
     };
-    ("upload-history-just-now") => {
-        $crate::t_select!(
-            Ko => "방금",
-            En => "Just now",
-            Ja => "たった今"
-        )
-    };
     ("upload-history-result-ok") => {
         $crate::t_select!(
             Ko => "완료",
@@ -144,20 +137,6 @@ macro_rules! t {
             Ko => "실패",
             En => "Failed",
             Ja => "失敗"
-        )
-    };
-    ("upload-history-minutes-ago", n = $n:expr) => {
-        $crate::t_select!(
-            Ko => format!("{}분 전", $n),
-            En => format!("{} min ago", $n),
-            Ja => format!("{}分前", $n)
-        )
-    };
-    ("upload-history-hours-ago", n = $n:expr) => {
-        $crate::t_select!(
-            Ko => format!("{}시간 전", $n),
-            En => format!("{} h ago", $n),
-            Ja => format!("{}時間前", $n)
         )
     };
     ("upload-history-top50-rank", rank = $rank:expr) => {

@@ -1,10 +1,11 @@
 //! 플레이어용 업로드 기록 창. 디버그 로그와 별개로 이번 실행 중 업로드 결과를 최신순으로 보여준다.
-//! 메인 오버레이와 같은 카드 룩을 쓰며, 제목표시줄 없이(프레임리스) 헤더에서 드래그하고 헤더의 ✕로 닫는다.
+//! 메인 오버레이와 같은 헤더 룩(Theme, 같은 버튼 크기·라운드)을 쓰며, 제목표시줄 없이(프레임리스)
+//! 헤더에서 드래그하고 헤더의 ✕로 닫는다.
 
 use crate::ui::overlay_theme::Theme;
 use eframe::egui::{
-    self, Align, Align2, CornerRadius, FontId, Frame, Layout, Margin, RichText, Sense, Stroke,
-    ViewportCommand,
+    self, Align, Align2, CornerRadius, FontId, Frame, Layout, Margin, RichText, Sense,
+    TextWrapMode, ViewportCommand,
 };
 use overmax_data::{UploadHistoryRecord, UPLOAD_HISTORY_LIMIT};
 use std::collections::VecDeque;
@@ -47,14 +48,19 @@ impl SharedUploadHistory {
     }
 }
 
-fn format_elapsed(secs: i64) -> String {
-    if secs < 60 {
-        crate::t!("upload-history-just-now").to_string()
-    } else if secs < 3600 {
-        crate::t!("upload-history-minutes-ago", n = secs / 60)
-    } else {
-        crate::t!("upload-history-hours-ago", n = secs / 3600)
-    }
+/// 기록 시각을 로컬 시간의 `YYYY-MM-DD HH:MM`으로 표시한다. 로컬 오프셋을 못 얻으면 UTC로 표시한다.
+fn format_timestamp(unix_secs: i64, offset: time::UtcOffset) -> String {
+    let utc = time::OffsetDateTime::from_unix_timestamp(unix_secs)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    let local = utc.to_offset(offset);
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        local.year(),
+        u8::from(local.month()),
+        local.day(),
+        local.hour(),
+        local.minute()
+    )
 }
 
 /// Esc 또는 OS 닫기 요청 시 창을 닫는다.
@@ -95,22 +101,24 @@ pub fn render_upload_history(
                 return;
             }
 
-            let now = now_unix();
+            // 로컬 오프셋은 프레임당 한 번만 구한다 (행마다 OS를 조회하지 않도록).
+            let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for entry in entries {
-                        draw_row(ui, entry, now, scale);
+                        draw_row(ui, entry, offset, scale);
                         ui.add_space(6.0 * scale);
                     }
                 });
         });
 }
 
-/// 헤더: 제목 영역 전체가 드래그 핸들이고, 오른쪽 ✕ 버튼만 닫기 동작을 가진다.
+/// 헤더: 메인 오버레이 헤더와 같은 색·라운드·버튼 크기를 쓴다. 제목 영역 전체가 드래그 핸들이고,
+/// 오른쪽 ✕ 버튼만 닫기 동작을 가진다 (드래그 영역은 버튼을 덮지 않도록 버튼 왼쪽까지만 잡는다).
 fn render_header(ui: &mut egui::Ui, open: &Arc<AtomicBool>, scale: f32) {
     let ctx = ui.ctx().clone();
-    let button_size = 20.0 * scale;
+    let button_size = 18.0 * scale;
     Frame::new()
         .fill(Theme::HEADER_BG)
         .corner_radius(CornerRadius::same((10.0 * scale) as u8))
@@ -134,14 +142,14 @@ fn render_header(ui: &mut egui::Ui, open: &Arc<AtomicBool>, scale: f32) {
 
                 let close = egui::Button::new(
                     RichText::new("✕")
-                        .color(Theme::TEXT_SECONDARY)
-                        .font(FontId::proportional(12.0 * scale)),
+                        .color(Theme::TEXT_PRIMARY)
+                        .font(FontId::proportional(10.0 * scale)),
                 )
                 .fill(Theme::SECTION_BG)
-                .stroke(Stroke::NONE)
-                .corner_radius(CornerRadius::same((4.0 * scale) as u8));
+                .corner_radius(CornerRadius::same((3.5 * scale) as u8))
+                .wrap();
                 if ui
-                    .add_sized([button_size, button_size], close)
+                    .add_sized([button_size, button_size], close.sense(Sense::click()))
                     .on_hover_text(crate::t!("upload-history-close"))
                     .clicked()
                 {
@@ -151,7 +159,7 @@ fn render_header(ui: &mut egui::Ui, open: &Arc<AtomicBool>, scale: f32) {
         });
 }
 
-fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, now: i64, scale: f32) {
+fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOffset, scale: f32) {
     Frame::new()
         .fill(Theme::SECTION_BG)
         .corner_radius(CornerRadius::same((8.0 * scale) as u8))
@@ -160,11 +168,15 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, now: i64, scale: f32
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(&entry.song_name)
-                            .color(Theme::TEXT_PRIMARY)
-                            .font(FontId::proportional(13.0 * scale))
-                            .strong(),
+                    // 곡명이 길면 잘라서 오른쪽 결과/시각 칸을 밀어내지 않는다.
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&entry.song_name)
+                                .color(Theme::TEXT_PRIMARY)
+                                .font(FontId::proportional(13.0 * scale))
+                                .strong(),
+                        )
+                        .truncate(),
                     );
                     ui.horizontal_wrapped(|ui| {
                         ui.label(
@@ -212,17 +224,23 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, now: i64, scale: f32
                     };
                     ui.vertical(|ui| {
                         ui.with_layout(Layout::top_down(Align::Max), |ui| {
-                            ui.label(
-                                RichText::new(text)
-                                    .color(color)
-                                    .font(FontId::proportional(11.0 * scale))
-                                    .strong(),
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(text)
+                                        .color(color)
+                                        .font(FontId::proportional(11.0 * scale))
+                                        .strong(),
+                                )
+                                .wrap_mode(TextWrapMode::Extend),
                             )
                             .on_hover_text(entry.message.as_str());
-                            ui.label(
-                                RichText::new(format_elapsed((now - entry.uploaded_at).max(0)))
-                                    .color(Theme::TEXT_MUTED)
-                                    .font(FontId::proportional(10.5 * scale)),
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format_timestamp(entry.uploaded_at, offset))
+                                        .color(Theme::TEXT_MUTED)
+                                        .font(FontId::proportional(10.5 * scale)),
+                                )
+                                .wrap_mode(TextWrapMode::Extend),
                             );
                         });
                     });
