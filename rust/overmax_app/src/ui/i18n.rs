@@ -125,25 +125,11 @@ macro_rules! t {
             Ja => "まだアップロード履歴がありません。"
         )
     };
-    ("upload-history-result-ok") => {
-        $crate::t_select!(
-            Ko => "완료",
-            En => "Done",
-            Ja => "完了"
-        )
-    };
     ("upload-history-result-failed") => {
         $crate::t_select!(
             Ko => "실패",
             En => "Failed",
             Ja => "失敗"
-        )
-    };
-    ("upload-history-top50-rank", rank = $rank:expr) => {
-        $crate::t_select!(
-            Ko => format!("TOP {}위 진입", $rank),
-            En => format!("Entered TOP {}", $rank),
-            Ja => format!("TOP{}位にランクイン", $rank)
         )
     };
 

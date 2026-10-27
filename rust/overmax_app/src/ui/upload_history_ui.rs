@@ -47,14 +47,14 @@ impl SharedUploadHistory {
     }
 }
 
-/// 기록 시각을 로컬 시간의 `YYYY-MM-DD HH:MM`으로 표시한다. 로컬 오프셋을 못 얻으면 UTC로 표시한다.
+/// 기록 시각을 로컬 시간의 `MM-DD HH:MM`으로 표시한다 (기록은 최근 것만 남으므로 연도는 생략).
+/// 로컬 오프셋을 못 얻으면 UTC로 표시한다.
 fn format_timestamp(unix_secs: i64, offset: time::UtcOffset) -> String {
     let utc = time::OffsetDateTime::from_unix_timestamp(unix_secs)
         .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
     let local = utc.to_offset(offset);
     format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}",
-        local.year(),
+        "{:02}-{:02} {:02}:{:02}",
         u8::from(local.month()),
         local.day(),
         local.hour(),
@@ -166,17 +166,17 @@ fn is_perfect(rate: f64) -> bool {
     rate >= 100.0 - 1e-6
 }
 
-/// 퍼펙트 배지: 강조색(TEXT_ACCENT) 알약 위에 어두운 글자를 올린다.
-fn perfect_badge(ui: &mut egui::Ui, scale: f32) {
+/// TOP N 진입 배지: 어두운 알약 위에 강조색(TEXT_ACCENT) 글자.
+fn badge(ui: &mut egui::Ui, text: &str, scale: f32) {
     Frame::new()
-        .fill(Theme::TEXT_ACCENT)
+        .fill(Theme::ROW_BG)
         .corner_radius(CornerRadius::same((4.0 * scale) as u8))
         .inner_margin(Margin::symmetric((5.0 * scale) as i8, (1.0 * scale) as i8))
         .show(ui, |ui| {
             ui.add(
                 egui::Label::new(
-                    RichText::new("PERFECT")
-                        .color(Theme::PANEL_BG)
+                    RichText::new(text)
+                        .color(Theme::TEXT_ACCENT)
                         .font(FontId::proportional(9.5 * scale))
                         .strong(),
                 )
@@ -192,8 +192,10 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
         .inner_margin(Margin::symmetric((10.0 * scale) as i8, (6.0 * scale) as i8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            // 오른쪽 결과/시각 칸의 폭을 먼저 고정하고, 왼쪽 정보는 남은 폭 안에서만 줄바꿈한다.
-            let right_w = (120.0 * scale).min(ui.available_width() * 0.4);
+            // 성공은 기본 상태라 따로 표시하지 않고, 실패만 경고색으로 드러낸다. 상세 메시지는 행 툴팁.
+            ui.response().on_hover_text(entry.message.as_str());
+            // 오른쪽 시각 칸의 폭을 먼저 고정하고, 왼쪽 정보는 남은 폭 안에서만 줄바꿈한다.
+            let right_w = (80.0 * scale).min(ui.available_width() * 0.4);
             let left_w = (ui.available_width() - right_w - ui.spacing().item_spacing.x).max(0.0);
             ui.horizontal_top(|ui| {
                 ui.allocate_ui_with_layout(
@@ -218,64 +220,41 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
                                     .color(Theme::TEXT_SECONDARY)
                                     .font(FontId::proportional(11.0 * scale)),
                             );
+                            ui.spacing_mut().item_spacing.x = 5.0 * scale;
                             ui.label(
                                 RichText::new(format!("{:.2}%", entry.rate))
-                                    .color(Theme::TEXT_ACCENT)
+                                    .color(Theme::OK)
                                     .font(FontId::proportional(11.0 * scale))
                                     .strong(),
                             );
-                            if let Some(delta) = entry.rate_delta {
+                            // 메인 오버레이 헤더와 같은 표기: Rate 바로 뒤에 P(퍼펙트) / M(맥스 콤보).
+                            if entry.is_max_combo {
+                                let sym = if is_perfect(entry.rate) { "P" } else { "M" };
                                 ui.label(
-                                    RichText::new(format!("{delta:+.2}%"))
-                                        .color(Theme::OK)
+                                    RichText::new(sym)
+                                        .color(Theme::TEXT_ACCENT)
                                         .font(FontId::proportional(11.0 * scale))
                                         .strong(),
                                 );
                             }
-                            // 퍼펙트는 맥스 콤보를 포함하므로, 둘 중 퍼펙트 배지 하나만 보여준다.
-                            if is_perfect(entry.rate) {
-                                perfect_badge(ui, scale);
-                            } else if entry.is_max_combo {
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new("MAX COMBO")
-                                            .color(Theme::OK)
-                                            .font(FontId::proportional(10.5 * scale))
-                                            .strong(),
-                                    )
-                                    .wrap_mode(TextWrapMode::Extend),
+                            // 상승폭도 헤더와 같은 색(RED)으로 표시한다.
+                            if let Some(delta) = entry.rate_delta {
+                                ui.label(
+                                    RichText::new(format!("{delta:+.2}%"))
+                                        .color(Theme::RED)
+                                        .font(FontId::proportional(11.0 * scale)),
                                 );
                             }
+                            if let Some(rank) = entry.top50_rank {
+                                badge(ui, &format!("TOP {rank}"), scale);
+                            }
                         });
-                        if let Some(rank) = entry.top50_rank {
-                            ui.label(
-                                RichText::new(crate::t!("upload-history-top50-rank", rank = rank))
-                                    .color(Theme::TEXT_ACCENT)
-                                    .font(FontId::proportional(10.5 * scale))
-                                    .strong(),
-                            );
-                        }
                     },
                 );
                 ui.allocate_ui_with_layout(
                     egui::vec2(right_w, 0.0),
                     Layout::top_down(Align::Max),
                     |ui| {
-                        let (text, color) = if entry.success {
-                            (crate::t!("upload-history-result-ok"), Theme::OK)
-                        } else {
-                            (crate::t!("upload-history-result-failed"), Theme::WARN)
-                        };
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(text)
-                                    .color(color)
-                                    .font(FontId::proportional(11.0 * scale))
-                                    .strong(),
-                            )
-                            .wrap_mode(TextWrapMode::Extend),
-                        )
-                        .on_hover_text(entry.message.as_str());
                         ui.add(
                             egui::Label::new(
                                 RichText::new(format_timestamp(entry.uploaded_at, offset))
@@ -284,6 +263,17 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
                             )
                             .wrap_mode(TextWrapMode::Extend),
                         );
+                        if !entry.success {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(crate::t!("upload-history-result-failed"))
+                                        .color(Theme::WARN)
+                                        .font(FontId::proportional(11.0 * scale))
+                                        .strong(),
+                                )
+                                .wrap_mode(TextWrapMode::Extend),
+                            );
+                        }
                     },
                 );
             });
