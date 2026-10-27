@@ -356,6 +356,10 @@ impl NativeApp {
                 }
                 let entries = history.snapshot();
                 let dragging = upload_history_ui::render_upload_history(ui, &entries, &open, scale);
+                if dragging {
+                    // 창이 커서를 따라 움직이는 동안 매 프레임 다시 그려서 위치 갱신이 끊기지 않게 한다.
+                    ui.ctx().request_repaint();
+                }
                 #[cfg(target_os = "windows")]
                 if let Ok(mut anchor) = drag_anchor.lock() {
                     platform::drag_window_by_title(&title, &mut anchor, dragging);
