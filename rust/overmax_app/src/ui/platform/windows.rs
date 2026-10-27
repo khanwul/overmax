@@ -132,7 +132,7 @@ pub fn is_position_on_screen(x: f32, y: f32) -> bool {
 }
 
 pub fn init_overlay_window_immediate() -> Option<isize> {
-    if let Some(hwnd) = find_overlay_window() {
+    if let Some(hwnd) = find_window_by_title(OVERLAY_TITLE) {
         setup_overlay_window(hwnd);
         unsafe {
             windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
@@ -269,7 +269,76 @@ unsafe extern "system" fn overlay_subclass_proc(
     DefSubclassProc(hwnd, msg, wparam, lparam)
 }
 
+const OVERLAY_TITLE: &str = "Overmax";
+
+/// 메인 오버레이 창: 비활성 툴윈도우 + 포커스 비획득 + 프레임리스 투명 스타일.
 fn setup_overlay_window(hwnd: windows_sys::Win32::Foundation::HWND) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    apply_frameless_transparent_style(hwnd, (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW) as i32);
+}
+
+/// 제목으로 찾은 보조 창(업로드 기록 등)을 메인 오버레이와 같은 프레임리스 투명 스타일로 바꾼다.
+/// 찾았으면 true를 반환한다. 창이 아직 없으면 false이므로 호출 쪽에서 다시 시도한다.
+pub fn apply_frameless_transparent_style_by_title(title: &str) -> bool {
+    match find_window_by_title(title) {
+        Some(hwnd) => {
+            apply_frameless_transparent_style(hwnd, 0);
+            true
+        }
+        None => false,
+    }
+}
+
+/// 제목으로 찾은 보조 창을 마우스 스크린 좌표 델타만큼 옮긴다. 메인 오버레이 드래그와 같은 방식이다.
+/// `anchor`는 드래그 시작 시의 (커서 x, 커서 y, 창 x, 창 y)이고, 드래그가 끝나면 None으로 돌아간다.
+pub fn drag_window_by_title(
+    title: &str,
+    anchor: &mut Option<(i32, i32, i32, i32)>,
+    dragging: bool,
+) {
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    if !dragging {
+        *anchor = None;
+        return;
+    }
+    let Some(hwnd) = find_window_by_title(title) else {
+        return;
+    };
+    unsafe {
+        let mut cursor = POINT { x: 0, y: 0 };
+        GetCursorPos(&mut cursor);
+        if anchor.is_none() {
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            GetWindowRect(hwnd, &mut rect);
+            *anchor = Some((cursor.x, cursor.y, rect.left, rect.top));
+        }
+        if let Some((start_cx, start_cy, start_wx, start_wy)) = *anchor {
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                start_wx + (cursor.x - start_cx),
+                start_wy + (cursor.y - start_cy),
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
+}
+
+/// 캡션/테두리를 없애고 레이어드 투명 + DWM 프레임 확장을 적용한다. Win10/11 공통 경로.
+/// `extra_ex_style`은 창 종류별 확장 스타일(오버레이만 NOACTIVATE/TOOLWINDOW)이다.
+fn apply_frameless_transparent_style(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    extra_ex_style: i32,
+) {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     unsafe {
         // 1. Win32 기본 스타일: 시스템 메뉴 / 캡션 버튼 (- ㅁ X) 완전 제거
@@ -289,10 +358,8 @@ fn setup_overlay_window(hwnd: windows_sys::Win32::Foundation::HWND) {
 
         // 2. Win32 확장 스타일: 비활성 툴윈도우 + 레이어드 투명
         let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-        let target_style = (style & !(WS_EX_TOPMOST as i32))
-            | WS_EX_LAYERED as i32
-            | WS_EX_NOACTIVATE as i32
-            | WS_EX_TOOLWINDOW as i32;
+        let target_style =
+            (style & !(WS_EX_TOPMOST as i32)) | WS_EX_LAYERED as i32 | extra_ex_style;
         if style != target_style {
             SetWindowLongW(hwnd, GWL_EXSTYLE, target_style);
         }
@@ -330,33 +397,35 @@ fn setup_overlay_window(hwnd: windows_sys::Win32::Foundation::HWND) {
     }
 }
 
-fn find_overlay_window() -> Option<windows_sys::Win32::Foundation::HWND> {
+fn find_window_by_title(window_title: &str) -> Option<windows_sys::Win32::Foundation::HWND> {
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    struct EnumData {
+    struct EnumData<'a> {
         target_pid: u32,
+        window_title: &'a str,
         found_hwnd: Option<HWND>,
     }
 
     let target_pid = unsafe { GetCurrentProcessId() };
     let mut data = EnumData {
         target_pid,
+        window_title,
         found_hwnd: None,
     };
 
     unsafe {
         extern "system" fn enum_callback(hwnd: HWND, lparam: isize) -> i32 {
             unsafe {
-                let data = &mut *(lparam as *mut EnumData);
+                let data = &mut *(lparam as *mut EnumData<'_>);
                 let mut pid = 0u32;
                 GetWindowThreadProcessId(hwnd, &mut pid);
                 if pid == data.target_pid {
                     let mut text = [0u16; 512];
                     let len = GetWindowTextW(hwnd, text.as_mut_ptr(), 512);
                     let title = String::from_utf16_lossy(&text[..len as usize]);
-                    if title == "Overmax" {
+                    if title == data.window_title {
                         data.found_hwnd = Some(hwnd);
                         return 0; // 즉시 중단
                     }
@@ -414,7 +483,7 @@ impl PlatformState {
 
         let hwnd = match self.win_cache.cached_hwnd {
             Some(h) => h as HWND,
-            None => match find_overlay_window() {
+            None => match find_window_by_title(OVERLAY_TITLE) {
                 Some(h) => {
                     setup_overlay_window(h);
                     self.win_cache.cached_hwnd = Some(h as isize);

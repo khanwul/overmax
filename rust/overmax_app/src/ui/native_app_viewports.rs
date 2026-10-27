@@ -3,7 +3,8 @@
 #[cfg(target_os = "windows")]
 use eframe::egui::Vec2;
 use eframe::egui::{self, RichText, ViewportBuilder, ViewportCommand};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::system::native_helpers;
 use crate::ui::debug_ui;
@@ -11,8 +12,11 @@ use crate::ui::dialog_theme::DialogTheme;
 use crate::ui::native_app::NativeApp;
 #[cfg(target_os = "windows")]
 use crate::ui::overlay_ui;
+#[cfg(target_os = "windows")]
+use crate::ui::platform;
 use crate::ui::settings_ui;
 use crate::ui::sync_ui;
+use crate::ui::upload_history_ui;
 use overmax_engine::capture::window_tracker;
 
 fn game_window_title(settings: &overmax_data::Settings) -> &str {
@@ -319,6 +323,54 @@ impl NativeApp {
         );
     }
 
+    /// 업로드 기록 창: 제목표시줄 없이 메인 오버레이와 같은 카드 룩으로 그린다 (헤더 드래그 · ✕ 닫기).
+    fn show_upload_history_viewport(&self, ctx: &egui::Context) {
+        if !self.ui_state.upload_history_open.load(Ordering::Relaxed) {
+            return;
+        }
+        let open = self.ui_state.upload_history_open.clone();
+        let history = self.upload_history.clone();
+        let scale = self.settings.get_merged().overlay().scale as f32;
+        let title = crate::t!("upload-history-title").to_string();
+        // 창이 생성된 뒤 첫 프레임에 한 번만 Win32 프레임리스/투명 스타일을 입힌다.
+        let style_applied = Arc::new(AtomicBool::new(false));
+        // 헤더 드래그는 메인 오버레이와 같이 마우스 스크린 좌표로 창을 옮긴다 (드래그 시작 앵커 보관).
+        #[cfg(target_os = "windows")]
+        let drag_anchor = Arc::new(Mutex::new(None));
+
+        ctx.show_viewport_deferred(
+            native_helpers::vp_upload_history(),
+            ViewportBuilder::default()
+                .with_title(&title)
+                .with_inner_size(upload_history_ui::WINDOW_SIZE.map(|v| v * scale))
+                .with_decorations(false)
+                .with_transparent(true)
+                .with_resizable(false)
+                .with_taskbar(true),
+            move |ui, _class| {
+                #[cfg(target_os = "windows")]
+                if !style_applied.load(Ordering::Relaxed)
+                    && platform::apply_frameless_transparent_style_by_title(&title)
+                {
+                    style_applied.store(true, Ordering::Relaxed);
+                }
+                let entries = history.snapshot();
+                let dragging = upload_history_ui::render_upload_history(ui, &entries, &open, scale);
+                if dragging {
+                    // 창이 커서를 따라 움직이는 동안 매 프레임 다시 그려서 위치 갱신이 끊기지 않게 한다.
+                    ui.ctx().request_repaint();
+                }
+                #[cfg(target_os = "windows")]
+                if let Ok(mut anchor) = drag_anchor.lock() {
+                    platform::drag_window_by_title(&title, &mut anchor, dragging);
+                }
+                #[cfg(not(target_os = "windows"))]
+                let _ = dragging;
+                upload_history_ui::close_if_requested(ui.ctx(), &open);
+            },
+        );
+    }
+
     fn show_sync_viewport(&self, ctx: &egui::Context) {
         if !self.ui_state.sync_open.load(Ordering::Relaxed) {
             return;
@@ -486,6 +538,7 @@ impl eframe::App for NativeApp {
         self.show_debug_viewport(&ctx);
         self.show_settings_viewport(&ctx);
         self.show_sync_viewport(&ctx);
+        self.show_upload_history_viewport(&ctx);
 
         self.update_platform_overlay(ui);
     }

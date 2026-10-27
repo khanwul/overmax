@@ -41,4 +41,4 @@ pub use service::recommend_provider_fetch::{
 };
 pub use service::record_manager::{RecordManager, RecordSource};
 pub use store::image_index::{ImageEntry, ImageIndexDb, ImageMatch};
-pub use store::record_db::RecordDB;
+pub use store::record_db::{RecordDB, UploadHistoryRecord, UPLOAD_HISTORY_LIMIT};

@@ -25,6 +25,7 @@ use crate::ui::debug_ui;
 use crate::ui::overlay_ui;
 use crate::ui::platform;
 use crate::ui::ui_command::UiCommand;
+use crate::ui::upload_history_ui;
 use eframe::egui;
 use overmax_engine::detector::detection_pipeline::DetectionOutput;
 use overmax_engine::detector::detection_worker;
@@ -167,6 +168,7 @@ pub struct SharedUiState {
     pub debug_open: Arc<AtomicBool>,
     pub settings_open: Arc<AtomicBool>,
     pub sync_open: Arc<AtomicBool>,
+    pub upload_history_open: Arc<AtomicBool>,
     pub scan_pending: Arc<AtomicBool>,
 }
 
@@ -184,13 +186,14 @@ pub struct SharedSyncState {
     pub steam_users: Arc<Mutex<std::collections::HashMap<String, steam_session::SteamUser>>>,
 }
 
-/// 업로드 결과: 키, 수동(quick) 업로드 여부, 상태, 메시지, 실제로 업로드한 (Rate, MAX COMBO).
+/// 업로드 결과: 키, 수동(quick) 업로드 여부, 상태, 메시지,
+/// 실제로 업로드한 (Rate, MAX COMBO, 이전 V-Archive Rate, 이전 MAX COMBO, Top-50 순위).
 pub(crate) type UploadResultMsg = (
     overmax_data::RecordKey,
     bool,
     String,
     String,
-    (f64, bool, Option<f64>, Option<bool>),
+    (f64, bool, Option<f64>, Option<bool>, Option<usize>),
 );
 
 pub(crate) struct SyncWorkerChannels {
@@ -274,6 +277,7 @@ pub struct NativeApp {
     pub(crate) settings: SharedSettings,
     pub(crate) ui_state: SharedUiState,
     pub(crate) debug_state: SharedDebugState,
+    pub(crate) upload_history: upload_history_ui::SharedUploadHistory,
     pub(crate) sync_state: SharedSyncState,
     pub(crate) log_rx: Option<Receiver<String>>,
     pub(crate) game_rect: Arc<Mutex<Option<overmax_engine::capture::window_tracker::WindowRect>>>,
@@ -382,6 +386,8 @@ impl NativeApp {
             );
         }
         let record_db = Arc::new(record_db);
+        let upload_history = upload_history_ui::SharedUploadHistory::default();
+        upload_history.replace(record_db.load_upload_history());
 
         // JSON 캐시 파일이 있다면 SQLite DB로 마이그레이션 실행
         let cache_root = paths.varchive_cache_dir();
@@ -423,6 +429,7 @@ impl NativeApp {
         let exit_requested = Arc::new(AtomicBool::new(false));
         let settings_open = Arc::new(AtomicBool::new(false));
         let sync_open = Arc::new(AtomicBool::new(false));
+        let upload_history_open = Arc::new(AtomicBool::new(false));
         let debug_open = Arc::new(AtomicBool::new(false));
 
         let sync_channels = SyncWorkerChannels::new();
@@ -505,6 +512,7 @@ impl NativeApp {
             debug_open: debug_open.clone(),
             settings_open: settings_open.clone(),
             sync_open: sync_open.clone(),
+            upload_history_open: upload_history_open.clone(),
             scan_pending: Arc::new(AtomicBool::new(false)),
         };
 
@@ -532,6 +540,7 @@ impl NativeApp {
             settings,
             ui_state,
             debug_state,
+            upload_history,
             sync_state,
             log_rx: Some(log_rx),
             game_rect: Arc::new(Mutex::new(None)),
@@ -688,7 +697,7 @@ impl NativeApp {
 
     pub(crate) fn drain_upload_results(&mut self) {
         let mut refreshed = false;
-        while let Ok((key, is_quick_upload, status, msg, (rate, mc, prev_rate, prev_mc))) =
+        while let Ok((key, is_quick_upload, status, msg, (rate, mc, prev_rate, prev_mc, rank))) =
             self.sync_channels.upload_res_rx.try_recv()
         {
             let success = status == "success";
@@ -707,10 +716,11 @@ impl NativeApp {
                 ),
             );
             // 이전 V-Archive Rate가 있을 때만 상승폭, 신규 MAX COMBO 달성 시 M 표시
+            let rate_delta = prev_rate.map(|prev| rate - prev);
             let result_msg = if success {
                 let mut tags = Vec::new();
-                if let Some(prev) = prev_rate {
-                    tags.push(format!("{:+.2}%", rate - prev));
+                if let Some(delta) = rate_delta {
+                    tags.push(format!("{delta:+.2}%"));
                 }
                 if mc && prev_mc != Some(true) {
                     tags.push("M".to_string());
@@ -731,6 +741,20 @@ impl NativeApp {
                     matched_candidate = true;
                 }
             }
+            let history_record = overmax_data::UploadHistoryRecord {
+                uploaded_at: upload_history_ui::now_unix(),
+                song_name: self.upload_song_name(key.0),
+                pattern: format!("{} {}", key.1, key.2),
+                rate,
+                rate_delta: if success { rate_delta } else { None },
+                top50_rank: if success { rank } else { None },
+                is_max_combo: mc,
+                prev_max_combo: if success { prev_mc } else { None },
+                success,
+                message: result_msg.clone(),
+            };
+            self.record_db.insert_upload_history(&history_record);
+            self.upload_history.push(history_record);
             if is_quick_upload || !matched_candidate {
                 let result_text = if success {
                     result_msg
@@ -774,6 +798,8 @@ impl NativeApp {
         }
 
         if changed {
+            self.upload_history
+                .replace(self.record_db.load_upload_history());
             debug_ui::push_log(
                 &self.debug_state.log_lines,
                 self.max_log_lines(),
@@ -842,6 +868,7 @@ impl NativeApp {
             candidate.overmax_mc,
             candidate.varchive_rate,
             candidate.varchive_mc,
+            None,
         );
 
         std::thread::spawn(move || {
@@ -891,7 +918,9 @@ impl NativeApp {
                     &candidate,
                     base_message,
                 ) {
-                    Ok(msg) => {
+                    Ok((msg, rank)) => {
+                        let (rate, mc, prev_rate, prev_mc, _) = uploaded;
+                        let uploaded = (rate, mc, prev_rate, prev_mc, rank);
                         let _ = tx.send((key, is_quick_upload, "success".into(), msg, uploaded));
                     }
                     Err(err_msg) => {
@@ -1237,7 +1266,7 @@ fn sync_varchive_cache_after_upload(
     steam: &str,
     candidate: &SyncCandidate,
     base_message: &str,
-) -> Result<String, String> {
+) -> Result<(String, Option<usize>), String> {
     let btn = button_num(candidate.button_mode.as_str());
 
     let varchive_settings = settings.varchive();
@@ -1276,12 +1305,16 @@ fn sync_varchive_cache_after_upload(
     let mut msg = base_message.to_string();
     match cache_updated {
         Ok(_) => {
-            if let Ok(Some(rank)) = record_db.get_varchive_top50_rank(
-                steam,
-                candidate.button_mode,
-                &candidate.song_id.to_string(),
-                candidate.difficulty,
-            ) {
+            let rank = record_db
+                .get_varchive_top50_rank(
+                    steam,
+                    candidate.button_mode,
+                    &candidate.song_id.to_string(),
+                    candidate.difficulty,
+                )
+                .ok()
+                .flatten();
+            if let Some(rank) = rank {
                 let place_msg = crate::t!(
                     "sys-place-achieved",
                     mode = candidate.button_mode,
@@ -1293,7 +1326,7 @@ fn sync_varchive_cache_after_upload(
                     rank_msg = &place_msg
                 );
             }
-            Ok(msg)
+            Ok((msg, rank))
         }
         Err(err_msg) => Err(err_msg),
     }

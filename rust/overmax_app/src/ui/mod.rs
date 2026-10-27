@@ -19,3 +19,4 @@ pub mod sync_ui;
 #[cfg(target_os = "windows")]
 pub mod tray_icon;
 pub mod ui_command;
+pub mod upload_history_ui;

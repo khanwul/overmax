@@ -103,6 +103,36 @@ macro_rules! t {
         }
     };
 
+    // 업로드 기록 창
+    ("upload-history-title") => {
+        $crate::t_select!(
+            Ko => "업로드 기록",
+            En => "Upload History",
+            Ja => "アップロード履歴"
+        )
+    };
+    ("upload-history-close") => {
+        $crate::t_select!(
+            Ko => "닫기",
+            En => "Close",
+            Ja => "閉じる"
+        )
+    };
+    ("upload-history-empty") => {
+        $crate::t_select!(
+            Ko => "아직 업로드 기록이 없습니다.",
+            En => "No uploads yet.",
+            Ja => "まだアップロード履歴がありません。"
+        )
+    };
+    ("upload-history-result-failed") => {
+        $crate::t_select!(
+            Ko => "실패",
+            En => "Failed",
+            Ja => "失敗"
+        )
+    };
+
     // 2) Dynamic Format Keys (Arg-based formatting)
     ("candidate-count", n = $n:expr) => {
         $crate::t_select!(
@@ -1168,6 +1198,13 @@ macro_rules! t {
         )
     };
 
+    ("tray-open-log") => {
+        $crate::t_select!(
+            Ko => "업로드 기록 열기",
+            En => "Open Upload History",
+            Ja => "アップロード履歴を開く"
+        )
+    };
     ("tray-exit") => {
         $crate::t_select!(
             Ko => "종료",

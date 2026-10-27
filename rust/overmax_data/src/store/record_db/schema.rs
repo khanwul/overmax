@@ -13,6 +13,7 @@ impl RecordDB {
             if self.create_records_table(&conn).is_ok()
                 && self.create_varchive_records_table(&conn).is_ok()
                 && self.create_play_events_table(&conn).is_ok()
+                && self.create_upload_history_table(&conn).is_ok()
             {
                 self.is_ready = self.ensure_schema(&mut conn).is_ok();
                 return self.is_ready;

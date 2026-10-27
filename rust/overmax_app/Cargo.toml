@@ -37,6 +37,7 @@ overmax-core = { path = "../overmax_core" }
 overmax-data = { path = "../overmax_data" }
 overmax_cv = { path = "../overmax_cv" }
 serde = { version = "1.0.229", features = ["derive"] }
+time = { version = "0.3.55", features = ["local-offset"] }
 serde_json = "1"
 sha2 = "0.10.8"
 zip = { version = "9.0.4", default-features = false, features = ["deflate"] }

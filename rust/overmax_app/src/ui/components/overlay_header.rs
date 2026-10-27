@@ -18,6 +18,7 @@ pub struct OverlayHeader<'a> {
     pattern_tabs: &'a [PatternTabInfo],
     settings_open: &'a Arc<AtomicBool>,
     sync_open: Option<&'a Arc<AtomicBool>>,
+    upload_history_button: bool,
     px: &'a Px,
     varchive_upload_needed: bool,
     varchive_upload_progress: Option<f32>,
@@ -41,6 +42,7 @@ impl<'a> OverlayHeader<'a> {
             pattern_tabs,
             settings_open,
             sync_open: None,
+            upload_history_button: false,
             px,
             varchive_upload_needed: false,
             varchive_upload_progress: None,
@@ -53,6 +55,12 @@ impl<'a> OverlayHeader<'a> {
 
     pub(crate) fn sync_open(mut self, sync_open: &'a Arc<AtomicBool>) -> Self {
         self.sync_open = Some(sync_open);
+        self
+    }
+
+    /// 업로드 기록 창 여는 버튼 표시 여부 (메인 오버레이 헤더에서만 켠다).
+    pub(crate) fn upload_history_button(mut self) -> Self {
+        self.upload_history_button = true;
         self
     }
 
@@ -114,6 +122,9 @@ impl<'a> OverlayHeader<'a> {
                     if self.sync_open.is_some() {
                         btn_count += 1;
                     }
+                    if self.upload_history_button {
+                        btn_count += 1;
+                    }
                     if self.varchive_upload_needed {
                         btn_count += 1;
                     }
@@ -169,6 +180,27 @@ impl<'a> OverlayHeader<'a> {
                             if response.clicked() {
                                 sync_open.store(true, Ordering::Relaxed);
                                 actions.command = Some(UiCommand::OpenSync);
+                            }
+                        }
+
+                        if self.upload_history_button {
+                            let history_text = RichText::new("📋")
+                                .color(Theme::TEXT_PRIMARY)
+                                .font(FontId::proportional(10.0 * self.px.scale));
+                            let history_btn = Button::new(history_text)
+                                .fill(Theme::SECTION_BG)
+                                .corner_radius(btn_radius)
+                                .wrap();
+                            let response = ui
+                                .add_sized(btn_size, history_btn.sense(Sense::click()))
+                                .on_hover_text(crate::t!("upload-history-title"));
+                            buttons_left_x = Some(
+                                buttons_left_x
+                                    .map(|x| x.min(response.rect.min.x))
+                                    .unwrap_or(response.rect.min.x),
+                            );
+                            if response.clicked() {
+                                actions.command = Some(UiCommand::OpenUploadHistory);
                             }
                         }
 
