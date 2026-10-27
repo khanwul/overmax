@@ -185,7 +185,13 @@ pub struct SharedSyncState {
 }
 
 /// 업로드 결과: 키, 수동(quick) 업로드 여부, 상태, 메시지, 실제로 업로드한 (Rate, MAX COMBO).
-pub(crate) type UploadResultMsg = (overmax_data::RecordKey, bool, String, String, (f64, bool));
+pub(crate) type UploadResultMsg = (
+    overmax_data::RecordKey,
+    bool,
+    String,
+    String,
+    (f64, bool, Option<f64>, Option<bool>),
+);
 
 pub(crate) struct SyncWorkerChannels {
     pub(crate) sync_rx: Receiver<Result<Vec<SyncCandidate>, String>>,
@@ -682,7 +688,7 @@ impl NativeApp {
 
     pub(crate) fn drain_upload_results(&mut self) {
         let mut refreshed = false;
-        while let Ok((key, is_quick_upload, status, msg, (rate, mc))) =
+        while let Ok((key, is_quick_upload, status, msg, (rate, mc, prev_rate, prev_mc))) =
             self.sync_channels.upload_res_rx.try_recv()
         {
             let success = status == "success";
@@ -710,7 +716,19 @@ impl NativeApp {
             }
             if is_quick_upload || !matched_candidate {
                 let result_text = if success {
-                    format!("V-Archive: {}", msg)
+                    // 이전 V-Archive Rate가 있을 때만 상승폭, 신규 MAX COMBO 달성 시 M 표시
+                    let mut tags = Vec::new();
+                    if let Some(prev) = prev_rate {
+                        tags.push(format!("{:+.2}%", rate - prev));
+                    }
+                    if mc && prev_mc != Some(true) {
+                        tags.push("M".to_string());
+                    }
+                    if tags.is_empty() {
+                        msg.clone()
+                    } else {
+                        format!("{} ({})", msg, tags.join(" "))
+                    }
                 } else {
                     crate::t!("status-varchive-failed-toast", error = &msg)
                 };
@@ -814,7 +832,12 @@ impl NativeApp {
         let account_path = account_path_for_steam(&settings, &steam);
         let tx = self.sync_channels.upload_res_tx.clone();
         let record_db = self.record_db.clone();
-        let uploaded = (candidate.overmax_rate, candidate.overmax_mc);
+        let uploaded = (
+            candidate.overmax_rate,
+            candidate.overmax_mc,
+            candidate.varchive_rate,
+            candidate.varchive_mc,
+        );
 
         std::thread::spawn(move || {
             let path = Path::new(&account_path);
