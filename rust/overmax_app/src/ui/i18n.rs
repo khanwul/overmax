@@ -1233,6 +1233,13 @@ macro_rules! t {
         )
     };
 
+    ("tray-open-log") => {
+        $crate::t_select!(
+            Ko => "로그 창 열기",
+            En => "Open Log Window",
+            Ja => "ログウィンドウを開く"
+        )
+    };
     ("tray-exit") => {
         $crate::t_select!(
             Ko => "종료",
