@@ -3,7 +3,8 @@
 #[cfg(target_os = "windows")]
 use eframe::egui::Vec2;
 use eframe::egui::{self, RichText, ViewportBuilder, ViewportCommand};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::system::native_helpers;
 use crate::ui::debug_ui;
@@ -11,6 +12,8 @@ use crate::ui::dialog_theme::DialogTheme;
 use crate::ui::native_app::NativeApp;
 #[cfg(target_os = "windows")]
 use crate::ui::overlay_ui;
+#[cfg(target_os = "windows")]
+use crate::ui::platform;
 use crate::ui::settings_ui;
 use crate::ui::sync_ui;
 use crate::ui::upload_history_ui;
@@ -328,17 +331,26 @@ impl NativeApp {
         let open = self.ui_state.upload_history_open.clone();
         let history = self.upload_history.clone();
         let scale = self.settings.get_merged().overlay().scale as f32;
+        let title = crate::t!("upload-history-title").to_string();
+        // 창이 생성된 뒤 첫 프레임에 한 번만 Win32 프레임리스/투명 스타일을 입힌다.
+        let style_applied = Arc::new(AtomicBool::new(false));
 
         ctx.show_viewport_deferred(
             native_helpers::vp_upload_history(),
             ViewportBuilder::default()
-                .with_title(crate::t!("upload-history-title"))
+                .with_title(&title)
                 .with_inner_size(upload_history_ui::WINDOW_SIZE)
                 .with_decorations(false)
                 .with_transparent(true)
-                .with_resizable(true)
+                .with_resizable(false)
                 .with_taskbar(true),
             move |ui, _class| {
+                #[cfg(target_os = "windows")]
+                if !style_applied.load(Ordering::Relaxed)
+                    && platform::apply_frameless_transparent_style_by_title(&title)
+                {
+                    style_applied.store(true, Ordering::Relaxed);
+                }
                 let entries = history.snapshot();
                 upload_history_ui::render_upload_history(ui, &entries, &open, scale);
                 upload_history_ui::close_if_requested(ui.ctx(), &open);
