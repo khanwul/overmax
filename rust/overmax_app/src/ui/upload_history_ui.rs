@@ -173,11 +173,14 @@ fn perfect_badge(ui: &mut egui::Ui, scale: f32) {
         .corner_radius(CornerRadius::same((4.0 * scale) as u8))
         .inner_margin(Margin::symmetric((5.0 * scale) as i8, (1.0 * scale) as i8))
         .show(ui, |ui| {
-            ui.label(
-                RichText::new("PERFECT")
-                    .color(Theme::PANEL_BG)
-                    .font(FontId::proportional(9.5 * scale))
-                    .strong(),
+            ui.add(
+                egui::Label::new(
+                    RichText::new("PERFECT")
+                        .color(Theme::PANEL_BG)
+                        .font(FontId::proportional(9.5 * scale))
+                        .strong(),
+                )
+                .wrap_mode(TextWrapMode::Extend),
             );
         });
 }
@@ -228,10 +231,10 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
                                         .strong(),
                                 );
                             }
+                            // 퍼펙트는 맥스 콤보를 포함하므로, 둘 중 퍼펙트 배지 하나만 보여준다.
                             if is_perfect(entry.rate) {
                                 perfect_badge(ui, scale);
-                            }
-                            if entry.is_max_combo {
+                            } else if entry.is_max_combo {
                                 ui.label(
                                     RichText::new("MAX COMBO")
                                         .color(Theme::OK)
