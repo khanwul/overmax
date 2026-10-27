@@ -193,7 +193,7 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             // 오른쪽 결과/시각 칸의 폭을 먼저 고정하고, 왼쪽 정보는 남은 폭 안에서만 줄바꿈한다.
-            let right_w = 104.0 * scale;
+            let right_w = (120.0 * scale).min(ui.available_width() * 0.4);
             let left_w = (ui.available_width() - right_w - ui.spacing().item_spacing.x).max(0.0);
             ui.horizontal_top(|ui| {
                 ui.allocate_ui_with_layout(
@@ -235,11 +235,14 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
                             if is_perfect(entry.rate) {
                                 perfect_badge(ui, scale);
                             } else if entry.is_max_combo {
-                                ui.label(
-                                    RichText::new("MAX COMBO")
-                                        .color(Theme::OK)
-                                        .font(FontId::proportional(10.5 * scale))
-                                        .strong(),
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new("MAX COMBO")
+                                            .color(Theme::OK)
+                                            .font(FontId::proportional(10.5 * scale))
+                                            .strong(),
+                                    )
+                                    .wrap_mode(TextWrapMode::Extend),
                                 );
                             }
                         });
