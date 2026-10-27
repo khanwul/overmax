@@ -200,7 +200,8 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
                     egui::vec2(left_w, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
-                        ui.set_max_width(left_w);
+                        // 내용 폭으로 줄어들면 오른쪽 칸 시작 위치가 행마다 달라지므로 폭을 고정한다.
+                        ui.set_width(left_w);
                         // 곡명이 길면 잘라서 오른쪽 칸을 밀어내지 않는다.
                         ui.add(
                             egui::Label::new(
