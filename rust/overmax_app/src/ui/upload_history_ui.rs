@@ -237,8 +237,8 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
                                         .strong(),
                                 );
                             }
-                            // 상승폭도 헤더와 같은 색(RED)으로 표시한다.
-                            if let Some(delta) = entry.rate_delta {
+                            // 상승폭도 헤더와 같은 색(RED)으로, 헤더처럼 실제로 올랐을 때만 표시한다.
+                            if let Some(delta) = entry.rate_delta.filter(|d| *d >= 0.005) {
                                 ui.label(
                                     RichText::new(format!("{delta:+.2}%"))
                                         .color(Theme::RED)
