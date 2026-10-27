@@ -749,6 +749,7 @@ impl NativeApp {
                 rate_delta: if success { rate_delta } else { None },
                 top50_rank: if success { rank } else { None },
                 is_max_combo: mc,
+                prev_max_combo: if success { prev_mc } else { None },
                 success,
                 message: result_msg.clone(),
             };
