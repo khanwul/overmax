@@ -706,29 +706,34 @@ impl NativeApp {
                     msg
                 ),
             );
+            // 이전 V-Archive Rate가 있을 때만 상승폭, 신규 MAX COMBO 달성 시 M 표시
+            let result_msg = if success {
+                let mut tags = Vec::new();
+                if let Some(prev) = prev_rate {
+                    tags.push(format!("{:+.2}%", rate - prev));
+                }
+                if mc && prev_mc != Some(true) {
+                    tags.push("M".to_string());
+                }
+                if tags.is_empty() {
+                    msg.clone()
+                } else {
+                    format!("{} ({})", msg, tags.join(" "))
+                }
+            } else {
+                msg.clone()
+            };
             let mut matched_candidate = false;
             if let Ok(mut list) = self.sync_state.candidates.lock() {
                 if let Some(c) = list.iter_mut().find(|item| item.matches_key(&key)) {
                     c.upload_status = status.clone();
-                    c.upload_message = msg.clone();
+                    c.upload_message = result_msg.clone();
                     matched_candidate = true;
                 }
             }
             if is_quick_upload || !matched_candidate {
                 let result_text = if success {
-                    // 이전 V-Archive Rate가 있을 때만 상승폭, 신규 MAX COMBO 달성 시 M 표시
-                    let mut tags = Vec::new();
-                    if let Some(prev) = prev_rate {
-                        tags.push(format!("{:+.2}%", rate - prev));
-                    }
-                    if mc && prev_mc != Some(true) {
-                        tags.push("M".to_string());
-                    }
-                    if tags.is_empty() {
-                        msg.clone()
-                    } else {
-                        format!("{} ({})", msg, tags.join(" "))
-                    }
+                    result_msg
                 } else {
                     crate::t!("status-varchive-failed-toast", error = &msg)
                 };
