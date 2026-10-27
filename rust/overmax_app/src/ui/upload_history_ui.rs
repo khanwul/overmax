@@ -161,6 +161,27 @@ fn render_header(ui: &mut egui::Ui, open: &Arc<AtomicBool>, scale: f32) -> bool 
         .inner
 }
 
+/// 퍼펙트(Rate 100.00%)인지 판정한다. 저장된 Rate는 소수 둘째 자리까지 맞춰 쓰이므로 여유 오차만 허용한다.
+fn is_perfect(rate: f64) -> bool {
+    rate >= 100.0 - 1e-6
+}
+
+/// 퍼펙트 배지: 강조색(TEXT_ACCENT) 알약 위에 어두운 글자를 올린다.
+fn perfect_badge(ui: &mut egui::Ui, scale: f32) {
+    Frame::new()
+        .fill(Theme::TEXT_ACCENT)
+        .corner_radius(CornerRadius::same((4.0 * scale) as u8))
+        .inner_margin(Margin::symmetric((5.0 * scale) as i8, (1.0 * scale) as i8))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new("PERFECT")
+                    .color(Theme::PANEL_BG)
+                    .font(FontId::proportional(9.5 * scale))
+                    .strong(),
+            );
+        });
+}
+
 fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOffset, scale: f32) {
     Frame::new()
         .fill(Theme::SECTION_BG)
@@ -206,6 +227,9 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
                                         .font(FontId::proportional(11.0 * scale))
                                         .strong(),
                                 );
+                            }
+                            if is_perfect(entry.rate) {
+                                perfect_badge(ui, scale);
                             }
                             if entry.is_max_combo {
                                 ui.label(
