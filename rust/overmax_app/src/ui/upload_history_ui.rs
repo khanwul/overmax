@@ -168,85 +168,93 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
         .inner_margin(Margin::symmetric((10.0 * scale) as i8, (6.0 * scale) as i8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    // 곡명이 길면 잘라서 오른쪽 결과/시각 칸을 밀어내지 않는다.
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(&entry.song_name)
-                                .color(Theme::TEXT_PRIMARY)
-                                .font(FontId::proportional(13.0 * scale))
-                                .strong(),
-                        )
-                        .truncate(),
-                    );
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            RichText::new(&entry.pattern)
-                                .color(Theme::TEXT_SECONDARY)
-                                .font(FontId::proportional(11.0 * scale)),
+            // 오른쪽 결과/시각 칸의 폭을 먼저 고정하고, 왼쪽 정보는 남은 폭 안에서만 줄바꿈한다.
+            let right_w = 104.0 * scale;
+            let left_w = (ui.available_width() - right_w - ui.spacing().item_spacing.x).max(0.0);
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(left_w, 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_max_width(left_w);
+                        // 곡명이 길면 잘라서 오른쪽 칸을 밀어내지 않는다.
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&entry.song_name)
+                                    .color(Theme::TEXT_PRIMARY)
+                                    .font(FontId::proportional(13.0 * scale))
+                                    .strong(),
+                            )
+                            .truncate(),
                         );
-                        ui.label(
-                            RichText::new(format!("{:.2}%", entry.rate))
-                                .color(Theme::TEXT_ACCENT)
-                                .font(FontId::proportional(11.0 * scale))
-                                .strong(),
-                        );
-                        if let Some(delta) = entry.rate_delta {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(
-                                RichText::new(format!("{delta:+.2}%"))
-                                    .color(Theme::OK)
+                                RichText::new(&entry.pattern)
+                                    .color(Theme::TEXT_SECONDARY)
+                                    .font(FontId::proportional(11.0 * scale)),
+                            );
+                            ui.label(
+                                RichText::new(format!("{:.2}%", entry.rate))
+                                    .color(Theme::TEXT_ACCENT)
                                     .font(FontId::proportional(11.0 * scale))
                                     .strong(),
                             );
-                        }
-                        if entry.is_max_combo {
+                            if let Some(delta) = entry.rate_delta {
+                                ui.label(
+                                    RichText::new(format!("{delta:+.2}%"))
+                                        .color(Theme::OK)
+                                        .font(FontId::proportional(11.0 * scale))
+                                        .strong(),
+                                );
+                            }
+                            if entry.is_max_combo {
+                                ui.label(
+                                    RichText::new("MAX COMBO")
+                                        .color(Theme::OK)
+                                        .font(FontId::proportional(10.5 * scale))
+                                        .strong(),
+                                );
+                            }
+                        });
+                        if let Some(rank) = entry.top50_rank {
                             ui.label(
-                                RichText::new("MAX COMBO")
-                                    .color(Theme::OK)
+                                RichText::new(crate::t!("upload-history-top50-rank", rank = rank))
+                                    .color(Theme::TEXT_ACCENT)
                                     .font(FontId::proportional(10.5 * scale))
                                     .strong(),
                             );
                         }
-                    });
-                    if let Some(rank) = entry.top50_rank {
-                        ui.label(
-                            RichText::new(crate::t!("upload-history-top50-rank", rank = rank))
-                                .color(Theme::TEXT_ACCENT)
-                                .font(FontId::proportional(10.5 * scale))
-                                .strong(),
-                        );
-                    }
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let (text, color) = if entry.success {
-                        (crate::t!("upload-history-result-ok"), Theme::OK)
-                    } else {
-                        (crate::t!("upload-history-result-failed"), Theme::WARN)
-                    };
-                    ui.vertical(|ui| {
-                        ui.with_layout(Layout::top_down(Align::Max), |ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(text)
-                                        .color(color)
-                                        .font(FontId::proportional(11.0 * scale))
-                                        .strong(),
-                                )
-                                .wrap_mode(TextWrapMode::Extend),
+                    },
+                );
+                ui.allocate_ui_with_layout(
+                    egui::vec2(right_w, 0.0),
+                    Layout::top_down(Align::Max),
+                    |ui| {
+                        let (text, color) = if entry.success {
+                            (crate::t!("upload-history-result-ok"), Theme::OK)
+                        } else {
+                            (crate::t!("upload-history-result-failed"), Theme::WARN)
+                        };
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(text)
+                                    .color(color)
+                                    .font(FontId::proportional(11.0 * scale))
+                                    .strong(),
                             )
-                            .on_hover_text(entry.message.as_str());
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(format_timestamp(entry.uploaded_at, offset))
-                                        .color(Theme::TEXT_MUTED)
-                                        .font(FontId::proportional(10.5 * scale)),
-                                )
-                                .wrap_mode(TextWrapMode::Extend),
-                            );
-                        });
-                    });
-                });
+                            .wrap_mode(TextWrapMode::Extend),
+                        )
+                        .on_hover_text(entry.message.as_str());
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format_timestamp(entry.uploaded_at, offset))
+                                    .color(Theme::TEXT_MUTED)
+                                    .font(FontId::proportional(10.5 * scale)),
+                            )
+                            .wrap_mode(TextWrapMode::Extend),
+                        );
+                    },
+                );
             });
         });
 }
