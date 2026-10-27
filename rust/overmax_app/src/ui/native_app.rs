@@ -186,13 +186,14 @@ pub struct SharedSyncState {
     pub steam_users: Arc<Mutex<std::collections::HashMap<String, steam_session::SteamUser>>>,
 }
 
-/// 업로드 결과: 키, 수동(quick) 업로드 여부, 상태, 메시지, 실제로 업로드한 (Rate, MAX COMBO).
+/// 업로드 결과: 키, 수동(quick) 업로드 여부, 상태, 메시지,
+/// 실제로 업로드한 (Rate, MAX COMBO, 이전 V-Archive Rate, 이전 MAX COMBO, Top-50 순위).
 pub(crate) type UploadResultMsg = (
     overmax_data::RecordKey,
     bool,
     String,
     String,
-    (f64, bool, Option<f64>, Option<bool>),
+    (f64, bool, Option<f64>, Option<bool>, Option<usize>),
 );
 
 pub(crate) struct SyncWorkerChannels {
@@ -696,7 +697,7 @@ impl NativeApp {
 
     pub(crate) fn drain_upload_results(&mut self) {
         let mut refreshed = false;
-        while let Ok((key, is_quick_upload, status, msg, (rate, mc, prev_rate, prev_mc))) =
+        while let Ok((key, is_quick_upload, status, msg, (rate, mc, prev_rate, prev_mc, rank))) =
             self.sync_channels.upload_res_rx.try_recv()
         {
             let success = status == "success";
@@ -715,10 +716,11 @@ impl NativeApp {
                 ),
             );
             // 이전 V-Archive Rate가 있을 때만 상승폭, 신규 MAX COMBO 달성 시 M 표시
+            let rate_delta = prev_rate.map(|prev| rate - prev);
             let result_msg = if success {
                 let mut tags = Vec::new();
-                if let Some(prev) = prev_rate {
-                    tags.push(format!("{:+.2}%", rate - prev));
+                if let Some(delta) = rate_delta {
+                    tags.push(format!("{delta:+.2}%"));
                 }
                 if mc && prev_mc != Some(true) {
                     tags.push("M".to_string());
@@ -744,6 +746,8 @@ impl NativeApp {
                 song_name: self.upload_song_name(key.0),
                 pattern: format!("{} {}", key.1, key.2),
                 rate,
+                rate_delta: if success { rate_delta } else { None },
+                top50_rank: if success { rank } else { None },
                 is_max_combo: mc,
                 success,
                 message: result_msg.clone(),
@@ -863,6 +867,7 @@ impl NativeApp {
             candidate.overmax_mc,
             candidate.varchive_rate,
             candidate.varchive_mc,
+            None,
         );
 
         std::thread::spawn(move || {
@@ -912,7 +917,9 @@ impl NativeApp {
                     &candidate,
                     base_message,
                 ) {
-                    Ok(msg) => {
+                    Ok((msg, rank)) => {
+                        let (rate, mc, prev_rate, prev_mc, _) = uploaded;
+                        let uploaded = (rate, mc, prev_rate, prev_mc, rank);
                         let _ = tx.send((key, is_quick_upload, "success".into(), msg, uploaded));
                     }
                     Err(err_msg) => {
@@ -1258,7 +1265,7 @@ fn sync_varchive_cache_after_upload(
     steam: &str,
     candidate: &SyncCandidate,
     base_message: &str,
-) -> Result<String, String> {
+) -> Result<(String, Option<usize>), String> {
     let btn = button_num(candidate.button_mode.as_str());
 
     let varchive_settings = settings.varchive();
@@ -1297,12 +1304,16 @@ fn sync_varchive_cache_after_upload(
     let mut msg = base_message.to_string();
     match cache_updated {
         Ok(_) => {
-            if let Ok(Some(rank)) = record_db.get_varchive_top50_rank(
-                steam,
-                candidate.button_mode,
-                &candidate.song_id.to_string(),
-                candidate.difficulty,
-            ) {
+            let rank = record_db
+                .get_varchive_top50_rank(
+                    steam,
+                    candidate.button_mode,
+                    &candidate.song_id.to_string(),
+                    candidate.difficulty,
+                )
+                .ok()
+                .flatten();
+            if let Some(rank) = rank {
                 let place_msg = crate::t!(
                     "sys-place-achieved",
                     mode = candidate.button_mode,
@@ -1314,7 +1325,7 @@ fn sync_varchive_cache_after_upload(
                     rank_msg = &place_msg
                 );
             }
-            Ok(msg)
+            Ok((msg, rank))
         }
         Err(err_msg) => Err(err_msg),
     }

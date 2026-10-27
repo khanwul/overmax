@@ -9,6 +9,10 @@ pub struct UploadHistoryRecord {
     pub song_name: String,
     pub pattern: String,
     pub rate: f64,
+    /// 이전 V-Archive Rate 대비 상승폭 (이전 기록이 없었다면 None).
+    pub rate_delta: Option<f64>,
+    /// 업로드 후 V-Archive Top-50 안의 순위 (순위 밖이면 None).
+    pub top50_rank: Option<usize>,
     pub is_max_combo: bool,
     pub success: bool,
     pub message: String,
@@ -16,6 +20,18 @@ pub struct UploadHistoryRecord {
 
 /// 사용자당 보관하는 최대 기록 수.
 pub const UPLOAD_HISTORY_LIMIT: usize = 200;
+
+/// 기존 DB에 뒤늦게 추가된 컬럼 (이름, ADD COLUMN 구문). 새 DB는 CREATE TABLE에 이미 포함된다.
+const UPLOAD_HISTORY_ADDED_COLUMNS: [(&str, &str); 2] = [
+    (
+        "rate_delta",
+        "ALTER TABLE upload_history ADD COLUMN rate_delta REAL",
+    ),
+    (
+        "top50_rank",
+        "ALTER TABLE upload_history ADD COLUMN top50_rank INTEGER",
+    ),
+];
 
 impl RecordDB {
     pub(super) fn create_upload_history_table(&self, conn: &Connection) -> Result<()> {
@@ -27,12 +43,28 @@ impl RecordDB {
                 song_name     TEXT NOT NULL,
                 pattern       TEXT NOT NULL,
                 rate          REAL NOT NULL,
+                rate_delta    REAL,
+                top50_rank    INTEGER,
                 is_max_combo  INTEGER NOT NULL DEFAULT 0,
                 success       INTEGER NOT NULL DEFAULT 0,
                 message       TEXT NOT NULL DEFAULT ''
             )",
             [],
         )?;
+
+        let existing_columns: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(upload_history)")?;
+            let names = stmt
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>>>()?;
+            names
+        };
+        for (name, ddl) in UPLOAD_HISTORY_ADDED_COLUMNS {
+            if !existing_columns.iter().any(|c| c == name) {
+                conn.execute(ddl, [])?;
+            }
+        }
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_upload_history_recent ON upload_history (steam_id, id DESC)",
             [],
@@ -54,14 +86,17 @@ impl RecordDB {
             let tx = conn.unchecked_transaction()?;
             tx.execute(
                 "INSERT INTO upload_history
-                    (steam_id, uploaded_at, song_name, pattern, rate, is_max_combo, success, message)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    (steam_id, uploaded_at, song_name, pattern, rate, rate_delta, top50_rank,
+                     is_max_combo, success, message)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     steam_id,
                     record.uploaded_at,
                     record.song_name,
                     record.pattern,
                     record.rate,
+                    record.rate_delta,
+                    record.top50_rank.map(|r| r as i64),
                     record.is_max_combo as i32,
                     record.success as i32,
                     record.message
@@ -92,7 +127,8 @@ impl RecordDB {
 
         self.with_retry(|conn| {
             let mut stmt = conn.prepare_cached(
-                "SELECT uploaded_at, song_name, pattern, rate, is_max_combo, success, message
+                "SELECT uploaded_at, song_name, pattern, rate, rate_delta, top50_rank,
+                        is_max_combo, success, message
                  FROM upload_history
                  WHERE steam_id = ?1
                  ORDER BY id DESC
@@ -104,9 +140,11 @@ impl RecordDB {
                     song_name: row.get(1)?,
                     pattern: row.get(2)?,
                     rate: row.get(3)?,
-                    is_max_combo: row.get::<_, i32>(4)? != 0,
-                    success: row.get::<_, i32>(5)? != 0,
-                    message: row.get(6)?,
+                    rate_delta: row.get(4)?,
+                    top50_rank: row.get::<_, Option<i64>>(5)?.map(|r| r as usize),
+                    is_max_combo: row.get::<_, i32>(6)? != 0,
+                    success: row.get::<_, i32>(7)? != 0,
+                    message: row.get(8)?,
                 })
             })?;
             rows.collect::<Result<Vec<_>>>()
@@ -125,6 +163,8 @@ mod tests {
             song_name: format!("song {i}"),
             pattern: "4B NM".to_string(),
             rate: 99.0,
+            rate_delta: if i.is_multiple_of(3) { Some(0.5) } else { None },
+            top50_rank: if i.is_multiple_of(5) { Some(7) } else { None },
             is_max_combo: i.is_multiple_of(2),
             success: true,
             message: format!("msg {i}"),

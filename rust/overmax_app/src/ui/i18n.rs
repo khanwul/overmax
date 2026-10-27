@@ -111,6 +111,13 @@ macro_rules! t {
             Ja => "アップロード履歴"
         )
     };
+    ("upload-history-close") => {
+        $crate::t_select!(
+            Ko => "닫기",
+            En => "Close",
+            Ja => "閉じる"
+        )
+    };
     ("upload-history-empty") => {
         $crate::t_select!(
             Ko => "아직 업로드 기록이 없습니다.",
@@ -151,6 +158,13 @@ macro_rules! t {
             Ko => format!("{}시간 전", $n),
             En => format!("{} h ago", $n),
             Ja => format!("{}時間前", $n)
+        )
+    };
+    ("upload-history-top50-rank", rank = $rank:expr) => {
+        $crate::t_select!(
+            Ko => format!("TOP {}위 진입", $rank),
+            En => format!("Entered TOP {}", $rank),
+            Ja => format!("TOP{}位にランクイン", $rank)
         )
     };
 

@@ -3,7 +3,8 @@
 
 use crate::ui::overlay_theme::Theme;
 use eframe::egui::{
-    self, Align, CornerRadius, FontId, Frame, Layout, Margin, RichText, Sense, ViewportCommand,
+    self, Align, Align2, CornerRadius, FontId, Frame, Layout, Margin, RichText, Sense, Stroke,
+    ViewportCommand,
 };
 use overmax_data::{UploadHistoryRecord, UPLOAD_HISTORY_LIMIT};
 use std::collections::VecDeque;
@@ -64,53 +65,25 @@ pub fn close_if_requested(ctx: &egui::Context, open: &Arc<AtomicBool>) {
     }
 }
 
-/// 창 본문. 헤더(제목 드래그 · ✕ 닫기)와 기록 카드 목록을 그린다.
+/// 창 본문. 창 전체를 패널 색으로 채운 뒤 헤더(제목 드래그 · ✕ 닫기)와 기록 카드 목록을 그린다.
 pub fn render_upload_history(
     ui: &mut egui::Ui,
     entries: &[UploadHistoryRecord],
     open: &Arc<AtomicBool>,
     scale: f32,
 ) {
-    let ctx = ui.ctx().clone();
+    // 내용이 짧아도 창 바닥이 검게 남지 않도록 창 전체 영역을 먼저 채운다.
+    let window_rect = ui.max_rect();
+    ui.painter().rect_filled(
+        window_rect,
+        CornerRadius::same((14.0 * scale) as u8),
+        Theme::PANEL_BG,
+    );
+
     Frame::new()
-        .fill(Theme::PANEL_BG)
-        .corner_radius(CornerRadius::same((14.0 * scale) as u8))
         .inner_margin(Margin::same((8.0 * scale) as i8))
         .show(ui, |ui| {
-            Frame::new()
-                .fill(Theme::HEADER_BG)
-                .corner_radius(CornerRadius::same((10.0 * scale) as u8))
-                .inner_margin(Margin::symmetric((12.0 * scale) as i8, (8.0 * scale) as i8))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        // 제목 라벨만 드래그 영역으로 써서 ✕ 버튼 클릭과 충돌하지 않게 한다.
-                        let title = ui.add(
-                            egui::Label::new(
-                                RichText::new(crate::t!("upload-history-title"))
-                                    .color(Theme::TEXT_PRIMARY)
-                                    .font(FontId::proportional(14.0 * scale))
-                                    .strong(),
-                            )
-                            .sense(Sense::drag()),
-                        );
-                        if title.drag_started() {
-                            ctx.send_viewport_cmd(ViewportCommand::StartDrag);
-                        }
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let close = egui::Button::new(
-                                RichText::new("✕")
-                                    .color(Theme::TEXT_SECONDARY)
-                                    .font(FontId::proportional(12.0 * scale)),
-                            )
-                            .fill(Theme::SECTION_BG)
-                            .corner_radius(CornerRadius::same((3.5 * scale) as u8));
-                            if ui.add_sized([18.0 * scale, 18.0 * scale], close).clicked() {
-                                open.store(false, Ordering::Relaxed);
-                            }
-                        });
-                    });
-                });
-
+            render_header(ui, open, scale);
             ui.add_space(6.0 * scale);
 
             if entries.is_empty() {
@@ -134,6 +107,50 @@ pub fn render_upload_history(
         });
 }
 
+/// 헤더: 제목 영역 전체가 드래그 핸들이고, 오른쪽 ✕ 버튼만 닫기 동작을 가진다.
+fn render_header(ui: &mut egui::Ui, open: &Arc<AtomicBool>, scale: f32) {
+    let ctx = ui.ctx().clone();
+    let button_size = 20.0 * scale;
+    Frame::new()
+        .fill(Theme::HEADER_BG)
+        .corner_radius(CornerRadius::same((10.0 * scale) as u8))
+        .inner_margin(Margin::symmetric((12.0 * scale) as i8, (8.0 * scale) as i8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let drag_width = (ui.available_width() - button_size).max(0.0);
+                let (drag_rect, drag) =
+                    ui.allocate_exact_size(egui::vec2(drag_width, button_size), Sense::drag());
+                ui.painter().text(
+                    drag_rect.left_center(),
+                    Align2::LEFT_CENTER,
+                    crate::t!("upload-history-title").to_string(),
+                    FontId::proportional(14.0 * scale),
+                    Theme::TEXT_PRIMARY,
+                );
+                if drag.drag_started() {
+                    ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                }
+
+                let close = egui::Button::new(
+                    RichText::new("✕")
+                        .color(Theme::TEXT_SECONDARY)
+                        .font(FontId::proportional(12.0 * scale)),
+                )
+                .fill(Theme::SECTION_BG)
+                .stroke(Stroke::NONE)
+                .corner_radius(CornerRadius::same((4.0 * scale) as u8));
+                if ui
+                    .add_sized([button_size, button_size], close)
+                    .on_hover_text(crate::t!("upload-history-close"))
+                    .clicked()
+                {
+                    open.store(false, Ordering::Relaxed);
+                }
+            });
+        });
+}
+
 fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, now: i64, scale: f32) {
     Frame::new()
         .fill(Theme::SECTION_BG)
@@ -149,7 +166,7 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, now: i64, scale: f32
                             .font(FontId::proportional(13.0 * scale))
                             .strong(),
                     );
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label(
                             RichText::new(&entry.pattern)
                                 .color(Theme::TEXT_SECONDARY)
@@ -161,6 +178,14 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, now: i64, scale: f32
                                 .font(FontId::proportional(11.0 * scale))
                                 .strong(),
                         );
+                        if let Some(delta) = entry.rate_delta {
+                            ui.label(
+                                RichText::new(format!("{delta:+.2}%"))
+                                    .color(Theme::OK)
+                                    .font(FontId::proportional(11.0 * scale))
+                                    .strong(),
+                            );
+                        }
                         if entry.is_max_combo {
                             ui.label(
                                 RichText::new("MAX COMBO")
@@ -170,6 +195,14 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, now: i64, scale: f32
                             );
                         }
                     });
+                    if let Some(rank) = entry.top50_rank {
+                        ui.label(
+                            RichText::new(crate::t!("upload-history-top50-rank", rank = rank))
+                                .color(Theme::TEXT_ACCENT)
+                                .font(FontId::proportional(10.5 * scale))
+                                .strong(),
+                        );
+                    }
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let (text, color) = if entry.success {
