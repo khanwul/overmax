@@ -21,6 +21,42 @@ pub struct UploadHistoryRecord {
     pub message: String,
 }
 
+/// 업로드 결과 표시 규칙. 토스트·동기화 목록 메시지와 업로드 기록 창이 같은 규칙을 쓰도록 여기에 둔다.
+impl UploadHistoryRecord {
+    /// 실제로 오른 경우의 상승폭만 반환한다 (표시 단위인 0.01% 미만은 변화 없음으로 본다).
+    pub fn visible_rate_delta(&self) -> Option<f64> {
+        self.rate_delta.filter(|d| *d >= 0.005)
+    }
+
+    /// MAX COMBO 표기: 퍼펙트(Rate 100.00%)면 "P", 아니면 "M". MAX COMBO가 아니면 None.
+    pub fn max_combo_symbol(&self) -> Option<&'static str> {
+        if !self.is_max_combo {
+            None
+        } else if self.rate >= 100.0 - 1e-6 {
+            Some("P")
+        } else {
+            Some("M")
+        }
+    }
+
+    /// 이번 업로드로 MAX COMBO를 새로 달았는지 (이전 기록을 모르면 새로 단 것으로 본다).
+    pub fn is_new_max_combo(&self) -> bool {
+        self.is_max_combo && self.prev_max_combo != Some(true)
+    }
+
+    /// 결과 메시지 뒤에 붙일 태그: 상승폭과 새로 단 P/M. 예: "+0.42% M"
+    pub fn result_tags(&self) -> Option<String> {
+        let mut tags = Vec::new();
+        if let Some(delta) = self.visible_rate_delta() {
+            tags.push(format!("{delta:+.2}%"));
+        }
+        if self.is_new_max_combo() {
+            tags.extend(self.max_combo_symbol().map(str::to_string));
+        }
+        (!tags.is_empty()).then(|| tags.join(" "))
+    }
+}
+
 /// 사용자당 보관하는 최대 기록 수.
 pub const UPLOAD_HISTORY_LIMIT: usize = 200;
 
@@ -180,6 +216,30 @@ mod tests {
             success: true,
             message: format!("msg {i}"),
         }
+    }
+
+    #[test]
+    fn result_tags_follow_display_rules() {
+        let mut r = sample(1);
+        r.rate = 99.42;
+        r.rate_delta = Some(0.0);
+        r.is_max_combo = true;
+        r.prev_max_combo = Some(false);
+        // 상승폭 0은 생략, 새로 단 MC만
+        assert_eq!(r.result_tags().as_deref(), Some("M"));
+
+        r.rate_delta = Some(0.42);
+        r.prev_max_combo = Some(true);
+        // 원래 MC였으면 상승폭만
+        assert_eq!(r.result_tags().as_deref(), Some("+0.42%"));
+
+        r.rate = 100.0;
+        r.prev_max_combo = None;
+        assert_eq!(r.result_tags().as_deref(), Some("+0.42% P"));
+
+        r.rate_delta = None;
+        r.is_max_combo = false;
+        assert_eq!(r.result_tags(), None);
     }
 
     #[test]

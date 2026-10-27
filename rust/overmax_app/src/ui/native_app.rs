@@ -715,24 +715,28 @@ impl NativeApp {
                     msg
                 ),
             );
-            // 이전 V-Archive Rate가 있을 때만 상승폭, 신규 MAX COMBO 달성 시 M 표시
-            let rate_delta = prev_rate.map(|prev| rate - prev);
-            let result_msg = if success {
-                let mut tags = Vec::new();
-                if let Some(delta) = rate_delta {
-                    tags.push(format!("{delta:+.2}%"));
-                }
-                if mc && prev_mc != Some(true) {
-                    tags.push("M".to_string());
-                }
-                if tags.is_empty() {
-                    msg.clone()
+            let mut history_record = overmax_data::UploadHistoryRecord {
+                uploaded_at: upload_history_ui::now_unix(),
+                song_name: self.upload_song_name(key.0),
+                pattern: format!("{} {}", key.1, key.2),
+                rate,
+                rate_delta: if success {
+                    prev_rate.map(|prev| rate - prev)
                 } else {
-                    format!("{} ({})", msg, tags.join(" "))
-                }
-            } else {
-                msg.clone()
+                    None
+                },
+                top50_rank: if success { rank } else { None },
+                is_max_combo: mc,
+                prev_max_combo: if success { prev_mc } else { None },
+                success,
+                message: msg.clone(),
             };
+            // 상승폭·P/M 태그는 업로드 기록 창과 같은 규칙(UploadHistoryRecord::result_tags)으로 붙인다.
+            let result_msg = match history_record.result_tags().filter(|_| success) {
+                Some(tags) => format!("{msg} ({tags})"),
+                None => msg.clone(),
+            };
+            history_record.message = result_msg.clone();
             let mut matched_candidate = false;
             if let Ok(mut list) = self.sync_state.candidates.lock() {
                 if let Some(c) = list.iter_mut().find(|item| item.matches_key(&key)) {
@@ -741,18 +745,6 @@ impl NativeApp {
                     matched_candidate = true;
                 }
             }
-            let history_record = overmax_data::UploadHistoryRecord {
-                uploaded_at: upload_history_ui::now_unix(),
-                song_name: self.upload_song_name(key.0),
-                pattern: format!("{} {}", key.1, key.2),
-                rate,
-                rate_delta: if success { rate_delta } else { None },
-                top50_rank: if success { rank } else { None },
-                is_max_combo: mc,
-                prev_max_combo: if success { prev_mc } else { None },
-                success,
-                message: result_msg.clone(),
-            };
             self.record_db.insert_upload_history(&history_record);
             self.upload_history.push(history_record);
             if is_quick_upload || !matched_candidate {

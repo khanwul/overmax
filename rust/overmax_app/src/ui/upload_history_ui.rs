@@ -161,11 +161,6 @@ fn render_header(ui: &mut egui::Ui, open: &Arc<AtomicBool>, scale: f32) -> bool 
         .inner
 }
 
-/// 퍼펙트(Rate 100.00%)인지 판정한다. 저장된 Rate는 소수 둘째 자리까지 맞춰 쓰이므로 여유 오차만 허용한다.
-fn is_perfect(rate: f64) -> bool {
-    rate >= 100.0 - 1e-6
-}
-
 /// TOP N 진입 배지: 어두운 알약 위에 강조색(TEXT_ACCENT) 글자.
 fn badge(ui: &mut egui::Ui, text: &str, scale: f32) {
     Frame::new()
@@ -229,12 +224,11 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
                             );
                             // 메인 오버레이 헤더와 같은 표기: Rate 바로 뒤에 P(퍼펙트) / M(맥스 콤보).
                             // 이번에 새로 단 경우만 강조색, 원래 달려 있던 경우는 헤더의 이전 기록처럼 흐린 색.
-                            if entry.is_max_combo {
-                                let sym = if is_perfect(entry.rate) { "P" } else { "M" };
-                                let color = if entry.prev_max_combo == Some(true) {
-                                    Theme::TEXT_SECONDARY
-                                } else {
+                            if let Some(sym) = entry.max_combo_symbol() {
+                                let color = if entry.is_new_max_combo() {
                                     Theme::TEXT_ACCENT
+                                } else {
+                                    Theme::TEXT_SECONDARY
                                 };
                                 ui.label(
                                     RichText::new(sym)
@@ -244,7 +238,7 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
                                 );
                             }
                             // 상승폭도 헤더와 같은 색(RED)으로, 헤더처럼 실제로 올랐을 때만 표시한다.
-                            if let Some(delta) = entry.rate_delta.filter(|d| *d >= 0.005) {
+                            if let Some(delta) = entry.visible_rate_delta() {
                                 ui.label(
                                     RichText::new(format!("{delta:+.2}%"))
                                         .color(Theme::RED)
