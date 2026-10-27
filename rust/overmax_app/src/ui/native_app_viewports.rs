@@ -342,7 +342,7 @@ impl NativeApp {
             native_helpers::vp_upload_history(),
             ViewportBuilder::default()
                 .with_title(&title)
-                .with_inner_size(upload_history_ui::WINDOW_SIZE)
+                .with_inner_size(upload_history_ui::WINDOW_SIZE.map(|v| v * scale))
                 .with_decorations(false)
                 .with_transparent(true)
                 .with_resizable(false)
