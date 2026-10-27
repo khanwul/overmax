@@ -228,11 +228,17 @@ fn draw_row(ui: &mut egui::Ui, entry: &UploadHistoryRecord, offset: time::UtcOff
                                     .strong(),
                             );
                             // 메인 오버레이 헤더와 같은 표기: Rate 바로 뒤에 P(퍼펙트) / M(맥스 콤보).
+                            // 이번에 새로 단 경우만 강조색, 원래 달려 있던 경우는 헤더의 이전 기록처럼 흐린 색.
                             if entry.is_max_combo {
                                 let sym = if is_perfect(entry.rate) { "P" } else { "M" };
+                                let color = if entry.prev_max_combo == Some(true) {
+                                    Theme::TEXT_SECONDARY
+                                } else {
+                                    Theme::TEXT_ACCENT
+                                };
                                 ui.label(
                                     RichText::new(sym)
-                                        .color(Theme::TEXT_ACCENT)
+                                        .color(color)
                                         .font(FontId::proportional(11.0 * scale))
                                         .strong(),
                                 );
