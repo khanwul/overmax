@@ -57,10 +57,17 @@ impl WindowRect {
 }
 
 #[cfg(target_os = "linux")]
+mod geometry_source;
+#[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "windows")]
 mod windows;
 
+#[cfg(target_os = "linux")]
+pub use geometry_source::{
+    select_geometry_source, spawn_game_geometry_source, GameGeometry, GameGeometrySource,
+    NoGeometrySource, SharedGameGeometry,
+};
 #[cfg(target_os = "linux")]
 pub use linux::{restore_foreground_by_title, WindowTracker};
 #[cfg(target_os = "windows")]
