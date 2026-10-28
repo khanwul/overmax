@@ -5,6 +5,7 @@
 //! Layering: `app → runtime → engine/data → core` (docs/plans/2026-10-28-app-boundary-inventory.md)
 
 pub mod auto_upload;
+pub mod derived;
 pub mod hub;
 pub mod ipc_observer;
 pub mod ipc_server;

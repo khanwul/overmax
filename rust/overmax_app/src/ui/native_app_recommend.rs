@@ -2,7 +2,7 @@ use crate::ui::debug_ui;
 use crate::ui::native_app::NativeApp;
 use crate::ui::overlay_recommend_ui::PatternTabInfo;
 use overmax_core::{Difficulty, GameSessionState};
-use overmax_data::{RecommendContext, RecommendResult};
+use overmax_data::RecommendResult;
 
 impl NativeApp {
     pub(crate) fn drain_detection_results(&mut self, ctx: &egui::Context) {
@@ -78,93 +78,13 @@ impl NativeApp {
     }
 
     fn recommend_for_state(&self, state: &GameSessionState) -> RecommendResult {
-        let Some(ctx) = &state.context else {
-            return RecommendResult::empty();
-        };
-        let rec_settings = self.settings.get_merged().recommend();
-        let smart_recommend = rec_settings.smart_recommend;
-        let target_rate = rec_settings.target_rate;
-        let strategy = overmax_data::RecommendStrategy::from_smart_flag(smart_recommend);
-        let rec_ctx = RecommendContext {
-            song_id: ctx.song_id,
-            button_mode: ctx.mode,
-            difficulty: ctx.diff,
-            floor_range: 0.0,
-            max_results: 6,
-            same_mode_only: true,
-            v_id: self.varchive_user_id(),
-            strategy,
-            target_rate,
-        };
-
-        let provider_settings = self.settings.get_merged().recommend_provider();
-        if provider_settings.enabled {
-            if let Some(url) = &provider_settings.url {
-                let clean_url = url.trim();
-                if !clean_url.is_empty() {
-                    let provider_name = provider_settings
-                        .name
-                        .as_deref()
-                        .filter(|n| !n.is_empty())
-                        .unwrap_or("external_provider");
-                    let cache_dir = self
-                        .root
-                        .join("cache")
-                        .join("recommend_provider")
-                        .join(provider_name);
-
-                    let manifest =
-                        crate::system::recommend_provider_fetch::get_cached_manifest(clean_url);
-
-                    let reader = overmax_data::ProviderCacheReader::new(
-                        provider_name,
-                        provider_name,
-                        cache_dir.clone(),
-                        manifest.vary,
-                        std::time::Duration::from_secs(manifest.ttl_sec),
-                    );
-
-                    let clean_url_clone = clean_url.to_string();
-                    let rec_ctx_clone = rec_ctx.clone();
-                    let cache_dir_clone = cache_dir.clone();
-                    let cache_key = reader.cache_key(&rec_ctx);
-                    let cache_path = cache_dir_clone.join(format!("{}.json", cache_key));
-
-                    let should_fetch = match std::fs::metadata(&cache_path) {
-                        Ok(meta) => meta
-                            .modified()
-                            .ok()
-                            .and_then(|m| m.elapsed().ok())
-                            .map(|e| e.as_secs() > 10)
-                            .unwrap_or(true),
-                        Err(_) => true,
-                    };
-
-                    if should_fetch {
-                        std::thread::spawn(move || {
-                            let manifest =
-                                crate::system::recommend_provider_fetch::fetch_manifest_blocking(
-                                    &clean_url_clone,
-                                );
-                            let _ =
-                                crate::system::recommend_provider_fetch::fetch_recommend_blocking(
-                                    &clean_url_clone,
-                                    &manifest,
-                                    &rec_ctx_clone,
-                                    &cache_path,
-                                );
-                        });
-                    }
-
-                    let composite = (*self.recommender).clone().with_provider(reader);
-                    return composite.recommend_panel(&rec_ctx).as_legacy_result();
-                }
-            }
-        }
-
-        self.recommender
-            .recommend_panel(&rec_ctx)
-            .as_legacy_result()
+        overmax_runtime::derived::recommend_for_state(
+            &self.recommender,
+            &self.settings.get_merged(),
+            &self.root,
+            self.varchive_user_id(),
+            state,
+        )
     }
 
     fn pattern_tabs_for_state(&self, state: &GameSessionState) -> Vec<PatternTabInfo> {
