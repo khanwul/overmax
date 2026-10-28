@@ -203,15 +203,15 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [x] 오버레이(app)에 좌표 입구 추가: 창 모드이고 출력 이름이 일치하는 위치 값이 있을 때만 그 rect에 스냅, 없으면 기존 수동 배치 (fail-closed)
   - [x] Windows 경로는 변경하지 않음
 
-- [x] **11.3 나머지 비-UI 모듈 순차 이동**
+- [ ] **11.3 나머지 비-UI 모듈 순차 이동**
   - [x] `overmax_runtime` crate 생성
   - [x] 이미 egui 무관하고 단위 테스트가 있는 것부터 (`auto_upload`, `transport`/`ipc_server`, `steam_session`) + `settings_writer`
   - [x] 작업 조율 메서드(`native_app.rs`의 스캔·업로드·캐시 갱신·삭제·Steam 갱신)를 runtime 서비스로 이동 — 이때 `native_helpers`의 계정 헬퍼를 함께 data로
     - 이동: 계정 조회(`overmax_data::config::varchive_account`), 업로드 판단·후보 생성(`overmax_runtime::upload_plan`), 스캔·조회·업로드 작업(`overmax_runtime::varchive_jobs`, 결과는 `UploadOutcome`으로 반환하고 다국어 문구는 app이 조립)
     - app 유지: `poll_*`/`drain_*`, `refresh_steam_session`, `handle_auto_refresh`, `on_varchive_db_updated` — 토스트·후보 목록·상태 문구·업로드 기록 창 등 UI 공유 상태를 갱신하는 연결부. 상태 소유권을 정하는 허브 2·3단계에서 다시 검토
-  - [ ] UI와 섞인 파일은 로직부 분리 → 이동 순서로 별도 커밋
-  - [ ] 각 이동 후 `cargo test --workspace` 및 Windows 수동 확인
-  - [ ] **런타임 허브 재설계** (`ui/native_app_recommend.rs`의 감지 결과 분배 루프 — 다른 프론트엔드가 재사용하려면 반드시 app 밖에 있어야 함)
+  - [x] UI와 섞인 파일은 로직부 분리 → 이동 순서로 별도 커밋
+  - [ ] 각 이동 후 `cargo test --workspace` 및 Windows 수동 확인 — 테스트는 매 커밋 Windows·Linux(WSL) 통과, **실제 앱 수동 확인(결과창 PB·IPC SSE·추천·V-Archive 업로드) 미완료**
+  - [x] **런타임 허브 재설계** (`ui/native_app_recommend.rs`의 감지 결과 분배 루프 — 다른 프론트엔드가 재사용하려면 반드시 app 밖에 있어야 함)
     - [x] 1단계: 동작 불변으로 `Runtime` 구조체로 통째 이동 (호출 스레드는 현행 UI 루프 유지) — 추천 재계산은 app에 남김 (`overmax_runtime::hub`)
     - [x] 2단계: 관찰자(IPC 발행, 자동 업로드, app 스냅샷)를 `RuntimeUpdate`를 받는 읽기 전용 trait 뒤로 하나씩 분리 — `RuntimeObserver` + `IpcObserver`. 자동 업로드는 감지 출력이 없어도 매 프레임 타이머를 진행해야 해서 관찰자가 아닌 app의 프레임 tick에 둠. app 스냅샷은 `on_detection` 반환값으로 받음
     - [x] 3단계: 커밋 체인을 `SessionTracker`(세션 경계·기록 스냅샷·PB 판정) → `RecordCommit` → `DerivedState`(추천 재계산) 순서 고정 호출로 분리 — `SessionTracker` → `commit_record` (`hub.rs`). 추천 재계산은 여러 경로에서 호출되므로 `runtime::derived::recommend_for_state` 함수로 두고 app의 `refresh_overlay_data`가 부름
