@@ -206,7 +206,9 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 - [ ] **11.3 나머지 비-UI 모듈 순차 이동**
   - [x] `overmax_runtime` crate 생성
   - [x] 이미 egui 무관하고 단위 테스트가 있는 것부터 (`auto_upload`, `transport`/`ipc_server`, `steam_session`) + `settings_writer`
-  - [ ] 작업 조율 메서드(`native_app.rs`의 스캔·업로드·캐시 갱신·삭제·Steam 갱신)를 runtime 서비스로 이동 — 이때 `native_helpers`의 계정 헬퍼를 함께 data로
+  - [x] 작업 조율 메서드(`native_app.rs`의 스캔·업로드·캐시 갱신·삭제·Steam 갱신)를 runtime 서비스로 이동 — 이때 `native_helpers`의 계정 헬퍼를 함께 data로
+    - 이동: 계정 조회(`overmax_data::config::varchive_account`), 업로드 판단·후보 생성(`overmax_runtime::upload_plan`), 스캔·조회·업로드 작업(`overmax_runtime::varchive_jobs`, 결과는 `UploadOutcome`으로 반환하고 다국어 문구는 app이 조립)
+    - app 유지: `poll_*`/`drain_*`, `refresh_steam_session`, `handle_auto_refresh`, `on_varchive_db_updated` — 토스트·후보 목록·상태 문구·업로드 기록 창 등 UI 공유 상태를 갱신하는 연결부. 상태 소유권을 정하는 허브 2·3단계에서 다시 검토
   - [ ] UI와 섞인 파일은 로직부 분리 → 이동 순서로 별도 커밋
   - [ ] 각 이동 후 `cargo test --workspace` 및 Windows 수동 확인
   - [ ] **런타임 허브 재설계** (`ui/native_app_recommend.rs`의 감지 결과 분배 루프 — 다른 프론트엔드가 재사용하려면 반드시 app 밖에 있어야 함)
