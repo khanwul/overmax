@@ -8,7 +8,6 @@ use overmax_data::{
 };
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -17,7 +16,6 @@ use crate::system::cache_update;
 use crate::system::single_instance::SingleInstanceGuard;
 use crate::system::steam_session;
 use crate::system::updater::{self, AppUpdateConfig};
-use crate::system::varchive_upload;
 use crate::ui::debug_ui;
 use crate::ui::overlay_ui;
 use crate::ui::platform;
@@ -25,11 +23,11 @@ use crate::ui::ui_command::UiCommand;
 use crate::ui::upload_history_ui;
 use eframe::egui;
 use overmax_data::config::varchive_account::{
-    account_path_for_steam, button_num, first_steam_from_settings, is_account_configured,
-    varchive_user_id,
+    account_path_for_steam, first_steam_from_settings, is_account_configured, varchive_user_id,
 };
 use overmax_engine::detector::detection_pipeline::DetectionOutput;
 use overmax_engine::detector::detection_worker;
+use overmax_runtime::varchive_jobs::{UploadCacheError, UploadOutcome};
 
 pub fn run_native_app() -> eframe::Result<()> {
     if let Err(error) = platform::init_platform_on_startup() {
@@ -828,15 +826,16 @@ impl NativeApp {
             return;
         };
         let settings = self.settings.get_merged();
-        let steam = self
-            .sync_state
-            .steam_id
-            .lock()
-            .map(|g| g.clone())
-            .unwrap_or_default();
+        let steam = self.current_steam_id();
         let account_path = account_path_for_steam(&settings, &steam);
+        let v_id = settings
+            .varchive()
+            .user_map
+            .get(&steam)
+            .and_then(|u| u.v_id.clone())
+            .unwrap_or_default();
         let tx = self.sync_channels.upload_res_tx.clone();
-        let record_db = self.record_db.clone();
+        let button_mode = candidate.button_mode;
         let uploaded = (
             candidate.overmax_rate,
             candidate.overmax_mc,
@@ -845,73 +844,18 @@ impl NativeApp {
             None,
         );
 
-        std::thread::spawn(move || {
-            let path = Path::new(&account_path);
-            if account_path.is_empty() || !path.exists() {
-                let _ = tx.send((
-                    key,
-                    is_quick_upload,
-                    "error".into(),
-                    crate::t!("status-account-path-missing").to_string(),
-                    uploaded,
-                ));
+        overmax_runtime::varchive_jobs::spawn_upload(
+            candidate,
+            account_path,
+            v_id,
+            steam,
+            self.record_db.clone(),
+            move |outcome| {
+                let (status, msg, uploaded) = upload_result_message(outcome, button_mode, uploaded);
+                let _ = tx.send((key, is_quick_upload, status.into(), msg, uploaded));
                 ctx.request_repaint();
-                return;
-            }
-            let Some(account) = varchive_upload::parse_account_file(path) else {
-                let _ = tx.send((
-                    key,
-                    is_quick_upload,
-                    "error".into(),
-                    crate::t!("status-account-parse-failed").to_string(),
-                    uploaded,
-                ));
-                ctx.request_repaint();
-                return;
-            };
-            let res = varchive_upload::upload_score_blocking(
-                &account,
-                &candidate.song_name,
-                candidate.button_mode,
-                candidate.difficulty,
-                candidate.overmax_rate,
-                candidate.overmax_mc,
-                &candidate.composer,
-            );
-            if res.success {
-                let base_message = if res.updated {
-                    crate::t!("status-updated")
-                } else {
-                    crate::t!("status-registered")
-                };
-
-                match sync_varchive_cache_after_upload(
-                    &record_db,
-                    &settings,
-                    &steam,
-                    &candidate,
-                    base_message,
-                ) {
-                    Ok((msg, rank)) => {
-                        let (rate, mc, prev_rate, prev_mc, _) = uploaded;
-                        let uploaded = (rate, mc, prev_rate, prev_mc, rank);
-                        let _ = tx.send((key, is_quick_upload, "success".into(), msg, uploaded));
-                    }
-                    Err(err_msg) => {
-                        let _ = tx.send((
-                            key,
-                            is_quick_upload,
-                            "success".into(),
-                            crate::t!("sys-upload-cache-error", error = err_msg),
-                            uploaded,
-                        ));
-                    }
-                }
-            } else {
-                let _ = tx.send((key, is_quick_upload, "error".into(), res.message, uploaded));
-            }
-            ctx.request_repaint();
-        });
+            },
+        );
     }
 
     fn current_steam_id(&self) -> String {
@@ -1102,98 +1046,128 @@ fn repaint_notify(ctx: egui::Context) -> overmax_runtime::varchive_jobs::Notify 
     Arc::new(move || ctx.request_repaint())
 }
 
-/// 업로드 성공 후 V-Archive 캐시 병합 및 Top-50 랭크 메시지를 생성한다.
-/// 캐시 갱신 실패 시 Err(사유)를 반환하되 업로드 자체는 성공임에 유의한다.
-fn sync_varchive_cache_after_upload(
-    record_db: &RecordDB,
-    settings: &overmax_data::Settings,
-    steam: &str,
-    candidate: &SyncCandidate,
-    base_message: &str,
-) -> Result<(String, Option<usize>), String> {
-    let btn = button_num(candidate.button_mode.as_str());
-
-    let varchive_settings = settings.varchive();
-    let v_id = varchive_settings
-        .user_map
-        .get(steam)
-        .and_then(|u| u.v_id.as_deref())
-        .unwrap_or("")
-        .to_string();
-
-    let cache_updated = if !v_id.is_empty() {
-        match varchive_upload::fetch_single_song_records_blocking(&v_id, btn, candidate.song_id) {
-            Ok(data) => record_db
-                .merge_varchive_fetched_records(steam, btn, &data, false)
-                .map_err(|e| crate::t!("sys-api-ok-cache-failed", error = e)),
-            Err(e) => {
-                let payload = upload_fallback_payload(candidate);
-                record_db
-                    .merge_varchive_fetched_records(steam, btn, &payload, false)
-                    .map_err(|ue| {
-                        crate::t!(
+/// 업로드 결과를 업로드 결과 채널의 (상태, 메시지, 업로드 값)으로 바꾼다.
+fn upload_result_message(
+    outcome: UploadOutcome,
+    button_mode: overmax_core::Mode,
+    uploaded: (f64, bool, Option<f64>, Option<bool>, Option<usize>),
+) -> (
+    &'static str,
+    String,
+    (f64, bool, Option<f64>, Option<bool>, Option<usize>),
+) {
+    match outcome {
+        UploadOutcome::AccountPathMissing => (
+            "error",
+            crate::t!("status-account-path-missing").to_string(),
+            uploaded,
+        ),
+        UploadOutcome::AccountParseFailed => (
+            "error",
+            crate::t!("status-account-parse-failed").to_string(),
+            uploaded,
+        ),
+        UploadOutcome::Rejected(message) => ("error", message, uploaded),
+        UploadOutcome::Uploaded { updated, cache } => {
+            let base_message = if updated {
+                crate::t!("status-updated")
+            } else {
+                crate::t!("status-registered")
+            };
+            match cache {
+                Ok(rank) => {
+                    let mut msg = base_message.to_string();
+                    if let Some(rank) = rank {
+                        let place_msg =
+                            crate::t!("sys-place-achieved", mode = button_mode, rank = rank);
+                        msg = crate::t!(
+                            "sys-upload-msg-with-rank",
+                            message = &msg,
+                            rank_msg = &place_msg
+                        );
+                    }
+                    let (rate, mc, prev_rate, prev_mc, _) = uploaded;
+                    ("success", msg, (rate, mc, prev_rate, prev_mc, rank))
+                }
+                Err(error) => {
+                    let err_msg = match error {
+                        UploadCacheError::ApiOkMergeFailed(e) => {
+                            crate::t!("sys-api-ok-cache-failed", error = e)
+                        }
+                        UploadCacheError::ApiAndFallbackFailed { api, fallback } => crate::t!(
                             "sys-api-and-fallback-failed",
-                            api_error = e,
-                            fallback_error = ue
-                        )
-                    })
+                            api_error = api,
+                            fallback_error = fallback
+                        ),
+                        UploadCacheError::FallbackFailed(e) => {
+                            crate::t!("sys-fallback-cache-failed", error = e)
+                        }
+                    };
+                    (
+                        "success",
+                        crate::t!("sys-upload-cache-error", error = err_msg),
+                        uploaded,
+                    )
+                }
             }
         }
-    } else {
-        let payload = upload_fallback_payload(candidate);
-        record_db
-            .merge_varchive_fetched_records(steam, btn, &payload, false)
-            .map_err(|e| crate::t!("sys-fallback-cache-failed", error = e))
-    };
-
-    let mut msg = base_message.to_string();
-    match cache_updated {
-        Ok(_) => {
-            let rank = record_db
-                .get_varchive_top50_rank(
-                    steam,
-                    candidate.button_mode,
-                    &candidate.song_id.to_string(),
-                    candidate.difficulty,
-                )
-                .ok()
-                .flatten();
-            if let Some(rank) = rank {
-                let place_msg = crate::t!(
-                    "sys-place-achieved",
-                    mode = candidate.button_mode,
-                    rank = rank
-                );
-                msg = crate::t!(
-                    "sys-upload-msg-with-rank",
-                    message = &msg,
-                    rank_msg = &place_msg
-                );
-            }
-            Ok((msg, rank))
-        }
-        Err(err_msg) => Err(err_msg),
     }
-}
-
-/// 오프라인/실패 폴백용 단일 곡 기록 페이로드.
-fn upload_fallback_payload(candidate: &SyncCandidate) -> serde_json::Value {
-    serde_json::json!({
-        "records": [
-            {
-                "title": candidate.song_id,
-                "pattern": candidate.difficulty,
-                "score": candidate.overmax_rate,
-                "maxCombo": candidate.overmax_mc,
-                "updatedAt": ""
-            }
-        ]
-    })
 }
 
 #[cfg(test)]
 mod tests {
+    use super::upload_result_message;
     use crate::ui::platform::native_options;
+    use overmax_runtime::varchive_jobs::{UploadCacheError, UploadOutcome};
+
+    #[test]
+    fn upload_outcome_maps_to_channel_message() {
+        let uploaded = (95.5, false, Some(90.0), Some(false), None);
+        let (status, msg, values) = upload_result_message(
+            UploadOutcome::Uploaded {
+                updated: true,
+                cache: Ok(Some(12)),
+            },
+            overmax_core::Mode::B4,
+            uploaded,
+        );
+        assert_eq!(status, "success");
+        let place = crate::t!(
+            "sys-place-achieved",
+            mode = overmax_core::Mode::B4,
+            rank = 12
+        );
+        let base = crate::t!("status-updated").to_string();
+        assert_eq!(
+            msg,
+            crate::t!(
+                "sys-upload-msg-with-rank",
+                message = &base,
+                rank_msg = &place
+            )
+        );
+        assert_eq!(values.4, Some(12));
+
+        let (status, msg, values) = upload_result_message(
+            UploadOutcome::Uploaded {
+                updated: false,
+                cache: Err(UploadCacheError::FallbackFailed("busy".into())),
+            },
+            overmax_core::Mode::B4,
+            uploaded,
+        );
+        assert_eq!(status, "success");
+        let inner = crate::t!("sys-fallback-cache-failed", error = "busy");
+        assert_eq!(msg, crate::t!("sys-upload-cache-error", error = inner));
+        assert_eq!(values, uploaded);
+
+        let (status, msg, _) = upload_result_message(
+            UploadOutcome::Rejected("denied".into()),
+            overmax_core::Mode::B4,
+            uploaded,
+        );
+        assert_eq!((status, msg.as_str()), ("error", "denied"));
+    }
 
     #[test]
     fn main_overlay_stays_out_of_taskbar() {

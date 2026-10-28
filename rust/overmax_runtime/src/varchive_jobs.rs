@@ -79,3 +79,122 @@ pub fn spawn_fetch(
         notify();
     });
 }
+
+/// 업로드 후 V-Archive 캐시 갱신 실패 사유. 업로드 자체는 성공한 상태다.
+#[derive(Clone, Debug, PartialEq)]
+pub enum UploadCacheError {
+    /// 단일 곡 API 조회는 됐으나 캐시 병합 실패.
+    ApiOkMergeFailed(String),
+    /// 단일 곡 API 조회 실패 후 폴백 기록 병합도 실패.
+    ApiAndFallbackFailed { api: String, fallback: String },
+    /// V-ID가 없어 폴백 기록을 병합했으나 실패.
+    FallbackFailed(String),
+}
+
+/// 단일 패턴 업로드 결과. 사용자에게 보일 문구는 호출자가 만든다.
+#[derive(Clone, Debug, PartialEq)]
+pub enum UploadOutcome {
+    AccountPathMissing,
+    AccountParseFailed,
+    /// V-Archive가 업로드를 거부함 (서버 메시지).
+    Rejected(String),
+    /// 업로드 성공. `cache`는 캐시 갱신 결과와 성공 시 Top-50 순위.
+    Uploaded {
+        updated: bool,
+        cache: Result<Option<usize>, UploadCacheError>,
+    },
+}
+
+/// `candidate`를 V-Archive에 업로드하고 캐시를 갱신한 뒤 `on_done`으로 결과를 넘긴다.
+pub fn spawn_upload(
+    candidate: SyncCandidate,
+    account_path: String,
+    v_id: String,
+    steam: String,
+    record_db: Arc<RecordDB>,
+    on_done: impl FnOnce(UploadOutcome) + Send + 'static,
+) {
+    std::thread::spawn(move || {
+        let path = std::path::Path::new(&account_path);
+        if account_path.is_empty() || !path.exists() {
+            return on_done(UploadOutcome::AccountPathMissing);
+        }
+        let Some(account) = varchive_api::parse_account_file(path) else {
+            return on_done(UploadOutcome::AccountParseFailed);
+        };
+        let res = varchive_api::upload_score_blocking(
+            &account,
+            &candidate.song_name,
+            candidate.button_mode,
+            candidate.difficulty,
+            candidate.overmax_rate,
+            candidate.overmax_mc,
+            &candidate.composer,
+        );
+        if !res.success {
+            return on_done(UploadOutcome::Rejected(res.message));
+        }
+        let cache = sync_varchive_cache_after_upload(&record_db, &v_id, &steam, &candidate);
+        on_done(UploadOutcome::Uploaded {
+            updated: res.updated,
+            cache,
+        });
+    });
+}
+
+/// 업로드 성공 후 V-Archive 캐시를 병합하고 Top-50 순위를 조회한다.
+fn sync_varchive_cache_after_upload(
+    record_db: &RecordDB,
+    v_id: &str,
+    steam: &str,
+    candidate: &SyncCandidate,
+) -> Result<Option<usize>, UploadCacheError> {
+    let btn = overmax_data::config::varchive_account::button_num(candidate.button_mode.as_str());
+
+    if !v_id.is_empty() {
+        match varchive_api::fetch_single_song_records_blocking(v_id, btn, candidate.song_id) {
+            Ok(data) => record_db
+                .merge_varchive_fetched_records(steam, btn, &data, false)
+                .map_err(UploadCacheError::ApiOkMergeFailed)?,
+            Err(e) => {
+                let payload = upload_fallback_payload(candidate);
+                record_db
+                    .merge_varchive_fetched_records(steam, btn, &payload, false)
+                    .map_err(|ue| UploadCacheError::ApiAndFallbackFailed {
+                        api: e,
+                        fallback: ue,
+                    })?
+            }
+        }
+    } else {
+        let payload = upload_fallback_payload(candidate);
+        record_db
+            .merge_varchive_fetched_records(steam, btn, &payload, false)
+            .map_err(UploadCacheError::FallbackFailed)?
+    };
+
+    Ok(record_db
+        .get_varchive_top50_rank(
+            steam,
+            candidate.button_mode,
+            &candidate.song_id.to_string(),
+            candidate.difficulty,
+        )
+        .ok()
+        .flatten())
+}
+
+/// 오프라인/실패 폴백용 단일 곡 기록 페이로드.
+fn upload_fallback_payload(candidate: &SyncCandidate) -> serde_json::Value {
+    serde_json::json!({
+        "records": [
+            {
+                "title": candidate.song_id,
+                "pattern": candidate.difficulty,
+                "score": candidate.overmax_rate,
+                "maxCombo": candidate.overmax_mc,
+                "updatedAt": ""
+            }
+        ]
+    })
+}
