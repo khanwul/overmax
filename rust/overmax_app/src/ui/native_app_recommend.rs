@@ -3,6 +3,7 @@ use crate::ui::native_app::NativeApp;
 use crate::ui::overlay_recommend_ui::PatternTabInfo;
 use overmax_core::{Difficulty, GameSessionState};
 use overmax_data::RecommendResult;
+use overmax_runtime::hub::RecordCommit;
 
 impl NativeApp {
     pub(crate) fn drain_detection_results(&mut self, ctx: &egui::Context) {
@@ -32,19 +33,32 @@ impl NativeApp {
                 self.session = output.state.clone();
             }
 
-            if let Some(event) =
-                self.runtime
-                    .on_detection(&output.state, output.event.as_ref(), &self.varchive_db)
+            match self
+                .runtime
+                .on_detection(&output.state, output.event.as_ref(), &self.varchive_db)
             {
-                debug_ui::push_log(
-                    &self.debug_state.log_lines,
-                    self.max_log_lines(),
-                    format!(
-                        "[Main] 기록 갱신: {}, {}, {}, {:.2}%, MaxCombo: {}",
-                        event.song_id, event.mode, event.diff, event.rate, event.is_max_combo
-                    ),
-                );
-                changed = true;
+                Some((event, RecordCommit::Updated)) => {
+                    debug_ui::push_log(
+                        &self.debug_state.log_lines,
+                        self.max_log_lines(),
+                        format!(
+                            "[Main] 기록 갱신: {}, {}, {}, {:.2}%, MaxCombo: {}",
+                            event.song_id, event.mode, event.diff, event.rate, event.is_max_combo
+                        ),
+                    );
+                    changed = true;
+                }
+                Some((event, RecordCommit::Failed(error))) => {
+                    debug_ui::push_log(
+                        &self.debug_state.log_lines,
+                        self.max_log_lines(),
+                        format!(
+                            "[Main] 기록 저장 실패: {}, {}, {}, {:.2}% - {error}",
+                            event.song_id, event.mode, event.diff, event.rate
+                        ),
+                    );
+                }
+                Some((_, RecordCommit::Unchanged)) | None => {}
             }
         }
 

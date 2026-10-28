@@ -18,8 +18,8 @@ pub struct RuntimeUpdate<'a> {
     pub event: Option<VerifiedPlayEvent>,
     /// The event improved on the record captured at result-screen entry.
     pub is_pb: bool,
-    /// The event changed the stored record.
-    pub record_updated: bool,
+    /// How storing the event went (`None` when there was no event).
+    pub commit: Option<RecordCommit>,
     /// Passed per update because the app swaps the song DB on cache updates.
     pub varchive_db: &'a VArchiveDB,
 }
@@ -63,9 +63,24 @@ impl SessionTracker {
     }
 }
 
-/// Commit chain step 2: stores the verified play. Returns whether the record changed.
-fn commit_record(record_manager: &RecordManager, event: &VerifiedPlayEvent) -> bool {
-    record_manager.handle_verified_play(event)
+/// Outcome of storing one verified play.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RecordCommit {
+    /// The stored record changed (new, improved, or a stale record was removed).
+    Updated,
+    /// Nothing to change (not an improvement, or no record to remove).
+    Unchanged,
+    /// Storing failed (DB not ready, SQLite error).
+    Failed(String),
+}
+
+/// Commit chain step 2: stores the verified play.
+fn commit_record(record_manager: &RecordManager, event: &VerifiedPlayEvent) -> RecordCommit {
+    match record_manager.try_handle_verified_play(event) {
+        Ok(true) => RecordCommit::Updated,
+        Ok(false) => RecordCommit::Unchanged,
+        Err(error) => RecordCommit::Failed(error),
+    }
 }
 
 pub struct Runtime {
@@ -93,34 +108,34 @@ impl Runtime {
         self.session.initial_record
     }
 
-    /// Applies one detection output. Returns the event when it changed the stored record.
+    /// Applies one detection output. Returns the event with its storage outcome, if any.
     pub fn on_detection(
         &mut self,
         state: &GameSessionState,
         event: Option<&VerifiedPlayEvent>,
         varchive_db: &VArchiveDB,
-    ) -> Option<VerifiedPlayEvent> {
+    ) -> Option<(VerifiedPlayEvent, RecordCommit)> {
         self.session.observe(state, &self.record_manager);
         let is_pb = event.is_some_and(|event| self.session.is_pb(event));
-        let record_updated = event.is_some_and(|event| commit_record(&self.record_manager, event));
+        let commit = event.map(|event| commit_record(&self.record_manager, event));
 
         let update = RuntimeUpdate {
             state,
             event: event.copied(),
             is_pb,
-            record_updated,
+            commit,
             varchive_db,
         };
         for observer in &mut self.observers {
             observer.on_update(&update);
         }
-        update.event.filter(|_| record_updated)
+        update.event.zip(update.commit)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Runtime, RuntimeObserver, RuntimeUpdate};
+    use super::{RecordCommit, Runtime, RuntimeObserver, RuntimeUpdate};
     use overmax_core::{
         Difficulty, GameSessionState, Mode, PlayContext, SceneType, VerifiedPlayEvent,
     };
@@ -135,7 +150,7 @@ mod tests {
                 self.0
                     .lock()
                     .unwrap()
-                    .push((update.is_pb, update.record_updated));
+                    .push((update.is_pb, update.commit == Some(RecordCommit::Updated)));
             }
         }
     }
@@ -181,11 +196,14 @@ mod tests {
         let (state, event) = result_state(95.0);
         assert_eq!(
             runtime.on_detection(&state, Some(&event), &songs),
-            Some(event)
+            Some((event, RecordCommit::Updated))
         );
         assert_eq!(runtime.session_initial_record(), Some((90.0, false)));
         // 같은 결과창에서 다시 들어온 이벤트도 진입 시점 기록(90%) 기준으로 PB다.
-        assert_eq!(runtime.on_detection(&state, Some(&event), &songs), None);
+        assert_eq!(
+            runtime.on_detection(&state, Some(&event), &songs),
+            Some((event, RecordCommit::Unchanged))
+        );
 
         assert_eq!(*seen.lock().unwrap(), vec![(true, true), (true, false)]);
     }
