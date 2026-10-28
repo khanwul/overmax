@@ -493,7 +493,10 @@ impl NativeApp {
                 ipc_cmd_tx,
                 ipc_data,
             );
-        let runtime = overmax_runtime::hub::Runtime::new(record_manager.clone(), ipc_publisher);
+        let runtime =
+            overmax_runtime::hub::Runtime::new(record_manager.clone()).with_observer(Box::new(
+                overmax_runtime::ipc_observer::IpcObserver::new(ipc_publisher),
+            ));
 
         let settings = SharedSettings {
             defaults: defaults.clone(),

@@ -1,32 +1,52 @@
-//! Runtime hub: distributes each detection output to record storage and IPC.
+//! Runtime hub: distributes each detection output to record storage and observers.
 //!
 //! Ordering invariants (docs/decisions/data_and_sync.md, 2026-10-28):
 //! - the result-screen record snapshot is taken before the verified play is stored,
 //!   so PB is judged against the record from before this play;
 //! - `PlayVerified` is published regardless of whether the DB commit succeeded.
+//!
+//! The commit chain runs first in a fixed order; observers then read the result and
+//! must not depend on each other's order.
 
-use crate::ipc_server::{update_latest_state, IpcEvent, IpcPublisher, SongMeta};
-use overmax_core::{Difficulty, GameSessionState, Mode, RecordValue, VerifiedPlayEvent};
+use overmax_core::{GameSessionState, RecordValue, VerifiedPlayEvent};
 use overmax_data::{RecordManager, RecordSource, VArchiveDB};
 use std::sync::Arc;
 
+/// Result of applying one detection output, handed to every observer.
+pub struct RuntimeUpdate<'a> {
+    pub state: &'a GameSessionState,
+    pub event: Option<VerifiedPlayEvent>,
+    /// The event improved on the record captured at result-screen entry.
+    pub is_pb: bool,
+    /// The event changed the stored record.
+    pub record_updated: bool,
+    /// Passed per update because the app swaps the song DB on cache updates.
+    pub varchive_db: &'a VArchiveDB,
+}
+
+/// Read-only consumer of runtime updates (IPC, external tools, ...).
+pub trait RuntimeObserver: Send {
+    fn on_update(&mut self, update: &RuntimeUpdate<'_>);
+}
+
 pub struct Runtime {
     record_manager: Arc<RecordManager>,
-    ipc_publisher: IpcPublisher,
     session_initial_record: Option<RecordValue>,
-    last_ipc_scene_key: Option<String>,
-    last_ipc_context_key: Option<(i32, Mode, Difficulty, u32, bool)>,
+    observers: Vec<Box<dyn RuntimeObserver>>,
 }
 
 impl Runtime {
-    pub fn new(record_manager: Arc<RecordManager>, ipc_publisher: IpcPublisher) -> Self {
+    pub fn new(record_manager: Arc<RecordManager>) -> Self {
         Self {
             record_manager,
-            ipc_publisher,
             session_initial_record: None,
-            last_ipc_scene_key: None,
-            last_ipc_context_key: None,
+            observers: Vec::new(),
         }
+    }
+
+    pub fn with_observer(mut self, observer: Box<dyn RuntimeObserver>) -> Self {
+        self.observers.push(observer);
+        self
     }
 
     /// Record of the current pattern captured on result-screen entry.
@@ -35,7 +55,6 @@ impl Runtime {
     }
 
     /// Applies one detection output. Returns the event when it changed the stored record.
-    /// `varchive_db` is passed per call because the app swaps it on cache updates.
     pub fn on_detection(
         &mut self,
         state: &GameSessionState,
@@ -58,82 +77,98 @@ impl Runtime {
             self.session_initial_record = None;
         }
 
-        // ── IPC 이벤트 발행 (관찰자 — 파이프라인/DB 경로 무변경) ──
-        // Publish current scene status; the IPC cache retains only stable song context.
-        update_latest_state(state.clone());
-        self.publish_ipc_events(state, varchive_db);
-
-        let event = event?;
         // PB 판정: 결과창 진입 시점의 기존 기록(session_initial_record) 대비 향상 여부.
         // 스냅샷이 없으면(진입 직후 첫 이벤트 등) 보수적으로 false.
-        let is_pb = self
-            .session_initial_record
-            .is_some_and(|(initial_rate, _)| event.rate > initial_rate);
-        let updated = self.record_manager.handle_verified_play(event);
-        // play_verified는 DB 커밋 성공 여부와 무관하게 확정 이벤트로 통지
-        let meta = song_meta_for(varchive_db, event.song_id, event.mode, event.diff);
-        self.ipc_publisher.publish(IpcEvent::PlayVerified {
-            song_id: event.song_id,
-            mode: event.mode.as_str().to_string(),
-            diff: event.diff.as_str().to_string(),
-            rate: event.rate,
-            is_max_combo: event.is_max_combo,
-            is_pb,
-            meta,
+        let is_pb = event.is_some_and(|event| {
+            self.session_initial_record
+                .is_some_and(|(initial_rate, _)| event.rate > initial_rate)
         });
-        updated.then_some(*event)
-    }
+        let record_updated =
+            event.is_some_and(|event| self.record_manager.handle_verified_play(event));
 
-    /// 감지 상태 → IPC 이벤트 변환 발행 (compare-and-publish 중복 억제 포함).
-    /// `scene`/`context` 조합이 직전 발행과 동일하면 아무것도 보내지 않는다.
-    fn publish_ipc_events(&mut self, state: &GameSessionState, varchive_db: &VArchiveDB) {
-        let scene_key = format!("{:?}", state.scene);
-        if self.last_ipc_scene_key.as_deref() != Some(scene_key.as_str()) {
-            self.ipc_publisher.publish(IpcEvent::SceneDetected {
-                scene: scene_key.clone(),
-            });
-            self.last_ipc_scene_key = Some(scene_key);
-        }
-
-        if !state.is_stable {
-            return;
-        }
-        let Some(ctx) = &state.context else {
-            return;
+        let update = RuntimeUpdate {
+            state,
+            event: event.copied(),
+            is_pb,
+            record_updated,
+            varchive_db,
         };
-        let ctx_key = (
-            ctx.song_id,
-            ctx.mode,
-            ctx.diff,
-            ctx.rate.to_bits(),
-            ctx.is_max_combo,
-        );
-        if self.last_ipc_context_key.as_ref() != Some(&ctx_key) {
-            let meta = song_meta_for(varchive_db, ctx.song_id, ctx.mode, ctx.diff);
-            self.ipc_publisher.publish(IpcEvent::SongDetected {
-                song_id: ctx.song_id,
-                mode: ctx.mode.as_str().to_string(),
-                diff: ctx.diff.as_str().to_string(),
-                rate: ctx.rate,
-                is_max_combo: ctx.is_max_combo,
-                meta,
-            });
-            self.last_ipc_context_key = Some(ctx_key);
+        for observer in &mut self.observers {
+            observer.on_update(&update);
         }
+        update.event.filter(|_| record_updated)
     }
 }
 
-/// 곡 메타 정보 조회 (오버레이가 이미 사용하는 VArchiveDB 값 전달 — 새 결합 없음).
-/// 조회 실패 시 빈 meta (필드 생략) — 클라이언트는 song_id로 자체 해석 가능.
-fn song_meta_for(varchive_db: &VArchiveDB, song_id: i32, mode: Mode, diff: Difficulty) -> SongMeta {
-    let Some(song) = varchive_db.search_by_id(song_id) else {
-        return Default::default();
+#[cfg(test)]
+mod tests {
+    use super::{Runtime, RuntimeObserver, RuntimeUpdate};
+    use overmax_core::{
+        Difficulty, GameSessionState, Mode, PlayContext, SceneType, VerifiedPlayEvent,
     };
-    let floor_name = song
-        .get_pattern(mode, diff)
-        .and_then(|p| p.floor_name.as_deref().map(String::from));
-    SongMeta {
-        title: Some(song.name.to_string()),
-        floor_name,
+    use overmax_data::{RecordDB, RecordManager, VArchiveDB};
+    use std::sync::{Arc, Mutex};
+
+    struct Recorder(Arc<Mutex<Vec<(bool, bool)>>>);
+
+    impl RuntimeObserver for Recorder {
+        fn on_update(&mut self, update: &RuntimeUpdate<'_>) {
+            if update.event.is_some() {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((update.is_pb, update.record_updated));
+            }
+        }
+    }
+
+    fn result_state(rate: f32) -> (GameSessionState, VerifiedPlayEvent) {
+        let ctx = PlayContext {
+            song_id: 77,
+            mode: Mode::B4,
+            diff: Difficulty::SC,
+            rate,
+            is_max_combo: false,
+        };
+        let state = GameSessionState {
+            scene: SceneType::ResultFreestyle,
+            context: Some(ctx),
+            is_stable: true,
+            is_fullscreen: true,
+        };
+        let event = VerifiedPlayEvent {
+            song_id: 77,
+            mode: Mode::B4,
+            diff: Difficulty::SC,
+            rate,
+            is_max_combo: false,
+            is_result_screen: true,
+        };
+        (state, event)
+    }
+
+    #[test]
+    fn pb_is_judged_against_record_from_before_the_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = RecordDB::new(dir.path().join("record.db"), Some("765611"));
+        assert!(db.initialize());
+        let manager = Arc::new(RecordManager::new(Arc::new(db)));
+        assert!(manager.upsert(77, Mode::B4, Difficulty::SC, 90.0, false, false));
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut runtime =
+            Runtime::new(manager.clone()).with_observer(Box::new(Recorder(seen.clone())));
+        let songs = VArchiveDB::new();
+
+        let (state, event) = result_state(95.0);
+        assert_eq!(
+            runtime.on_detection(&state, Some(&event), &songs),
+            Some(event)
+        );
+        assert_eq!(runtime.session_initial_record(), Some((90.0, false)));
+        // 같은 결과창에서 다시 들어온 이벤트도 진입 시점 기록(90%) 기준으로 PB다.
+        assert_eq!(runtime.on_detection(&state, Some(&event), &songs), None);
+
+        assert_eq!(*seen.lock().unwrap(), vec![(true, true), (true, false)]);
     }
 }
