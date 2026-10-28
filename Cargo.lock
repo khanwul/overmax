@@ -2816,6 +2816,7 @@ dependencies = [
  "overmax-core",
  "overmax-data",
  "overmax-engine",
+ "overmax-runtime",
  "overmax_cv",
  "pollster",
  "raw-window-handle",
@@ -2881,6 +2882,14 @@ dependencies = [
  "windows-future",
  "windows-sys 0.61.2",
  "x11rb",
+]
+
+[[package]]
+name = "overmax-runtime"
+version = "0.4.2"
+dependencies = [
+ "overmax-core",
+ "overmax-data",
 ]
 
 [[package]]
