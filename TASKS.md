@@ -196,11 +196,12 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [x] 결정을 `docs/decisions/` 해당 도메인 문서에 기록
   - 결과: [docs/plans/2026-10-28-app-boundary-inventory.md](docs/plans/2026-10-28-app-boundary-inventory.md) — 신규 crate는 `overmax_runtime` 하나, 앱 프로세스 관리(업데이터·단일 인스턴스·데스크톱 엔트리)는 app 유지
 
-- [ ] **11.2 Linux 창 추적 분리 (첫 이동 대상, 동작 불변)**
-  - [ ] `capture_engine/linux.rs`와 `linux_layer_overlay.rs`의 책임 범위 및 창 위치·크기·포커스 정보 흐름 정리
-  - [ ] 창 geometry trait 경계를 하위 crate에 정의, Linux 기존 경로를 그 뒤에 둠 (현재 동작 유지)
-  - [ ] Windows 구현은 경계만 맞추고 로직은 변경하지 않음
-  - [ ] 오버레이(app)는 외부 좌표를 받는 입구만 가짐. 기본값은 현재 수동 배치, 위치 정보가 없으면 기존 동작 유지 (fail-closed)
+- [ ] **11.2 Linux 게임 창 위치 소스 경계 도입 (동작 불변)**
+  - 범위 조정 (2026-10-28): #35의 원인은 창 추적 코드 위치가 아니라 "컴포지터 좌표의 게임 창 위치 소스 부재"이므로, 그 확장 지점만 만든다. foreign-toplevel 관찰 이동·Windows/Linux `WindowTracker` 통합은 하지 않음 — 근거는 [2026-10-28-linux-window-geometry-sources.md](docs/plans/2026-10-28-linux-window-geometry-sources.md) §4
+  - [x] 창 위치·크기·포커스 정보 흐름 정리 및 환경별 위치 소스 조사 (위 문서 §1~2)
+  - [ ] engine `window_tracker`에 `GameGeometrySource` trait + `SharedGameGeometry` + 소스 없음 기본 구현 추가 (계약은 위 문서 §3)
+  - [ ] 오버레이(app)에 좌표 입구 추가: 창 모드이고 출력 이름이 일치하는 위치 값이 있을 때만 그 rect에 스냅, 없으면 기존 수동 배치 (fail-closed)
+  - [ ] Windows 경로는 변경하지 않음
 
 - [ ] **11.3 나머지 비-UI 모듈 순차 이동**
   - [ ] 이미 egui 무관하고 단위 테스트가 있는 것부터 (`auto_upload`, `transport`/`ipc_server`, `steam_session`)
@@ -235,10 +236,13 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [ ] 현재 지원 조합(Proton/XWayland + wlr-layer-shell + 테두리 없는 전체화면) 기준으로 자동 배치 대상 범위 명시
   - [ ] 미지원 환경을 `docs/guides/linux-support.md`에 명시 (native Wayland, Gamescope, GNOME, X11 데스크톱)
 
-- [ ] **12.2 컴포지터별 위치 소스 조사 (검증 가능한 환경부터)**
-  - [ ] niri IPC 창 위치·크기 이벤트 조사 (기여자 환경 기준, 실제 검증은 제보 받기)
+- [ ] **12.2 컴포지터별 위치 소스 구현 (검증 가능한 환경부터)**
+  - 기준 표·우선순위: [2026-10-28-linux-window-geometry-sources.md](docs/plans/2026-10-28-linux-window-geometry-sources.md) §2
+  - [ ] Hyprland IPC 소스 (`clients -j` + socket2 이벤트)
+  - [ ] Sway IPC 소스 (`get_tree` + `window` 이벤트)
+  - [ ] niri IPC 소스 — 화면 절대 좌표 제공 여부 확인 (기여자 환경 기준, 실제 검증은 제보 받기)
   - [ ] KWin 스크립트 geometry 신호 경로 조사 및 설치·유지보수 부담 평가
-  - [ ] 좌표 변환·배율·창 장식·workspace 전환 영향 확인
+  - [ ] 좌표 변환·배율·창 장식·workspace 전환 영향 확인, 검증 결과를 기준 표에 기록
 
 - [ ] **12.3 오버레이 위치 갱신 연결**
   - [ ] 11.2의 오버레이 입구에 컴포지터별 위치 소스(하위 crate) 연결

@@ -32,12 +32,14 @@
 
 ### 3.1 창 추적 (→ 11.2)
 
-| 위치 | 내용 | 목적지 | 비고 |
+> 2026-10-28 범위 조정: 창 추적 핵심은 이미 engine에 있고, #35에 필요한 것은 컴포지터 좌표의 위치 소스뿐이라 아래 항목은 대부분 **이동하지 않는다**. 근거와 새 계약은 [2026-10-28-linux-window-geometry-sources.md](2026-10-28-linux-window-geometry-sources.md).
+
+| 위치 | 내용 | 결정 | 비고 |
 |:---|:---|:---|:---|
-| `ui/linux_layer_overlay.rs` `ForeignToplevel*`, `parse_foreign_toplevel_states`, `unique_matching_toplevel` | wlr-foreign-toplevel로 게임 창 활성/전체화면/출력 관찰 → `PresentationObservation` 발행 | engine `window_tracker` (trait 구현) | **결합 주의**: 오버레이와 같은 Wayland 연결·`wl_output` 객체를 공유함. 분리하려면 별도 연결을 열거나 출력 식별을 이름 기반으로 바꿔야 함 → 11.2에서 설계 필요 |
-| `ui/linux_layer_overlay.rs` `select_output_by_overlap`, `output_geometry` | 게임 rect와 출력 겹침으로 대상 출력 선택 | app 유지 | 오버레이 배치 로직. 좌표 입력만 받으면 됨 |
-| `ui/native_app_viewports.rs` `determine_active_state` (Windows) | `GetForegroundWindow`/PID 비교로 게임 활성 판정 | engine `window_tracker` | engine `WindowTracker::is_foreground`와 중복 여부 확인 후 통합 |
-| `ui/native_app_viewports.rs` `find_hwnd_by_title` 호출부 | 게임 hwnd 탐색 | engine (이미 있음) | 호출만 runtime/engine 쪽으로 |
+| (신규) engine `window_tracker` `GameGeometrySource` | 컴포지터 좌표의 게임 창 위치 소스 경계 | engine에 추가 | 컴포지터별 구현은 12.2 |
+| `ui/linux_layer_overlay.rs` `ForeignToplevel*` 관찰 | 게임 창 활성/전체화면/출력 관찰 → `PresentationObservation` 발행 | app 유지 | 좌표를 주지 않아 #35와 무관, 오버레이 Wayland 연결·`wl_output`에 결합. 이미 `SharedPresentationObservation`으로 engine과 분리됨 |
+| `ui/linux_layer_overlay.rs` `select_output_by_overlap`, `output_geometry` | 대상 출력 선택 | app 유지 | 오버레이 배치 로직 |
+| `ui/native_app_viewports.rs` `determine_active_state` (Windows) | 게임 활성 판정 | 보류 | engine `is_foreground`와 유사하나 Windows 경로 불변 원칙. 실제 버그·요구가 생기면 재검토 |
 | `ui/platform/windows.rs` `GetWindowRect`/`SetWindowPos` | **오버레이 자신의** 드래그 이동 | app 유지 | 창 추적 아님 |
 
 ### 3.2 런타임 허브와 작업 조율 (→ 11.3)
@@ -73,7 +75,7 @@
 
 ## 4. 이동 순서 (11.2 → 11.3)
 
-1. **11.2 창 추적**: engine `window_tracker`에 trait 경계 도입 → Windows 활성 판정 통합 → Linux foreign-toplevel 관찰 분리 (Wayland 연결 공유 문제 설계 선행)
+1. **11.2 위치 소스 경계**: engine `GameGeometrySource` trait + 소스 없음 기본 구현 → 오버레이 좌표 입구
 2. **11.3 하위 crate 이동** (각 1커밋, 동작 불변):
    1. `overmax_runtime` 빈 crate 생성
    2. data로: `steam_session` → `settings_writer` → `native_helpers` 계정 헬퍼
@@ -83,5 +85,4 @@
 
 ## 5. 열린 질문
 
-- Linux foreign-toplevel 관찰을 engine으로 옮길 때 Wayland 연결을 별도로 열지, 오버레이 연결을 공유하는 어댑터를 둘지 (11.2 설계 항목)
 - `transport`를 runtime 내부 모듈로 둘지 독립 crate로 둘지 — 현재는 내부 모듈, 외부 재사용 수요가 생기면 재검토
