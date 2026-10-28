@@ -29,9 +29,48 @@ pub trait RuntimeObserver: Send {
     fn on_update(&mut self, update: &RuntimeUpdate<'_>);
 }
 
+/// Commit chain step 1: tracks the result-screen session and judges PB.
+#[derive(Default)]
+struct SessionTracker {
+    initial_record: Option<RecordValue>,
+}
+
+impl SessionTracker {
+    /// 결과창 진입 시 현재 패턴의 기존 기록을 한 번 저장하고, 결과창을 벗어나면 비운다.
+    fn observe(&mut self, state: &GameSessionState, record_manager: &RecordManager) {
+        if state.scene.is_result() {
+            if let Some(ctx_val) = &state.context {
+                if self.initial_record.is_none() {
+                    let song_id = ctx_val.song_id;
+                    let rate_map = record_manager.get_rate_map(&[song_id]);
+                    if let Some(&(r, mc)) = rate_map.get(&(song_id, ctx_val.mode, ctx_val.diff)) {
+                        self.initial_record = Some((r, mc));
+                    } else {
+                        self.initial_record = Some((0.0, false));
+                    }
+                }
+            }
+        } else {
+            self.initial_record = None;
+        }
+    }
+
+    /// PB 판정: 결과창 진입 시점의 기존 기록(initial_record) 대비 향상 여부.
+    /// 스냅샷이 없으면(진입 직후 첫 이벤트 등) 보수적으로 false.
+    fn is_pb(&self, event: &VerifiedPlayEvent) -> bool {
+        self.initial_record
+            .is_some_and(|(initial_rate, _)| event.rate > initial_rate)
+    }
+}
+
+/// Commit chain step 2: stores the verified play. Returns whether the record changed.
+fn commit_record(record_manager: &RecordManager, event: &VerifiedPlayEvent) -> bool {
+    record_manager.handle_verified_play(event)
+}
+
 pub struct Runtime {
     record_manager: Arc<RecordManager>,
-    session_initial_record: Option<RecordValue>,
+    session: SessionTracker,
     observers: Vec<Box<dyn RuntimeObserver>>,
 }
 
@@ -39,7 +78,7 @@ impl Runtime {
     pub fn new(record_manager: Arc<RecordManager>) -> Self {
         Self {
             record_manager,
-            session_initial_record: None,
+            session: SessionTracker::default(),
             observers: Vec::new(),
         }
     }
@@ -51,7 +90,7 @@ impl Runtime {
 
     /// Record of the current pattern captured on result-screen entry.
     pub fn session_initial_record(&self) -> Option<RecordValue> {
-        self.session_initial_record
+        self.session.initial_record
     }
 
     /// Applies one detection output. Returns the event when it changed the stored record.
@@ -61,30 +100,9 @@ impl Runtime {
         event: Option<&VerifiedPlayEvent>,
         varchive_db: &VArchiveDB,
     ) -> Option<VerifiedPlayEvent> {
-        if state.scene.is_result() {
-            if let Some(ctx_val) = &state.context {
-                if self.session_initial_record.is_none() {
-                    let song_id = ctx_val.song_id;
-                    let rate_map = self.record_manager.get_rate_map(&[song_id]);
-                    if let Some(&(r, mc)) = rate_map.get(&(song_id, ctx_val.mode, ctx_val.diff)) {
-                        self.session_initial_record = Some((r, mc));
-                    } else {
-                        self.session_initial_record = Some((0.0, false));
-                    }
-                }
-            }
-        } else {
-            self.session_initial_record = None;
-        }
-
-        // PB 판정: 결과창 진입 시점의 기존 기록(session_initial_record) 대비 향상 여부.
-        // 스냅샷이 없으면(진입 직후 첫 이벤트 등) 보수적으로 false.
-        let is_pb = event.is_some_and(|event| {
-            self.session_initial_record
-                .is_some_and(|(initial_rate, _)| event.rate > initial_rate)
-        });
-        let record_updated =
-            event.is_some_and(|event| self.record_manager.handle_verified_play(event));
+        self.session.observe(state, &self.record_manager);
+        let is_pb = event.is_some_and(|event| self.session.is_pb(event));
+        let record_updated = event.is_some_and(|event| commit_record(&self.record_manager, event));
 
         let update = RuntimeUpdate {
             state,
