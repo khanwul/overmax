@@ -7,7 +7,8 @@ use crate::ui::ui_command::UiCommand;
 use overmax_core::{GameSessionState, RecordValue};
 use overmax_data::{RecommendResult, RecordManager};
 use overmax_engine::capture::window_tracker::{
-    FocusState, PresentationObservation, SharedPresentationObservation, WindowRect, WindowSnapshot,
+    FocusState, GameGeometry, PresentationObservation, SharedPresentationObservation, WindowRect,
+    WindowSnapshot,
 };
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
@@ -87,6 +88,8 @@ pub struct LinuxOverlaySnapshot {
     pub session_initial_record: Option<RecordValue>,
     pub toast: Option<ToastMessage>,
     pub window_snapshot: Option<WindowSnapshot>,
+    /// 컴포지터 좌표의 게임 창 위치 (`GameGeometrySource`). 창 모드 스냅 기준으로만 쓴다.
+    pub game_geometry: Option<GameGeometry>,
     pub capture_fatal: Option<String>,
     /// IPC `set_overlay_visibility` 로 강제된 표시 상태. `None` 이면 강제 없음.
     /// Windows 렌더 경로(`native_app_viewports.rs` 의 `overlay_on`)와 동일한 계약이다.
@@ -223,6 +226,7 @@ fn same_display_snapshot(
         && previous.session_initial_record == next.session_initial_record
         && previous.toast == next.toast
         && previous.window_snapshot == next.window_snapshot
+        && previous.game_geometry == next.game_geometry
         && previous.capture_fatal == next.capture_fatal
         && previous.overlay_visible_override == next.overlay_visible_override
 }
@@ -746,10 +750,16 @@ impl Backend {
             previous.snap != snapshot.snap
                 || previous.position != snapshot.position
                 || previous.window_snapshot != snapshot.window_snapshot
+                || previous.game_geometry != snapshot.game_geometry
                 || size_changed
         });
         let margin = if reposition {
-            panel_margin(&snapshot, size, self.output_logical_size)
+            panel_margin(
+                &snapshot,
+                size,
+                self.output_logical_size,
+                self.game_anchor(&snapshot),
+            )
         } else {
             self.margin
         };
@@ -826,7 +836,12 @@ impl Backend {
             return;
         }
         if let Some(snapshot) = &self.snapshot {
-            self.margin = panel_margin(snapshot, self.requested_size, self.output_logical_size);
+            self.margin = panel_margin(
+                snapshot,
+                self.requested_size,
+                self.output_logical_size,
+                self.game_anchor(snapshot),
+            );
         }
         if let Some(layer) = &self.layer {
             layer.wl_surface().set_buffer_scale(fallback_buffer_scale(
@@ -837,6 +852,22 @@ impl Backend {
             layer.commit();
         }
         self.needs_redraw = true;
+    }
+
+    /// Game window rect in target-output-local logical coordinates, when a geometry source
+    /// reported it for the output the overlay is on.
+    fn game_anchor(&self, snapshot: &LinuxOverlaySnapshot) -> Option<WindowRect> {
+        let geometry = snapshot.game_geometry.as_ref()?;
+        let output = self
+            .target_output
+            .as_ref()
+            .or(self.surface_output.as_ref())?;
+        let info = self.output_state.info(output)?;
+        game_anchor_on_output(
+            geometry,
+            info.name.as_deref()?,
+            output_geometry(&info)?.rect,
+        )
     }
 
     fn update_output_geometry(&mut self) -> bool {
@@ -891,7 +922,12 @@ impl Backend {
     fn create_surface(&mut self, qh: &QueueHandle<Self>) -> Result<(), String> {
         self.update_output_geometry();
         if let Some(snapshot) = &self.snapshot {
-            self.margin = panel_margin(snapshot, self.requested_size, self.output_logical_size);
+            self.margin = panel_margin(
+                snapshot,
+                self.requested_size,
+                self.output_logical_size,
+                self.game_anchor(snapshot),
+            );
         }
         let input_passthrough = self.snapshot.as_deref().is_some_and(is_hidden);
         let layer = create_layer(
@@ -1512,11 +1548,33 @@ fn uses_manual_position(snapshot: &LinuxOverlaySnapshot) -> bool {
             .is_some_and(|window| !window.fullscreen)
 }
 
+fn game_anchor_on_output(
+    geometry: &GameGeometry,
+    output_name: &str,
+    output_rect: WindowRect,
+) -> Option<WindowRect> {
+    (geometry.output == output_name && geometry.rect.is_valid()).then_some(WindowRect {
+        left: geometry.rect.left - output_rect.left,
+        top: geometry.rect.top - output_rect.top,
+        width: geometry.rect.width,
+        height: geometry.rect.height,
+    })
+}
+
 fn panel_margin(
     snapshot: &LinuxOverlaySnapshot,
     size: (u32, u32),
     output_logical_size: Option<(i32, i32)>,
+    game_anchor: Option<WindowRect>,
 ) -> (i32, i32) {
+    let windowed = snapshot
+        .window_snapshot
+        .is_some_and(|window| !window.fullscreen);
+    if windowed && snapshot.snap != "manual" {
+        if let Some(rect) = game_anchor {
+            return calculate_margin(&snapshot.snap, snapshot.position, Some(rect), size);
+        }
+    }
     let snap = if uses_manual_position(snapshot) {
         "manual"
     } else {
@@ -1993,14 +2051,15 @@ impl ProvidesRegistryState for Backend {
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_margin, output_render_scale, overlay_props, panel_margin, panel_size,
-        parse_foreign_toplevel_states, physical_size, retained_panel_size, select_committed_output,
-        select_output_by_overlap, unique_matching_toplevel, uses_manual_position,
-        ForeignToplevelState, LinuxLayerOverlayHandle, LinuxOverlaySnapshot, PublishedSnapshots,
+        calculate_margin, game_anchor_on_output, output_render_scale, overlay_props, panel_margin,
+        panel_size, parse_foreign_toplevel_states, physical_size, retained_panel_size,
+        select_committed_output, select_output_by_overlap, unique_matching_toplevel,
+        uses_manual_position, ForeignToplevelState, LinuxLayerOverlayHandle, LinuxOverlaySnapshot,
+        PublishedSnapshots,
     };
     use overmax_core::{GameSessionState, SceneType};
     use overmax_data::{RecommendResult, RecordDB, RecordManager};
-    use overmax_engine::capture::window_tracker::{WindowRect, WindowSnapshot};
+    use overmax_engine::capture::window_tracker::{GameGeometry, WindowRect, WindowSnapshot};
     use std::io::Read as _;
     use std::os::unix::net::UnixStream;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -2161,6 +2220,7 @@ mod tests {
             session_initial_record: None,
             toast: None,
             window_snapshot: None,
+            game_geometry: None,
             capture_fatal: None,
             overlay_visible_override: None,
             #[cfg(any(debug_assertions, feature = "telemetry"))]
@@ -2211,11 +2271,65 @@ mod tests {
         assert_eq!(panel_size(Some(&background)), (360, 406));
         assert!(uses_manual_position(&background));
         assert!(overlay_props(&background).is_snap_manual);
-        assert_eq!(panel_margin(&background, (360, 406), None), (25, 35));
+        assert_eq!(panel_margin(&background, (360, 406), None, None), (25, 35));
+        let anchor = game_anchor_on_output(
+            &GameGeometry {
+                output: "DP-1".to_string(),
+                rect: WindowRect {
+                    left: 2120,
+                    top: 100,
+                    width: 1280,
+                    height: 720,
+                },
+                generation: 1,
+            },
+            "DP-1",
+            WindowRect {
+                left: 1920,
+                top: 0,
+                width: 2560,
+                height: 1440,
+            },
+        );
+        assert_eq!(
+            anchor,
+            Some(WindowRect {
+                left: 200,
+                top: 100,
+                width: 1280,
+                height: 720,
+            })
+        );
+        assert_eq!(
+            panel_margin(&background, (360, 406), Some((2560, 1440)), anchor),
+            (1104, 398)
+        );
+        assert_eq!(
+            game_anchor_on_output(
+                &GameGeometry {
+                    output: "HDMI-A-1".to_string(),
+                    rect: WindowRect {
+                        left: 0,
+                        top: 0,
+                        width: 1280,
+                        height: 720,
+                    },
+                    generation: 1,
+                },
+                "DP-1",
+                WindowRect {
+                    left: 0,
+                    top: 0,
+                    width: 1920,
+                    height: 1080,
+                },
+            ),
+            None
+        );
         background.window_snapshot.as_mut().unwrap().fullscreen = true;
         assert!(!uses_manual_position(&background));
         assert_eq!(
-            panel_margin(&background, (360, 406), Some((1920, 1080))),
+            panel_margin(&background, (360, 406), Some((1920, 1080)), None),
             (1544, 658)
         );
 

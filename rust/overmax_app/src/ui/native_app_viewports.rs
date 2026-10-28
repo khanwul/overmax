@@ -662,6 +662,7 @@ impl NativeApp {
                 session_initial_record: self.session_initial_record,
                 toast: self.toast.clone(),
                 window_snapshot: self.window_snapshot,
+                game_geometry: overmax_core::lock_or_recover(&self.platform.game_geometry).clone(),
                 capture_fatal: self.capture_fatal.clone(),
                 overlay_visible_override: self.overlay_visible_override,
                 #[cfg(any(debug_assertions, feature = "telemetry"))]
