@@ -6,22 +6,22 @@
 
 ## 1. 워크스페이스 구조 및 크레이트 역할
 
-Overmax는 단일 Rust 워크스페이스로 구성되어 있으며, 5개의 내부 크레이트가 명확한 단방향 계층 구조를 갖는다.
+Overmax는 단일 Rust 워크스페이스로 구성되어 있으며, 6개의 내부 크레이트가 명확한 단방향 계층 구조를 갖는다. `overmax_runtime`은 감지 출력(`GameSessionState`, `VerifiedPlayEvent`)을 `overmax_core` 타입으로만 받으므로 `overmax_engine`에 의존하지 않는다. `overmax_app`을 제외한 크레이트는 egui/eframe에 의존하지 않는다 (계약: [module-contracts.md](../guides/module-contracts.md)).
 
 ```
-[ overmax_app ]
-      │
-      ▼
-[ overmax_engine ]
-      │
-      ▼
-[ overmax_data ]
-      │
-      ▼
-[ overmax_cv ]
-      │
-      ▼
-[ overmax_core ]
+               [ overmax_app ]
+                 │         │
+                 ▼         ▼
+     [ overmax_runtime ]  [ overmax_engine ]
+                 │         │
+                 ▼         ▼
+               [ overmax_data ]
+                     │
+                     ▼
+               [ overmax_cv ]
+                     │
+                     ▼
+               [ overmax_core ]
 ```
 
 ### 크레이트별 책임과 의존성
@@ -32,7 +32,8 @@ Overmax는 단일 Rust 워크스페이스로 구성되어 있으며, 5개의 내
 | `overmax_cv` | `rust/overmax_cv` | OpenCV 없이 구현된 순수 Rust CV 알고리즘 백엔드 (pHash, dHash, aHash, HOG, DCT, Grayscale/Resize 변환, 4x4 RGBA 히스토그램 Centroid). | `overmax_core` |
 | `overmax_data` | `rust/overmax_data` | 설정 파일 관리(`Settings`), SQLite 로컬 저장소(`RecordDB`), V-Archive API 클라이언트 및 동기화(`sync`), 자켓 피처 매칭(`JacketMatcher`), 추천 엔진(`Recommender`, `CompositeRecommender`). | `overmax_core`, `overmax_cv` |
 | `overmax_engine` | `rust/overmax_engine` | 화면 캡처 엔진(DXGI, GDI, XComposite), 윈도우 추적기(`WindowTracker`), 템플릿 매칭(`templates/`), CV 디텍션 파이프라인(`DetectionPipeline`) 및 상태 머신(`PlayState`). | `overmax_core`, `overmax_cv`, `overmax_data` |
-| `overmax_app` | `rust/overmax_app` | 앱 진입점(`main.rs`), winit/egui UI 런타임, 다중 뷰포트 관리, Windows/Linux OS 연동(DPI V2, Z-Order, 네이티브 창 드래그, 단일 인스턴스 락, 자동 업데이트), 백그라운드 워커 관리. | `overmax_core`, `overmax_cv`, `overmax_data`, `overmax_engine` (최상위) |
+| `overmax_runtime` | `rust/overmax_runtime` | UI 없는 런타임: 감지 결과 분배 허브(`hub::Runtime` — 결과창 기록 스냅샷·PB 판정 → 기록 저장 → `RuntimeObserver`), IPC 서버·관찰자, 추천 계산(`derived`), V-Archive 업로드 판단·백그라운드 작업(`upload_plan`, `varchive_jobs`), 자동 업로드 스케줄러. | `overmax_core`, `overmax_data` |
+| `overmax_app` | `rust/overmax_app` | 앱 진입점(`main.rs`), winit/egui UI 런타임, 다중 뷰포트 관리, Windows/Linux OS 연동(DPI V2, Z-Order, 네이티브 창 드래그, 단일 인스턴스 락, 자동 업데이트), 런타임 결과의 화면 반영과 다국어 문구 조립. | `overmax_core`, `overmax_cv`, `overmax_data`, `overmax_engine`, `overmax_runtime` (최상위) |
 
 ---
 
