@@ -306,7 +306,7 @@ pub struct NativeApp {
     /// 입력(`session.context` 의 rate/is_max_combo, `record_manager` 상태)이 바뀌는
     /// 모든 경로가 `refresh_overlay_data` 를 거치므로 그 안에서 갱신한다.
     pub(crate) overlay_upload_needed: bool,
-    pub(crate) auto_upload: crate::ui::auto_upload::AutoUploadScheduler,
+    pub(crate) auto_upload: overmax_runtime::auto_upload::AutoUploadScheduler,
     pub(crate) platform: platform::PlatformState,
     pub(crate) toast: Option<crate::ui::components::ToastMessage>,
     pub(crate) last_detection_output: Option<DetectionOutput>,
@@ -1015,7 +1015,7 @@ impl NativeApp {
         }
 
         let settings = self.settings.get_merged().varchive().auto_upload;
-        let obs = crate::ui::auto_upload::AutoUploadObservation {
+        let obs = overmax_runtime::auto_upload::AutoUploadObservation {
             scene: self.session.scene,
             stable_context,
             eligible: self.overlay_upload_needed && self.is_varchive_account_configured(),
