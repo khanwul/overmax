@@ -1,9 +1,9 @@
 //! Overmax IPC Service & Domain RPC Dispatcher.
 //!
 //! Exposes real-time game events over SSE (`/events`) and query/control capabilities
-//! over JSON-RPC 2.0 (`/rpc`) via the pure `system::transport` loopback engine.
+//! over JSON-RPC 2.0 (`/rpc`) via the pure `transport` loopback engine.
 
-use crate::system::transport::{
+use crate::transport::{
     format_sse_frame as transport_format_sse, now_ms, spawn_loopback_service, LoopbackServerConfig,
     TransportHandle,
 };
