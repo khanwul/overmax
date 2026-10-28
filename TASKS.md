@@ -175,7 +175,7 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [ ] 배경: 선곡 화면 `rate_cache`가 체크섬(±50) 기반으로 값을 유지하므로, 오인식 1회가 안정화 이력(5프레임) 전체에 복제되어 `Unplayed(0.0)` 이벤트 → 로컬 기록 삭제(`RecordManager::handle_verified_play`)로 이어질 수 있음. (결과창은 7샘플 median으로 방어하지만 선곡 화면에는 대응 장치 없음)
   - [x] 오탐 여부 1차 측정 (2026-10-08, 녹화 영상 재생 기반 debug 빌드, `[VerifiedEvent]` 로그): 선곡 화면 이벤트 15건 중 오탐 0건 (rate 검출 2건은 로컬 기록과 일치, `0.00%` 13건은 기록 없음 또는 게임 화면도 0.00%). 표본이 작고 라이브 캡처가 아니므로 결론은 "증거 없음"이며 안전을 증명한 것은 아님
   - [ ] (보류) 방어 로직 도입: 오탐 증거가 없어 근거 없는 땜질을 피하기 위해 보류. 실플레이 라이브 로그에서 기록이 있는 패턴이 선곡 화면 `Rate: 0.00%`로 확정되는 사례가 확인되면 재개. 후보: 삭제 조건 강화(미플레이 지속 시간) / 독립 샘플 검증. 구조적 약점은 그대로임: `(score, rate) = (None, None)`이 `Unplayed`로 처리되어 "읽기 실패"와 "기록 없음"이 구분되지 않음 (`play_state.rs` `process_rate_detection`)
-  - [ ] 관련: `handle_verified_play`가 실패(DB busy 등)와 "변경 없음"을 모두 `false`로 반환해, 이벤트 1회 방출 구조에서는 실패 재시도가 불가함 — 반환값 의미 분리 검토
+  - [ ] 관련: `handle_verified_play`가 실패(DB busy 등)와 "변경 없음"을 모두 `false`로 반환해, 이벤트 1회 방출 구조에서는 실패 재시도가 불가함 — 반환값 의미 분리는 완료(11.3, `try_handle_verified_play` / `RecordCommit::Failed`), 재시도 정책은 미정
 
 ---
 
@@ -203,7 +203,7 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [x] 오버레이(app)에 좌표 입구 추가: 창 모드이고 출력 이름이 일치하는 위치 값이 있을 때만 그 rect에 스냅, 없으면 기존 수동 배치 (fail-closed)
   - [x] Windows 경로는 변경하지 않음
 
-- [ ] **11.3 나머지 비-UI 모듈 순차 이동**
+- [x] **11.3 나머지 비-UI 모듈 순차 이동**
   - [x] `overmax_runtime` crate 생성
   - [x] 이미 egui 무관하고 단위 테스트가 있는 것부터 (`auto_upload`, `transport`/`ipc_server`, `steam_session`) + `settings_writer`
   - [x] 작업 조율 메서드(`native_app.rs`의 스캔·업로드·캐시 갱신·삭제·Steam 갱신)를 runtime 서비스로 이동 — 이때 `native_helpers`의 계정 헬퍼를 함께 data로
@@ -216,7 +216,7 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
     - [x] 2단계: 관찰자(IPC 발행, 자동 업로드, app 스냅샷)를 `RuntimeUpdate`를 받는 읽기 전용 trait 뒤로 하나씩 분리 — `RuntimeObserver` + `IpcObserver`. 자동 업로드는 감지 출력이 없어도 매 프레임 타이머를 진행해야 해서 관찰자가 아닌 app의 프레임 tick에 둠. app 스냅샷은 `on_detection` 반환값으로 받음
     - [x] 3단계: 커밋 체인을 `SessionTracker`(세션 경계·기록 스냅샷·PB 판정) → `RecordCommit` → `DerivedState`(추천 재계산) 순서 고정 호출로 분리 — `SessionTracker` → `commit_record` (`hub.rs`). 추천 재계산은 여러 경로에서 호출되므로 `runtime::derived::recommend_for_state` 함수로 두고 app의 `refresh_overlay_data`가 부름
     - [x] 순서 불변식 유지: PB 판정은 기록 저장 전, `PlayVerified`는 DB 커밋 결과와 무관하게 발행 (`hub.rs` 테스트)
-    - [ ] (별도 커밋) `RecordCommit` 결과를 실패/변경 없음/갱신으로 구분 — 10.1의 `handle_verified_play` 반환값 의미 분리와 연결
+    - [x] (별도 커밋) `RecordCommit` 결과를 실패/변경 없음/갱신으로 구분 — 10.1의 `handle_verified_play` 반환값 의미 분리와 연결 (`try_handle_verified_play` 등 `try_*` API 추가, 기존 API는 호환 유지. 실패는 디버그 로그로만 노출)
 
 - [ ] **11.4 공개 계약 문서화**
   - [ ] 하위 crate가 app·외부에 노출하는 API(창 geometry trait 포함)와 입출력 계약 정리
