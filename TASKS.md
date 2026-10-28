@@ -186,14 +186,15 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 - 제약: Windows 동작은 변경하지 않음. 한 커밋 = 한 모듈 이동, 이동 커밋은 동작 불변(내용 수정 없이 위치만), 공개 API 정리는 별도 커밋. 안정화 코드는 git blame 게이트를 따름 (AGENTS.md)
 - 의존 방향: `app → engine/data/core` 유지. 하위 crate는 egui/eframe에 의존하지 않음
 
-- [ ] **11.1 app 내 비-UI 책임 목록화 및 목적지 결정**
-  - [ ] 후보 분류 (UI와 섞인 파일은 로직부/표현부 경계까지 표시)
+- [x] **11.1 app 내 비-UI 책임 목록화 및 목적지 결정**
+  - [x] 후보 분류 (UI와 섞인 파일은 로직부/표현부 경계까지 표시)
     - 창 추적: `ui/linux_layer_overlay.rs`의 foreign-toplevel·output 선택부, `ui/platform/windows.rs`의 창 추적부
     - 외부 연동: `system/ipc_server.rs`, `system/transport/`
     - 업로드: `ui/auto_upload.rs`(이미 egui 무관), `ui/sync_ui.rs`의 로직부
     - 시스템: `system/steam_session*`, `system/updater/`, `system/settings_writer.rs`, `system/single_instance*`
-  - [ ] 항목별 목적지 결정 (`overmax_engine` / `overmax_data` / 신규 crate) — 신규 crate는 기존 crate에 두면 의존이 과해지는 경우에만 만든다
-  - [ ] 결정을 `docs/decisions/` 해당 도메인 문서에 기록
+  - [x] 항목별 목적지 결정 (`overmax_engine` / `overmax_data` / 신규 crate) — 신규 crate는 기존 crate에 두면 의존이 과해지는 경우에만 만든다
+  - [x] 결정을 `docs/decisions/` 해당 도메인 문서에 기록
+  - 결과: [docs/plans/2026-10-28-app-boundary-inventory.md](docs/plans/2026-10-28-app-boundary-inventory.md) — 신규 crate는 `overmax_runtime` 하나, 앱 프로세스 관리(업데이터·단일 인스턴스·데스크톱 엔트리)는 app 유지
 
 - [ ] **11.2 Linux 창 추적 분리 (첫 이동 대상, 동작 불변)**
   - [ ] `capture_engine/linux.rs`와 `linux_layer_overlay.rs`의 책임 범위 및 창 위치·크기·포커스 정보 흐름 정리
