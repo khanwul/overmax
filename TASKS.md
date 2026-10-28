@@ -218,10 +218,11 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
     - [x] 순서 불변식 유지: PB 판정은 기록 저장 전, `PlayVerified`는 DB 커밋 결과와 무관하게 발행 (`hub.rs` 테스트)
     - [x] (별도 커밋) `RecordCommit` 결과를 실패/변경 없음/갱신으로 구분 — 10.1의 `handle_verified_play` 반환값 의미 분리와 연결 (`try_handle_verified_play` 등 `try_*` API 추가, 기존 API는 호환 유지. 실패는 디버그 로그로만 노출)
 
-- [ ] **11.4 공개 계약 문서화**
-  - [ ] 하위 crate가 app·외부에 노출하는 API(창 geometry trait 포함)와 입출력 계약 정리
-  - [ ] 기여자가 통과해야 하는 테스트 명시 (Xvfb+Openbox lifecycle 게이트 포함)
-  - [ ] 검증 보고 양식 정의 (배포판·컴포지터·실행 방식)
+- [x] **11.4 공개 계약 문서화**
+  - [x] 하위 crate가 app·외부에 노출하는 API(창 geometry trait 포함)와 입출력 계약 정리
+  - [x] 기여자가 통과해야 하는 테스트 명시 (Xvfb+Openbox lifecycle 게이트 포함)
+  - [x] 검증 보고 양식 정의 (배포판·컴포지터·실행 방식)
+  - 결과: [docs/guides/module-contracts.md](docs/guides/module-contracts.md)
 
 - [ ] **11.5 이슈 #35 답변 및 정리**
   - [ ] 모듈 분리 준비 중임을 답변하고 기여 요청은 11.2 완료 후로 안내
