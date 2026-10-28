@@ -9,3 +9,4 @@ pub mod hub;
 pub mod ipc_server;
 pub mod transport;
 pub mod upload_plan;
+pub mod varchive_jobs;

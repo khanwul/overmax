@@ -2,9 +2,9 @@
 
 use overmax_core::{Changed, GameSessionState, PlayContext};
 use overmax_data::{
-    build_candidates, load_base_settings_from_paths, load_merged_settings_from_paths,
-    normalize_settings, AppPaths, PatternSheetMeta, RecommendResult, Recommender, RecordDB,
-    RecordManager, SyncCandidate, VArchiveDB,
+    load_base_settings_from_paths, load_merged_settings_from_paths, normalize_settings, AppPaths,
+    PatternSheetMeta, RecommendResult, Recommender, RecordDB, RecordManager, SyncCandidate,
+    VArchiveDB,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -814,26 +814,13 @@ impl NativeApp {
     }
 
     fn spawn_scan(&self, ctx: egui::Context) {
-        let steam = self
-            .sync_state
-            .steam_id
-            .lock()
-            .map(|g| g.clone())
-            .unwrap_or_default();
-        let tx = self.sync_channels.sync_tx.clone();
-        let songs_path = self.paths.songs_json();
-        let rdb = self.record_db.clone();
-        std::thread::spawn(move || {
-            let mut db = VArchiveDB::new();
-            if let Err(e) = db.load_from_file(&songs_path) {
-                let _ = tx.send(Err(format!("songs.json: {e}")));
-                ctx.request_repaint();
-                return;
-            }
-            let list = build_candidates(&db, rdb.as_ref(), &steam);
-            let _ = tx.send(Ok(list));
-            ctx.request_repaint();
-        });
+        overmax_runtime::varchive_jobs::spawn_scan(
+            self.paths.songs_json(),
+            self.record_db.clone(),
+            self.current_steam_id(),
+            self.sync_channels.sync_tx.clone(),
+            repaint_notify(ctx),
+        );
     }
 
     fn spawn_upload(&self, candidate: SyncCandidate, is_quick_upload: bool, ctx: egui::Context) {
@@ -1097,67 +1084,22 @@ impl NativeApp {
     }
 
     fn spawn_fetch(&self, steam_id: String, v_id: String, button: i32, ctx: egui::Context) {
-        let tx = self.sync_channels.fetch_res_tx.clone();
         let log_lines = self.debug_state.log_lines.clone();
         let max_lines = self.max_log_lines();
-        let record_db = self.record_db.clone();
-
-        std::thread::spawn(move || {
-            let buttons = if button == 0 {
-                vec![4, 5, 6, 8]
-            } else {
-                vec![button]
-            };
-            for b in buttons {
-                debug_ui::push_log(
-                    &log_lines,
-                    max_lines,
-                    format!("[VArchiveClient] 기록 요청 중: {} ({}B)", v_id, b),
-                );
-
-                let since = record_db.get_latest_updated_at_from_db(&steam_id, b);
-                if let Some(ref s) = since {
-                    debug_ui::push_log(
-                        &log_lines,
-                        max_lines,
-                        format!("[VArchiveClient] 증분 조회 적용 (since={})", s),
-                    );
-                }
-
-                match varchive_upload::fetch_records_blocking(&v_id, b, since.as_deref()) {
-                    Ok(data) => {
-                        let clear_first = since.is_none();
-                        let save_res = record_db.merge_varchive_fetched_records(
-                            &steam_id,
-                            b,
-                            &data,
-                            clear_first,
-                        );
-
-                        if let Err(e) = save_res {
-                            debug_ui::push_log(
-                                &log_lines,
-                                max_lines,
-                                format!("[VArchiveClient] 캐시 저장 실패: {}", e),
-                            );
-                            let _ = tx.send((v_id.clone(), b, Err(e)));
-                        } else {
-                            debug_ui::push_log(
-                                &log_lines,
-                                max_lines,
-                                format!("[VArchiveClient] 캐시 저장 완료 ({}B)", b),
-                            );
-                            let _ = tx.send((v_id.clone(), b, Ok(1)));
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.send((v_id.clone(), b, Err(e)));
-                    }
-                }
-            }
-            ctx.request_repaint();
-        });
+        overmax_runtime::varchive_jobs::spawn_fetch(
+            steam_id,
+            v_id,
+            button,
+            self.record_db.clone(),
+            self.sync_channels.fetch_res_tx.clone(),
+            Arc::new(move |line: String| debug_ui::push_log(&log_lines, max_lines, line)),
+            repaint_notify(ctx),
+        );
     }
+}
+
+fn repaint_notify(ctx: egui::Context) -> overmax_runtime::varchive_jobs::Notify {
+    Arc::new(move || ctx.request_repaint())
 }
 
 /// 업로드 성공 후 V-Archive 캐시 병합 및 Top-50 랭크 메시지를 생성한다.
