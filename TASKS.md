@@ -175,7 +175,7 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [ ] 배경: 선곡 화면 `rate_cache`가 체크섬(±50) 기반으로 값을 유지하므로, 오인식 1회가 안정화 이력(5프레임) 전체에 복제되어 `Unplayed(0.0)` 이벤트 → 로컬 기록 삭제(`RecordManager::handle_verified_play`)로 이어질 수 있음. (결과창은 7샘플 median으로 방어하지만 선곡 화면에는 대응 장치 없음)
   - [x] 오탐 여부 1차 측정 (2026-10-08, 녹화 영상 재생 기반 debug 빌드, `[VerifiedEvent]` 로그): 선곡 화면 이벤트 15건 중 오탐 0건 (rate 검출 2건은 로컬 기록과 일치, `0.00%` 13건은 기록 없음 또는 게임 화면도 0.00%). 표본이 작고 라이브 캡처가 아니므로 결론은 "증거 없음"이며 안전을 증명한 것은 아님
   - [ ] (보류) 방어 로직 도입: 오탐 증거가 없어 근거 없는 땜질을 피하기 위해 보류. 실플레이 라이브 로그에서 기록이 있는 패턴이 선곡 화면 `Rate: 0.00%`로 확정되는 사례가 확인되면 재개. 후보: 삭제 조건 강화(미플레이 지속 시간) / 독립 샘플 검증. 구조적 약점은 그대로임: `(score, rate) = (None, None)`이 `Unplayed`로 처리되어 "읽기 실패"와 "기록 없음"이 구분되지 않음 (`play_state.rs` `process_rate_detection`)
-  - [ ] 관련: `handle_verified_play`가 실패(DB busy 등)와 "변경 없음"을 모두 `false`로 반환해, 이벤트 1회 방출 구조에서는 실패 재시도가 불가함 — 반환값 의미 분리 검토
+  - [ ] 관련: `handle_verified_play`가 실패(DB busy 등)와 "변경 없음"을 모두 `false`로 반환해, 이벤트 1회 방출 구조에서는 실패 재시도가 불가함 — 반환값 의미 분리는 완료(11.3, `try_handle_verified_play` / `RecordCommit::Failed`), 재시도 정책은 미정
 
 ---
 
@@ -184,42 +184,49 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 - 목표: overmax의 기능을 다른 프론트엔드·도구·기여자가 쉽게 가져다 쓸 수 있도록 연다. `overmax_app`은 사용자가 직접 닿는 표현 계층(View/Settings/트레이/다이얼로그)만 유지하고, 그 외 로직은 `overmax_engine` 또는 다른 하위 crate로 내린다
 - 근거: 소유자 방향 + [orphera/overmax#35](https://github.com/orphera/overmax/issues/35) — 기여자가 환경별 창 추적 구현을 app을 건드리지 않고 붙일 수 있어야 함
 - 제약: Windows 동작은 변경하지 않음. 한 커밋 = 한 모듈 이동, 이동 커밋은 동작 불변(내용 수정 없이 위치만), 공개 API 정리는 별도 커밋. 안정화 코드는 git blame 게이트를 따름 (AGENTS.md)
-- 의존 방향: `app → engine/data/core` 유지. 하위 crate는 egui/eframe에 의존하지 않음
+- 의존 방향: `app → runtime → data → core`, `app → engine → data`. runtime은 engine에 의존하지 않고, 하위 crate는 egui/eframe에 의존하지 않음
 
-- [ ] **11.1 app 내 비-UI 책임 목록화 및 목적지 결정**
-  - [ ] 후보 분류 (UI와 섞인 파일은 로직부/표현부 경계까지 표시)
+- [x] **11.1 app 내 비-UI 책임 목록화 및 목적지 결정**
+  - [x] 후보 분류 (UI와 섞인 파일은 로직부/표현부 경계까지 표시)
     - 창 추적: `ui/linux_layer_overlay.rs`의 foreign-toplevel·output 선택부, `ui/platform/windows.rs`의 창 추적부
     - 외부 연동: `system/ipc_server.rs`, `system/transport/`
     - 업로드: `ui/auto_upload.rs`(이미 egui 무관), `ui/sync_ui.rs`의 로직부
     - 시스템: `system/steam_session*`, `system/updater/`, `system/settings_writer.rs`, `system/single_instance*`
-  - [ ] 항목별 목적지 결정 (`overmax_engine` / `overmax_data` / 신규 crate) — 신규 crate는 기존 crate에 두면 의존이 과해지는 경우에만 만든다
-  - [ ] 결정을 `docs/decisions/` 해당 도메인 문서에 기록
+  - [x] 항목별 목적지 결정 (`overmax_engine` / `overmax_data` / 신규 crate) — 신규 crate는 기존 crate에 두면 의존이 과해지는 경우에만 만든다
+  - [x] 결정을 `docs/decisions/` 해당 도메인 문서에 기록
+  - 결과: [docs/plans/2026-10-28-app-boundary-inventory.md](docs/plans/2026-10-28-app-boundary-inventory.md) — 신규 crate는 `overmax_runtime` 하나, 앱 프로세스 관리(업데이터·단일 인스턴스·데스크톱 엔트리)는 app 유지
 
-- [ ] **11.2 Linux 창 추적 분리 (첫 이동 대상, 동작 불변)**
-  - [ ] `capture_engine/linux.rs`와 `linux_layer_overlay.rs`의 책임 범위 및 창 위치·크기·포커스 정보 흐름 정리
-  - [ ] 창 geometry trait 경계를 하위 crate에 정의, Linux 기존 경로를 그 뒤에 둠 (현재 동작 유지)
-  - [ ] Windows 구현은 경계만 맞추고 로직은 변경하지 않음
-  - [ ] 오버레이(app)는 외부 좌표를 받는 입구만 가짐. 기본값은 현재 수동 배치, 위치 정보가 없으면 기존 동작 유지 (fail-closed)
+- [x] **11.2 Linux 게임 창 위치 소스 경계 도입 (동작 불변)**
+  - 범위 조정 (2026-10-28): #35의 원인은 창 추적 코드 위치가 아니라 "컴포지터 좌표의 게임 창 위치 소스 부재"이므로, 그 확장 지점만 만든다. foreign-toplevel 관찰 이동·Windows/Linux `WindowTracker` 통합은 하지 않음 — 근거는 [2026-10-28-linux-window-geometry-sources.md](docs/plans/2026-10-28-linux-window-geometry-sources.md) §4
+  - [x] 창 위치·크기·포커스 정보 흐름 정리 및 환경별 위치 소스 조사 (위 문서 §1~2)
+  - [x] engine `window_tracker`에 `GameGeometrySource` trait + `SharedGameGeometry` + 소스 없음 기본 구현 추가 (계약은 위 문서 §3)
+  - [x] 오버레이(app)에 좌표 입구 추가: 창 모드이고 출력 이름이 일치하는 위치 값이 있을 때만 그 rect에 스냅, 없으면 기존 수동 배치 (fail-closed)
+  - [x] Windows 경로는 변경하지 않음
 
-- [ ] **11.3 나머지 비-UI 모듈 순차 이동**
-  - [ ] 이미 egui 무관하고 단위 테스트가 있는 것부터 (`auto_upload`, `transport`/`ipc_server`, `steam_session`)
-  - [ ] UI와 섞인 파일은 로직부 분리 → 이동 순서로 별도 커밋
-  - [ ] 각 이동 후 `cargo test --workspace` 및 Windows 수동 확인
-  - [ ] **런타임 허브 재설계** (`ui/native_app_recommend.rs`의 감지 결과 분배 루프 — 다른 프론트엔드가 재사용하려면 반드시 app 밖에 있어야 함)
-    - [ ] 1단계: 동작 불변으로 `Runtime` 구조체로 통째 이동 (호출 스레드는 현행 UI 루프 유지)
-    - [ ] 2단계: 관찰자(IPC 발행, 자동 업로드, app 스냅샷)를 `RuntimeUpdate`를 받는 읽기 전용 trait 뒤로 하나씩 분리
-    - [ ] 3단계: 커밋 체인을 `SessionTracker`(세션 경계·기록 스냅샷·PB 판정) → `RecordCommit` → `DerivedState`(추천 재계산) 순서 고정 호출로 분리
-    - [ ] 순서 불변식 유지: PB 판정은 기록 저장 전, `PlayVerified`는 DB 커밋 결과와 무관하게 발행
-    - [ ] (별도 커밋) `RecordCommit` 결과를 실패/변경 없음/갱신으로 구분 — 10.1의 `handle_verified_play` 반환값 의미 분리와 연결
+- [x] **11.3 나머지 비-UI 모듈 순차 이동**
+  - [x] `overmax_runtime` crate 생성
+  - [x] 이미 egui 무관하고 단위 테스트가 있는 것부터 (`auto_upload`, `transport`/`ipc_server`, `steam_session`) + `settings_writer`
+  - [x] 작업 조율 메서드(`native_app.rs`의 스캔·업로드·캐시 갱신·삭제·Steam 갱신)를 runtime 서비스로 이동 — 이때 `native_helpers`의 계정 헬퍼를 함께 data로
+    - 이동: 계정 조회(`overmax_data::config::varchive_account`), 업로드 판단·후보 생성(`overmax_runtime::upload_plan`), 스캔·조회·업로드 작업(`overmax_runtime::varchive_jobs`, 결과는 `UploadOutcome`으로 반환하고 다국어 문구는 app이 조립)
+    - app 유지: `poll_*`/`drain_*`, `refresh_steam_session`, `handle_auto_refresh`, `on_varchive_db_updated` — 토스트·후보 목록·상태 문구·업로드 기록 창 등 UI 공유 상태를 갱신하는 연결부. 상태 소유권을 정하는 허브 2·3단계에서 다시 검토
+  - [x] UI와 섞인 파일은 로직부 분리 → 이동 순서로 별도 커밋
+  - [x] 각 이동 후 `cargo test --workspace` 및 Windows 수동 확인 — 테스트는 매 커밋 Windows·Linux(WSL) 통과, 실제 앱 수동 확인 완료(2026-10-28). 확인 중 발견한 기존 버그는 [orphera/overmax#38](https://github.com/orphera/overmax/issues/38) (라이트 모드 헤더 업로드 버튼 클릭 불가)
+  - [x] **런타임 허브 재설계** (`ui/native_app_recommend.rs`의 감지 결과 분배 루프 — 다른 프론트엔드가 재사용하려면 반드시 app 밖에 있어야 함)
+    - [x] 1단계: 동작 불변으로 `Runtime` 구조체로 통째 이동 (호출 스레드는 현행 UI 루프 유지) — 추천 재계산은 app에 남김 (`overmax_runtime::hub`)
+    - [x] 2단계: 관찰자(IPC 발행, 자동 업로드, app 스냅샷)를 `RuntimeUpdate`를 받는 읽기 전용 trait 뒤로 하나씩 분리 — `RuntimeObserver` + `IpcObserver`. 자동 업로드는 감지 출력이 없어도 매 프레임 타이머를 진행해야 해서 관찰자가 아닌 app의 프레임 tick에 둠. app 스냅샷은 `on_detection` 반환값으로 받음
+    - [x] 3단계: 커밋 체인을 `SessionTracker`(세션 경계·기록 스냅샷·PB 판정) → `RecordCommit` → `DerivedState`(추천 재계산) 순서 고정 호출로 분리 — `SessionTracker` → `commit_record` (`hub.rs`). 추천 재계산은 여러 경로에서 호출되므로 `runtime::derived::recommend_for_state` 함수로 두고 app의 `refresh_overlay_data`가 부름
+    - [x] 순서 불변식 유지: PB 판정은 기록 저장 전, `PlayVerified`는 DB 커밋 결과와 무관하게 발행 (`hub.rs` 테스트)
+    - [x] (별도 커밋) `RecordCommit` 결과를 실패/변경 없음/갱신으로 구분 — 10.1의 `handle_verified_play` 반환값 의미 분리와 연결 (`try_handle_verified_play` 등 `try_*` API 추가, 기존 API는 호환 유지. 실패는 디버그 로그로만 노출)
 
-- [ ] **11.4 공개 계약 문서화**
-  - [ ] 하위 crate가 app·외부에 노출하는 API(창 geometry trait 포함)와 입출력 계약 정리
-  - [ ] 기여자가 통과해야 하는 테스트 명시 (Xvfb+Openbox lifecycle 게이트 포함)
-  - [ ] 검증 보고 양식 정의 (배포판·컴포지터·실행 방식)
+- [x] **11.4 공개 계약 문서화**
+  - [x] 하위 crate가 app·외부에 노출하는 API(창 geometry trait 포함)와 입출력 계약 정리
+  - [x] 기여자가 통과해야 하는 테스트 명시 (Xvfb+Openbox lifecycle 게이트 포함)
+  - [x] 검증 보고 양식 정의 (배포판·컴포지터·실행 방식)
+  - 결과: [docs/guides/module-contracts.md](docs/guides/module-contracts.md)
 
-- [ ] **11.5 이슈 #35 답변 및 정리**
-  - [ ] 모듈 분리 준비 중임을 답변하고 기여 요청은 11.2 완료 후로 안내
-  - [ ] 이슈를 TASKS 11번 및 후속 12번 항목과 연결 후 닫기
+- [x] **11.5 이슈 #35 답변 및 정리**
+  - [x] 모듈 분리 준비 중임을 답변하고 기여 요청은 11.2 완료 후로 안내
+  - [x] 이슈를 TASKS 11번 및 후속 12번 항목과 연결 후 닫기
 
 ---
 
@@ -234,14 +241,19 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [ ] 현재 지원 조합(Proton/XWayland + wlr-layer-shell + 테두리 없는 전체화면) 기준으로 자동 배치 대상 범위 명시
   - [ ] 미지원 환경을 `docs/guides/linux-support.md`에 명시 (native Wayland, Gamescope, GNOME, X11 데스크톱)
 
-- [ ] **12.2 컴포지터별 위치 소스 조사 (검증 가능한 환경부터)**
-  - [ ] niri IPC 창 위치·크기 이벤트 조사 (기여자 환경 기준, 실제 검증은 제보 받기)
+- [ ] **12.2 컴포지터별 위치 소스 구현 (검증 가능한 환경부터)**
+  - 기준 표·우선순위: [2026-10-28-linux-window-geometry-sources.md](docs/plans/2026-10-28-linux-window-geometry-sources.md) §2
+  - [ ] Hyprland IPC 소스 (`clients -j` + socket2 이벤트)
+  - [ ] Sway IPC 소스 (`get_tree` + `window` 이벤트)
+  - [ ] niri IPC 소스 — 화면 절대 좌표 제공 여부 확인 (기여자 환경 기준, 실제 검증은 제보 받기)
   - [ ] KWin 스크립트 geometry 신호 경로 조사 및 설치·유지보수 부담 평가
-  - [ ] 좌표 변환·배율·창 장식·workspace 전환 영향 확인
+  - [ ] 좌표 변환·배율·창 장식·workspace 전환 영향 확인, 검증 결과를 기준 표에 기록
 
 - [ ] **12.3 오버레이 위치 갱신 연결**
   - [ ] 11.2의 오버레이 입구에 컴포지터별 위치 소스(하위 crate) 연결
   - [ ] 위치 정보가 없는 환경은 현재 수동 배치 유지
+  - [ ] 소스가 위치를 갱신할 때 오버레이를 깨우는 경로 추가 (현재는 app이 스냅샷을 다시 발행할 때만 반영됨 — 첫 실제 소스 구현과 함께 `GameGeometrySource::start`에 알림 콜백 추가 검토)
+  - [ ] 위치 값으로 스냅 중일 때 `overlay_props.is_snap_manual`(창 모드면 수동으로 표시) 및 드래그 동작 정리
 
 - [ ] **12.4 검증 및 회귀 방지**
   - [ ] Xvfb+Openbox 기반 lifecycle 게이트에 창 이동·크기 변경 시나리오 추가

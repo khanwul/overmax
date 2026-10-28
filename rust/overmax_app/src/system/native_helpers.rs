@@ -16,26 +16,6 @@ pub fn vp_upload_history() -> ViewportId {
     ViewportId::from_hash_of("overmax_upload_history_vp")
 }
 
-pub fn first_steam_from_settings(settings: &overmax_data::Settings) -> String {
-    let varchive = settings.varchive();
-    varchive.user_map.keys().next().cloned().unwrap_or_default()
-}
-
-pub fn account_path_for_steam(settings: &overmax_data::Settings, steam: &str) -> String {
-    settings
-        .varchive()
-        .user_map
-        .get(steam)
-        .and_then(|entry| entry.account_path.clone())
-        .unwrap_or_default()
-}
-
-pub fn button_num(mode: &str) -> i32 {
-    overmax_data::community::client::Mode::from_str(mode)
-        .map(|m| m.button_count())
-        .unwrap_or(4)
-}
-
 /// 시스템 파일 탐색기로 지정된 디렉터리를 엽니다.
 pub fn open_folder(path: &std::path::Path) -> std::io::Result<()> {
     if !path.exists() {

@@ -30,6 +30,12 @@ impl RecordManager {
 
     /// VerifiedPlayEvent를 수신하여 기록을 갱신하고, 신규/개선 여부를 반환합니다.
     pub fn handle_verified_play(&self, event: &VerifiedPlayEvent) -> bool {
+        self.try_handle_verified_play(event).unwrap_or(false)
+    }
+
+    /// `handle_verified_play`와 같되 저장 실패를 `Err`로 구분한다.
+    /// `Ok(false)`는 기록이 바뀌지 않았음(개선 아님·지울 기록 없음)을 뜻한다.
+    pub fn try_handle_verified_play(&self, event: &VerifiedPlayEvent) -> Result<bool, String> {
         let key = event.record_key();
         if event.is_result_screen {
             let now_unix = std::time::SystemTime::now()
@@ -41,9 +47,9 @@ impl RecordManager {
 
         if !event.is_result_screen && event.rate <= 0.0 {
             // 선곡 화면에서 미플레이(0.0%)로 확인된 경우: 과거 오기록이 있다면 삭제하여 미플레이로 교정
-            self.delete(key.0, key.1, key.2)
+            self.try_delete(key.0, key.1, key.2)
         } else {
-            self.upsert(
+            self.try_upsert(
                 key.0,
                 key.1,
                 key.2,
@@ -97,25 +103,60 @@ impl RecordManager {
         is_max_combo: bool,
         only_if_improved: bool,
     ) -> bool {
-        if self.record_db.upsert(
+        self.try_upsert(
+            song_id,
+            button_mode,
+            difficulty,
+            rate,
+            is_max_combo,
+            only_if_improved,
+        )
+        .unwrap_or(false)
+    }
+
+    /// `upsert`와 같되 저장 실패를 `Err`로 구분한다.
+    pub fn try_upsert(
+        &self,
+        song_id: i32,
+        button_mode: Mode,
+        difficulty: Difficulty,
+        rate: f32,
+        is_max_combo: bool,
+        only_if_improved: bool,
+    ) -> Result<bool, String> {
+        if self.record_db.try_upsert(
             song_id,
             button_mode,
             difficulty,
             rate as f64,
             is_max_combo,
             only_if_improved,
-        ) {
+        )? {
             if let Ok(mut guard) = self.dirty_record_keys.lock() {
                 guard.insert((song_id, button_mode, difficulty));
             }
             self.data_revision.fetch_add(1, Ordering::SeqCst);
-            return true;
+            return Ok(true);
         }
-        false
+        Ok(false)
     }
 
     pub fn delete(&self, song_id: i32, button_mode: Mode, difficulty: Difficulty) -> bool {
-        if self.record_db.delete(song_id, button_mode, difficulty) {
+        self.try_delete(song_id, button_mode, difficulty)
+            .unwrap_or(false)
+    }
+
+    /// `delete`와 같되 삭제 실패를 `Err`로 구분한다.
+    pub fn try_delete(
+        &self,
+        song_id: i32,
+        button_mode: Mode,
+        difficulty: Difficulty,
+    ) -> Result<bool, String> {
+        if self
+            .record_db
+            .try_delete(song_id, button_mode, difficulty)?
+        {
             let key = (song_id, button_mode, difficulty);
             if let Ok(mut guard) = self.varchive_cache.lock() {
                 guard.remove(&key);
@@ -124,9 +165,9 @@ impl RecordManager {
                 guard.insert(key);
             }
             self.data_revision.fetch_add(1, Ordering::SeqCst);
-            return true;
+            return Ok(true);
         }
-        false
+        Ok(false)
     }
 
     pub fn data_revision(&self) -> u64 {
@@ -586,6 +627,32 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_try_handle_verified_play_separates_failure_from_no_change() {
+        let event = VerifiedPlayEvent {
+            song_id: 77,
+            mode: overmax_core::Mode::B4,
+            diff: overmax_core::Difficulty::SC,
+            rate: 95.0,
+            is_max_combo: false,
+            is_result_screen: true,
+        };
+
+        // 초기화되지 않은 DB: 기존 API는 false, try_ API는 실패로 구분한다.
+        let dir = test_dir("record-manager-try-not-ready");
+        let unready = RecordManager::new(Arc::new(RecordDB::new(dir.join("record.db"), None)));
+        assert!(!unready.handle_verified_play(&event));
+        assert!(unready.try_handle_verified_play(&event).is_err());
+
+        let dir = test_dir("record-manager-try-ready");
+        let mut db = RecordDB::new(dir.join("record.db"), Some("765611"));
+        assert!(db.initialize());
+        let manager = RecordManager::new(Arc::new(db));
+        assert_eq!(manager.try_handle_verified_play(&event), Ok(true));
+        // 같은 기록은 개선이 아니므로 변경 없음.
+        assert_eq!(manager.try_handle_verified_play(&event), Ok(false));
     }
 
     #[test]

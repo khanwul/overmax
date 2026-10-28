@@ -43,9 +43,9 @@ impl SettingsDebounceWriter {
 
     fn flush_payload(payload: &SavePayload) {
         if payload.root.extension().is_some_and(|ext| ext == "json") {
-            let _ = overmax_data::save_user_settings_to_path(&payload.root, &payload.diff);
+            let _ = crate::save_user_settings_to_path(&payload.root, &payload.diff);
         } else {
-            let _ = overmax_data::save_user_settings(&payload.root, &payload.diff);
+            let _ = crate::save_user_settings(&payload.root, &payload.diff);
         }
     }
 

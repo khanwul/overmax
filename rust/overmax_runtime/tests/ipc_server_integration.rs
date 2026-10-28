@@ -6,12 +6,12 @@
 //! - SSE named-event 엔벨로프 + 접속 시 state_snapshot 선송신 (§5.3)
 //! - JSON-RPC 2.0 get_current_context (§5.4)
 
-use overmax_app::system::ipc_server::{
+use overmax_core::{GameSessionState, PlayContext, SceneType};
+use overmax_data::{RecordDB, RecordManager, VArchiveDB};
+use overmax_runtime::ipc_server::{
     spawn_ipc_manager, update_latest_recommendations, update_latest_state, BoundPortSlot,
     IpcDataSources, IpcEvent,
 };
-use overmax_core::{GameSessionState, PlayContext, SceneType};
-use overmax_data::{RecordDB, RecordManager, VArchiveDB};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -217,7 +217,7 @@ fn ipc_sse_stream_and_rpc_end_to_end() {
         diff: "SC".into(),
         rate: 99.23,
         is_max_combo: false,
-        meta: overmax_app::system::ipc_server::SongMeta {
+        meta: overmax_runtime::ipc_server::SongMeta {
             title: Some("Test Song".into()),
             floor_name: Some("SC 15".into()),
         },
@@ -241,7 +241,7 @@ fn ipc_sse_stream_and_rpc_end_to_end() {
         rate: 99.50,
         is_max_combo: true,
         is_pb: true,
-        meta: overmax_app::system::ipc_server::SongMeta {
+        meta: overmax_runtime::ipc_server::SongMeta {
             title: Some("Test Song".into()),
             floor_name: Some("SC 15".into()),
         },
@@ -424,7 +424,7 @@ fn ipc_sse_stream_and_rpc_end_to_end() {
         .recv_timeout(Duration::from_secs(2))
         .expect("GUI command not delivered");
     match cmd {
-        overmax_app::system::ipc_server::IpcCommand::SetOverlayVisibility(visible) => {
+        overmax_runtime::ipc_server::IpcCommand::SetOverlayVisibility(visible) => {
             assert!(!visible, "visibility param must be false");
         }
     }

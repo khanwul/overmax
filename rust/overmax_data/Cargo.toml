@@ -40,8 +40,12 @@ sha2 = "0.10.8"
 zip = { version = "9.0.4", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
+winreg = "0.55"
 windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
 ] }
 
 [dev-dependencies]

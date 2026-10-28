@@ -17,7 +17,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
   - 오버레이 스냅과 스크린 앵커 드래그 제어: 마우스 드래그 시 Win32 비클라이언트 메시지(`WM_NCLBUTTONDOWN`)나 비동기 뷰포트 델타를 쓰지 않고, 드래그 시작 시점의 스크린 절대 좌표와 창 위치를 앵커로 잡는 픽셀 완벽 스크린 앵커 드래그(`PlatformState::handle_screen_drag`)를 적용하여 1픽셀의 오차 없이 커서를 100% 추종하며 타이틀바 헤더 노출을 방지함. 구석 고정(Snap) 시에는 `try_lock()`으로 백그라운드 스레드와의 락 경합을 방지하고, 기하 구조 캐시(`prev_snap_geometry`)를 적용하여 좌표 변화가 없을 때는 `SetWindowPos` 호출을 생략(0회)함.
 - **데이터 및 저장소 경로 추상화**: `overmax_data::AppPaths` — V-Archive DB (JSON) 및 로컬 기록 DB (SQLite). Portable 모드(바이너리 상대 경로)와 Installed/MSIX 모드(`%LOCALAPPDATA%\Overmax\` / Linux `XDG_DATA_HOME/overmax`) 듀얼 경로 지원. Win32 `GetCurrentPackageFullName` 무비용 패키지 감지, `.portable` 마커/디렉터리 권한 기반 자동 모드 판별, 초기 번들 에셋 시딩 및 포터블 데이터 마이그레이션(`ensure_dirs_and_seed`) 지원.
 - **배포 및 패키징 (Desktop Bridge / MSIX)**: Windows Desktop Bridge(Centennial) 기반 `AppxManifest.xml.template` 및 규격 비주얼 에셋(`packaging/msix/Assets/`)과 자동화 스크립트(`scripts/package-msix.ps1`) 구축. `runFullTrust` 권한, Windows SDK `MakeAppx`/`SignTool` 연동, SemVer ➔ MSIX `Major.Minor.Build.0` 규격화(스토어 승인 정책에 따라 Revision=0 고정), Microsoft Store 등록 메타데이터 및 정책 대응 가이드(`docs/store/STORE_LISTING.md`, `docs/store/PRIVACY.md`) 완비 및 GitHub Actions CI 워크플로우(`ci.yml`) MSIX 아티팩트 빌드 연동.
-- **외부 연동 (로컬 IPC)**: `overmax_app::system::ipc_server` — std-only 최소 HTTP 서버(의존성 0) 기반 단일 loopback 포트에서 SSE 이벤트 푸시(`GET /events`)와 JSON-RPC 2.0 RPC(`POST /rpc`)를 동시 제공. 프로토콜 ID는 `overmax-ipc/1`이며 기본 OFF(`ipc.enabled=false`), 기본 포트 30110(허용 대역 30100~30199, 바인딩 실패 시 대역 내 순차 스캔 → 전부 실패하면 fail-closed 비활성). 실제 확정 포트는 `cache/ipc_endpoint.json`(원자적 교체)으로 노출.
+- **외부 연동 (로컬 IPC)**: `overmax_runtime::ipc_server` — std-only 최소 HTTP 서버(의존성 0) 기반 단일 loopback 포트에서 SSE 이벤트 푸시(`GET /events`)와 JSON-RPC 2.0 RPC(`POST /rpc`)를 동시 제공. 프로토콜 ID는 `overmax-ipc/1`이며 기본 OFF(`ipc.enabled=false`), 기본 포트 30110(허용 대역 30100~30199, 바인딩 실패 시 대역 내 순차 스캔 → 전부 실패하면 fail-closed 비활성). 실제 확정 포트는 `cache/ipc_endpoint.json`(원자적 교체)으로 노출.
 
 
 ---
@@ -57,7 +57,8 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
 
 ## Workspace Crate 구조
 
-- `overmax_app`: 메인 GUI 애플리케이션 (`egui/winit` 기반 멀티 뷰포트 오버레이 UI, 설정/동기화/디버그 창 및 윈도우 스타일 제어)
+- `overmax_app`: 메인 GUI 애플리케이션 (`egui/winit` 기반 멀티 뷰포트 오버레이 UI, 설정/동기화/디버그 창 및 윈도우 스타일 제어, 런타임 결과의 화면 반영·다국어 문구 조립, 앱 프로세스 관리)
+- `overmax_runtime`: UI 없는 런타임 (감지 결과 분배 허브 `hub::Runtime` — 결과창 기록 스냅샷·PB 판정 → 기록 저장 → `RuntimeObserver`; IPC 서버·관찰자, 추천 계산 `derived`, V-Archive 업로드 판단·백그라운드 작업, 자동 업로드 스케줄러). egui·`overmax_engine`에 의존하지 않음 (계약: `docs/guides/module-contracts.md`)
 - `overmax_engine`: 화면 캡처 및 실시간 디텍션 핵심 엔진 (GDI/DXGI 캡처, 템플릿 매칭 디텍터, Hysteresis 버퍼, ROI 관리 및 템플릿 데이터)
 - `overmax_core`: 공통 데이터 모델 및 핵심 상태 구조체 (`GameSessionState`, `PlayContext`, `SceneType`)
 - `overmax_data`: 설정 파싱, SQLite DB (`RecordDB`), V-Archive API 클라이언트, 추천 정렬 로직 및 유사도 검색 알고리즘
@@ -70,8 +71,9 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
    ├── Overlay (Windows eframe viewport / Linux native layer-shell surface)
    ├── Settings / Sync / Debug Windows (설정 변경, V-Archive 기록 동기화, 실시간 로그)
    ├── Channel Receiver (디텍션 결과 수신 및 UI 상태 반영)
-   │      └── drain_detection_results(): IPC 이벤트 발행 관찰자 (§6.2 — 파이프라인 무변경)
-   │              └─ try_send(bounded 64) → [system::transport::sse] → SSE 클라이언트별 writer fan-out
+   │      └── drain_detection_results() → overmax_runtime::hub::Runtime::on_detection()
+   │              ├─ SessionTracker(PB 판정) → commit_record (RecordCommit: Updated/Unchanged/Failed)
+   │              └─ RuntimeObserver: IpcObserver → try_send(bounded 64) → [transport::sse] → SSE 클라이언트별 writer fan-out
    ├── IPC Command Receiver (set_overlay_visibility 등 GUI 제어 명령 수신)
    └── IpcPublisher / IpcServerHandle (shutdown) / BoundPortSlot (런타임 상태)
             ▲
@@ -85,7 +87,7 @@ Overmax는 DJMAX RESPECT V의 화면을 실시간으로 분석하여, 현재 선
         ├── ImageIndexDb: overmax_cv (HOG + Hash 매칭 -> song_id 탐색)
         └── PlayStateDetector: (버튼 모드, 난이도, 맥스콤보 감지)
 
-[Inbound Transport Subsystem (`overmax_app::system::transport`)]
+[Inbound Transport Subsystem (`overmax_runtime::transport`)]
    ├── [Loopback HTTP Manager Thread] ← std-only TCP 리스너 (30100~30199 대역), DNS Rebinding 가드, 엔드포인트 파일 동기화, 라우팅
    ├── [SSE Hub Thread]              ← 도메인 이벤트 SSE 프레이밍 직렬화, 연결별 단조 seq 할당, 15초 하트비트
    └── [SSE Client Threads]          ← 16개 한도, 논블로킹 fan-out, dead connection 자동 회수

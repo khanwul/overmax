@@ -121,7 +121,7 @@ where
         std::thread::Builder::new()
             .name("ipc-hub".into())
             .spawn(move || {
-                crate::system::transport::sse::run_sse_hub_loop(
+                crate::transport::sse::run_sse_hub_loop(
                     event_rx,
                     new_sse_client_rx,
                     shutdown,

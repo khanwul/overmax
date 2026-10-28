@@ -53,6 +53,8 @@ mod upload_history;
 
 pub use upload_history::{UploadHistoryRecord, UPLOAD_HISTORY_LIMIT};
 
+const NOT_READY: &str = "record DB is not initialized";
+
 impl RecordDB {
     const UNKNOWN_STEAM_ID: &'static str = "__unknown__";
 
@@ -142,10 +144,32 @@ impl RecordDB {
         is_max_combo: bool,
         only_if_improved: bool,
     ) -> bool {
+        self.try_upsert(
+            song_id,
+            button_mode,
+            difficulty,
+            rate,
+            is_max_combo,
+            only_if_improved,
+        )
+        .unwrap_or(false)
+    }
+
+    /// `upsert`와 같되 저장 실패(DB 미준비·SQLite 오류)를 `Err`로 구분한다.
+    /// `Ok(false)`는 기존 기록과 같거나 개선이 아니어서 쓰지 않았음을 뜻한다.
+    pub fn try_upsert(
+        &self,
+        song_id: i32,
+        button_mode: Mode,
+        difficulty: Difficulty,
+        rate: f64,
+        is_max_combo: bool,
+        only_if_improved: bool,
+    ) -> std::result::Result<bool, String> {
         let button_mode = button_mode.as_str();
         let difficulty = difficulty.as_str();
         if !self.is_ready {
-            return false;
+            return Err(NOT_READY.to_string());
         }
 
         let sid = song_id.to_string();
@@ -217,14 +241,25 @@ impl RecordDB {
             )?;
             Ok(true)
         });
-        res.unwrap_or(false)
+        res.map_err(|e| e.to_string())
     }
 
     pub fn delete(&self, song_id: i32, button_mode: Mode, difficulty: Difficulty) -> bool {
+        self.try_delete(song_id, button_mode, difficulty)
+            .unwrap_or(false)
+    }
+
+    /// `delete`와 같되 삭제 실패를 `Err`로 구분한다. `Ok(false)`는 지울 기록이 없었음을 뜻한다.
+    pub fn try_delete(
+        &self,
+        song_id: i32,
+        button_mode: Mode,
+        difficulty: Difficulty,
+    ) -> std::result::Result<bool, String> {
         let button_mode = button_mode.as_str();
         let difficulty = difficulty.as_str();
         if !self.is_ready {
-            return false;
+            return Err(NOT_READY.to_string());
         }
 
         let sid = song_id.to_string();
@@ -237,7 +272,7 @@ impl RecordDB {
             )?;
             Ok(rows > 0)
         });
-        res.unwrap_or(false)
+        res.map_err(|e| e.to_string())
     }
 
     pub fn get(

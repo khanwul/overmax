@@ -1,4 +1,3 @@
-pub mod auto_upload;
 pub mod components;
 pub mod debug_ui;
 pub mod dialog_theme;

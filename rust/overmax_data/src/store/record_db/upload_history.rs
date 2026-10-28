@@ -212,7 +212,11 @@ mod tests {
             rate_delta: if i.is_multiple_of(3) { Some(0.5) } else { None },
             top50_rank: if i.is_multiple_of(5) { Some(7) } else { None },
             is_max_combo: i.is_multiple_of(2),
-            prev_max_combo: if i.is_multiple_of(4) { Some(false) } else { None },
+            prev_max_combo: if i.is_multiple_of(4) {
+                Some(false)
+            } else {
+                None
+            },
             success: true,
             message: format!("msg {i}"),
         }

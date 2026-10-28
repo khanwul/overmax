@@ -1,0 +1,21 @@
+[package]
+name = "overmax-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "overmax_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+overmax-core = { path = "../overmax_core" }
+overmax-data = { path = "../overmax_data" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

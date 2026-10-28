@@ -28,7 +28,7 @@ fn effective_delay(
 }
 
 /// 한 프레임의 관측값.
-pub(crate) struct AutoUploadObservation<'a> {
+pub struct AutoUploadObservation<'a> {
     pub scene: SceneType,
     /// 안정 확정된 컨텍스트 (`is_stable` 이 아니면 `None`).
     pub stable_context: Option<&'a PlayContext>,
@@ -46,7 +46,7 @@ struct Pending {
 }
 
 #[derive(Default)]
-pub(crate) struct AutoUploadScheduler {
+pub struct AutoUploadScheduler {
     pending: Option<Pending>,
     /// 마지막으로 내보낸 값. 실패 시 같은 값을 매 프레임 재시도하지 않도록 막는다.
     /// 다른 안정 값이 관측되면 해제되어, 선곡창에서 커서를 옮겼다 돌아오면 재시도된다.
@@ -55,7 +55,7 @@ pub(crate) struct AutoUploadScheduler {
 
 impl AutoUploadScheduler {
     /// 관측값을 반영하고, 업로드할 값이 있으면 반환한다.
-    pub(crate) fn tick(
+    pub fn tick(
         &mut self,
         now: Instant,
         obs: &AutoUploadObservation<'_>,
@@ -123,7 +123,7 @@ impl AutoUploadScheduler {
     }
 
     /// 대기 진행률 (0.0..=1.0). 대기 중이 아니면 `None`.
-    pub(crate) fn progress(&self, now: Instant) -> Option<f32> {
+    pub fn progress(&self, now: Instant) -> Option<f32> {
         let p = self.pending.as_ref()?;
         if p.interrupted {
             return Some(0.0);
@@ -135,7 +135,7 @@ impl AutoUploadScheduler {
         Some(ratio.clamp(0.0, 1.0))
     }
 
-    pub(crate) fn is_pending(&self) -> bool {
+    pub fn is_pending(&self) -> bool {
         self.pending.is_some()
     }
 

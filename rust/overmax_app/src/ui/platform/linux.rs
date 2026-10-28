@@ -97,6 +97,7 @@ pub fn native_options(settings: &overmax_data::Settings) -> eframe::NativeOption
 
 pub struct PlatformState {
     pub linux_overlay: LinuxLayerOverlayHandle,
+    pub game_geometry: overmax_engine::capture::window_tracker::SharedGameGeometry,
 }
 
 impl PlatformState {
@@ -124,7 +125,16 @@ impl PlatformState {
             runtime_telemetry,
         )?;
 
-        Ok(Self { linux_overlay })
+        let (game_geometry, geometry_source) =
+            overmax_engine::capture::window_tracker::spawn_game_geometry_source(game_window_title);
+        if let Err(error) = geometry_source {
+            eprintln!("[LinuxOverlay] geometry source failed: {error}");
+        }
+
+        Ok(Self {
+            linux_overlay,
+            game_geometry,
+        })
     }
 
     pub fn presentation_observation(
