@@ -184,7 +184,7 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 - 목표: overmax의 기능을 다른 프론트엔드·도구·기여자가 쉽게 가져다 쓸 수 있도록 연다. `overmax_app`은 사용자가 직접 닿는 표현 계층(View/Settings/트레이/다이얼로그)만 유지하고, 그 외 로직은 `overmax_engine` 또는 다른 하위 crate로 내린다
 - 근거: 소유자 방향 + [orphera/overmax#35](https://github.com/orphera/overmax/issues/35) — 기여자가 환경별 창 추적 구현을 app을 건드리지 않고 붙일 수 있어야 함
 - 제약: Windows 동작은 변경하지 않음. 한 커밋 = 한 모듈 이동, 이동 커밋은 동작 불변(내용 수정 없이 위치만), 공개 API 정리는 별도 커밋. 안정화 코드는 git blame 게이트를 따름 (AGENTS.md)
-- 의존 방향: `app → engine/data/core` 유지. 하위 crate는 egui/eframe에 의존하지 않음
+- 의존 방향: `app → runtime → data → core`, `app → engine → data`. runtime은 engine에 의존하지 않고, 하위 crate는 egui/eframe에 의존하지 않음
 
 - [x] **11.1 app 내 비-UI 책임 목록화 및 목적지 결정**
   - [x] 후보 분류 (UI와 섞인 파일은 로직부/표현부 경계까지 표시)
