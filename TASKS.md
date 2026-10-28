@@ -196,12 +196,12 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [x] 결정을 `docs/decisions/` 해당 도메인 문서에 기록
   - 결과: [docs/plans/2026-10-28-app-boundary-inventory.md](docs/plans/2026-10-28-app-boundary-inventory.md) — 신규 crate는 `overmax_runtime` 하나, 앱 프로세스 관리(업데이터·단일 인스턴스·데스크톱 엔트리)는 app 유지
 
-- [ ] **11.2 Linux 게임 창 위치 소스 경계 도입 (동작 불변)**
+- [x] **11.2 Linux 게임 창 위치 소스 경계 도입 (동작 불변)**
   - 범위 조정 (2026-10-28): #35의 원인은 창 추적 코드 위치가 아니라 "컴포지터 좌표의 게임 창 위치 소스 부재"이므로, 그 확장 지점만 만든다. foreign-toplevel 관찰 이동·Windows/Linux `WindowTracker` 통합은 하지 않음 — 근거는 [2026-10-28-linux-window-geometry-sources.md](docs/plans/2026-10-28-linux-window-geometry-sources.md) §4
   - [x] 창 위치·크기·포커스 정보 흐름 정리 및 환경별 위치 소스 조사 (위 문서 §1~2)
-  - [ ] engine `window_tracker`에 `GameGeometrySource` trait + `SharedGameGeometry` + 소스 없음 기본 구현 추가 (계약은 위 문서 §3)
-  - [ ] 오버레이(app)에 좌표 입구 추가: 창 모드이고 출력 이름이 일치하는 위치 값이 있을 때만 그 rect에 스냅, 없으면 기존 수동 배치 (fail-closed)
-  - [ ] Windows 경로는 변경하지 않음
+  - [x] engine `window_tracker`에 `GameGeometrySource` trait + `SharedGameGeometry` + 소스 없음 기본 구현 추가 (계약은 위 문서 §3)
+  - [x] 오버레이(app)에 좌표 입구 추가: 창 모드이고 출력 이름이 일치하는 위치 값이 있을 때만 그 rect에 스냅, 없으면 기존 수동 배치 (fail-closed)
+  - [x] Windows 경로는 변경하지 않음
 
 - [ ] **11.3 나머지 비-UI 모듈 순차 이동**
   - [ ] 이미 egui 무관하고 단위 테스트가 있는 것부터 (`auto_upload`, `transport`/`ipc_server`, `steam_session`)
@@ -247,6 +247,8 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 - [ ] **12.3 오버레이 위치 갱신 연결**
   - [ ] 11.2의 오버레이 입구에 컴포지터별 위치 소스(하위 crate) 연결
   - [ ] 위치 정보가 없는 환경은 현재 수동 배치 유지
+  - [ ] 소스가 위치를 갱신할 때 오버레이를 깨우는 경로 추가 (현재는 app이 스냅샷을 다시 발행할 때만 반영됨 — 첫 실제 소스 구현과 함께 `GameGeometrySource::start`에 알림 콜백 추가 검토)
+  - [ ] 위치 값으로 스냅 중일 때 `overlay_props.is_snap_manual`(창 모드면 수동으로 표시) 및 드래그 동작 정리
 
 - [ ] **12.4 검증 및 회귀 방지**
   - [ ] Xvfb+Openbox 기반 lifecycle 게이트에 창 이동·크기 변경 시나리오 추가
