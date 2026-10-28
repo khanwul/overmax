@@ -2835,7 +2835,6 @@ dependencies = [
  "windows-future",
  "windows-sys 0.61.2",
  "winit",
- "winreg",
  "winres",
  "zip 9.0.4",
 ]
@@ -2865,6 +2864,7 @@ dependencies = [
  "strsim",
  "tempfile",
  "windows-sys 0.61.2",
+ "winreg",
  "zip 9.0.4",
 ]
 

@@ -78,7 +78,6 @@ telemetry = ["overmax-engine/telemetry"]
 
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.55"
 windows = { version = "0.62.2", features = [
   "Graphics_Capture",
   "Win32_Graphics_Direct3D",
