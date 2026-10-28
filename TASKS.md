@@ -179,31 +179,46 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 
 ---
 
-## 11. 리눅스 창 추적 모듈 분리 (Linux Window Tracking Module Split)
+## 11. app 경계 정리 — 비-UI 기능을 하위 crate로 내리기 (Linux 창 추적 분리 포함)
 
-- 근거: [orphera/overmax#35](https://github.com/orphera/overmax/issues/35) — 기여자가 환경별 구현을 붙일 수 있도록 모듈 경계를 먼저 정리
-- 제약: Windows 동작은 변경하지 않음. 변경은 작은 커밋으로 나누고, 안정화 코드는 git blame 게이트를 따름 (AGENTS.md)
+- 목표: overmax의 기능을 다른 프론트엔드·도구·기여자가 쉽게 가져다 쓸 수 있도록 연다. `overmax_app`은 사용자가 직접 닿는 표현 계층(View/Settings/트레이/다이얼로그)만 유지하고, 그 외 로직은 `overmax_engine` 또는 다른 하위 crate로 내린다
+- 근거: 소유자 방향 + [orphera/overmax#35](https://github.com/orphera/overmax/issues/35) — 기여자가 환경별 창 추적 구현을 app을 건드리지 않고 붙일 수 있어야 함
+- 제약: Windows 동작은 변경하지 않음. 한 커밋 = 한 모듈 이동, 이동 커밋은 동작 불변(내용 수정 없이 위치만), 공개 API 정리는 별도 커밋. 안정화 코드는 git blame 게이트를 따름 (AGENTS.md)
+- 의존 방향: `app → engine/data/core` 유지. 하위 crate는 egui/eframe에 의존하지 않음
 
-- [ ] **11.1 현재 Linux 창 추적·캡처·오버레이 경계 조사**
-  - [ ] `rust/overmax_engine/src/capture/capture_engine/linux.rs`와 `rust/overmax_app/src/ui/linux_layer_overlay.rs`의 책임 범위 정리
-  - [ ] 창 위치·크기·포커스 정보가 어디서 생기고 어디로 흐르는지 목록화
+- [ ] **11.1 app 내 비-UI 책임 목록화 및 목적지 결정**
+  - [ ] 후보 분류 (UI와 섞인 파일은 로직부/표현부 경계까지 표시)
+    - 창 추적: `ui/linux_layer_overlay.rs`의 foreign-toplevel·output 선택부, `ui/platform/windows.rs`의 창 추적부
+    - 외부 연동: `system/ipc_server.rs`, `system/transport/`
+    - 업로드: `ui/auto_upload.rs`(이미 egui 무관), `ui/sync_ui.rs`의 로직부
+    - 시스템: `system/steam_session*`, `system/updater/`, `system/settings_writer.rs`, `system/single_instance*`
+  - [ ] 항목별 목적지 결정 (`overmax_engine` / `overmax_data` / 신규 crate) — 신규 crate는 기존 crate에 두면 의존이 과해지는 경우에만 만든다
+  - [ ] 결정을 `docs/decisions/` 해당 도메인 문서에 기록
 
-- [ ] **11.2 창 geometry 인터페이스 도입 (동작 불변)**
-  - [ ] 창 위치·크기 변경을 받는 trait 경계 정의
-  - [ ] Linux 기존 경로를 새 경계 뒤에 두되, 현재 동작은 그대로 유지
+- [ ] **11.2 Linux 창 추적 분리 (첫 이동 대상, 동작 불변)**
+  - [ ] `capture_engine/linux.rs`와 `linux_layer_overlay.rs`의 책임 범위 및 창 위치·크기·포커스 정보 흐름 정리
+  - [ ] 창 geometry trait 경계를 하위 crate에 정의, Linux 기존 경로를 그 뒤에 둠 (현재 동작 유지)
   - [ ] Windows 구현은 경계만 맞추고 로직은 변경하지 않음
+  - [ ] 오버레이(app)는 외부 좌표를 받는 입구만 가짐. 기본값은 현재 수동 배치, 위치 정보가 없으면 기존 동작 유지 (fail-closed)
 
-- [ ] **11.3 오버레이 쪽 입력 지점 분리**
-  - [ ] `linux_layer_overlay.rs`에 외부 좌표를 받는 입구를 추가하되, 기본값은 현재 수동 배치
-  - [ ] 위치 정보가 없는 환경은 기존 동작을 유지 (fail-closed)
+- [ ] **11.3 나머지 비-UI 모듈 순차 이동**
+  - [ ] 이미 egui 무관하고 단위 테스트가 있는 것부터 (`auto_upload`, `transport`/`ipc_server`, `steam_session`)
+  - [ ] UI와 섞인 파일은 로직부 분리 → 이동 순서로 별도 커밋
+  - [ ] 각 이동 후 `cargo test --workspace` 및 Windows 수동 확인
+  - [ ] **런타임 허브 재설계** (`ui/native_app_recommend.rs`의 감지 결과 분배 루프 — 다른 프론트엔드가 재사용하려면 반드시 app 밖에 있어야 함)
+    - [ ] 1단계: 동작 불변으로 `Runtime` 구조체로 통째 이동 (호출 스레드는 현행 UI 루프 유지)
+    - [ ] 2단계: 관찰자(IPC 발행, 자동 업로드, app 스냅샷)를 `RuntimeUpdate`를 받는 읽기 전용 trait 뒤로 하나씩 분리
+    - [ ] 3단계: 커밋 체인을 `SessionTracker`(세션 경계·기록 스냅샷·PB 판정) → `RecordCommit` → `DerivedState`(추천 재계산) 순서 고정 호출로 분리
+    - [ ] 순서 불변식 유지: PB 판정은 기록 저장 전, `PlayVerified`는 DB 커밋 결과와 무관하게 발행
+    - [ ] (별도 커밋) `RecordCommit` 결과를 실패/변경 없음/갱신으로 구분 — 10.1의 `handle_verified_play` 반환값 의미 분리와 연결
 
-- [ ] **11.4 검증 계약 문서화**
-  - [ ] 기여자가 구현할 때 맞춰야 할 trait 시그니처와 입출력 계약 정리
-  - [ ] 통과해야 하는 테스트 명시 (Xvfb+Openbox lifecycle 게이트 포함)
+- [ ] **11.4 공개 계약 문서화**
+  - [ ] 하위 crate가 app·외부에 노출하는 API(창 geometry trait 포함)와 입출력 계약 정리
+  - [ ] 기여자가 통과해야 하는 테스트 명시 (Xvfb+Openbox lifecycle 게이트 포함)
   - [ ] 검증 보고 양식 정의 (배포판·컴포지터·실행 방식)
 
 - [ ] **11.5 이슈 #35 답변 및 정리**
-  - [ ] 모듈 분리 준비 중임을 답변하고 기여 요청은 분리 완료 후로 안내
+  - [ ] 모듈 분리 준비 중임을 답변하고 기여 요청은 11.2 완료 후로 안내
   - [ ] 이슈를 TASKS 11번 및 후속 12번 항목과 연결 후 닫기
 
 ---
@@ -212,7 +227,8 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 
 - 근거: [orphera/overmax#35](https://github.com/orphera/overmax/issues/35) — 게임 창 이동·크기 변경 시 Linux 오버레이가 따라가지 않음
 - 제약: 단일 Source of Truth는 `CONTEXT.md`, 지원 범위는 `docs/guides/linux-support.md`. 지원 범위 밖 환경(native Wayland, Gamescope, GNOME)은 이 작업에서 보장하지 않음
-- 선행: 11번 모듈 분리 완료
+- 선행: 11.2 Linux 창 추적 분리 완료 (11.3 전체를 기다리지 않음)
+- 위치: 컴포지터별 위치 소스는 11.2의 trait 구현으로 하위 crate에 둔다. app은 받은 좌표로 그리기만 한다
 
 - [ ] **12.1 지원 범위 확정 및 문서화**
   - [ ] 현재 지원 조합(Proton/XWayland + wlr-layer-shell + 테두리 없는 전체화면) 기준으로 자동 배치 대상 범위 명시
@@ -224,7 +240,7 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [ ] 좌표 변환·배율·창 장식·workspace 전환 영향 확인
 
 - [ ] **12.3 오버레이 위치 갱신 연결**
-  - [ ] 11.3의 입력 지점에 컴포지터별 위치 소스 연결
+  - [ ] 11.2의 오버레이 입구에 컴포지터별 위치 소스(하위 crate) 연결
   - [ ] 위치 정보가 없는 환경은 현재 수동 배치 유지
 
 - [ ] **12.4 검증 및 회귀 방지**
