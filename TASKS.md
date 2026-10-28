@@ -204,11 +204,13 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
   - [x] Windows 경로는 변경하지 않음
 
 - [ ] **11.3 나머지 비-UI 모듈 순차 이동**
-  - [ ] 이미 egui 무관하고 단위 테스트가 있는 것부터 (`auto_upload`, `transport`/`ipc_server`, `steam_session`)
+  - [x] `overmax_runtime` crate 생성
+  - [x] 이미 egui 무관하고 단위 테스트가 있는 것부터 (`auto_upload`, `transport`/`ipc_server`, `steam_session`) + `settings_writer`
+  - [ ] 작업 조율 메서드(`native_app.rs`의 스캔·업로드·캐시 갱신·삭제·Steam 갱신)를 runtime 서비스로 이동 — 이때 `native_helpers`의 계정 헬퍼를 함께 data로
   - [ ] UI와 섞인 파일은 로직부 분리 → 이동 순서로 별도 커밋
   - [ ] 각 이동 후 `cargo test --workspace` 및 Windows 수동 확인
   - [ ] **런타임 허브 재설계** (`ui/native_app_recommend.rs`의 감지 결과 분배 루프 — 다른 프론트엔드가 재사용하려면 반드시 app 밖에 있어야 함)
-    - [ ] 1단계: 동작 불변으로 `Runtime` 구조체로 통째 이동 (호출 스레드는 현행 UI 루프 유지)
+    - [x] 1단계: 동작 불변으로 `Runtime` 구조체로 통째 이동 (호출 스레드는 현행 UI 루프 유지) — 추천 재계산은 app에 남김 (`overmax_runtime::hub`)
     - [ ] 2단계: 관찰자(IPC 발행, 자동 업로드, app 스냅샷)를 `RuntimeUpdate`를 받는 읽기 전용 trait 뒤로 하나씩 분리
     - [ ] 3단계: 커밋 체인을 `SessionTracker`(세션 경계·기록 스냅샷·PB 판정) → `RecordCommit` → `DerivedState`(추천 재계산) 순서 고정 호출로 분리
     - [ ] 순서 불변식 유지: PB 판정은 기록 저장 전, `PlayVerified`는 DB 커밋 결과와 무관하게 발행
