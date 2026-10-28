@@ -236,6 +236,9 @@ Overmax 활성 작업 목록 및 마일스톤 로드맵입니다.
 - 제약: 단일 Source of Truth는 `CONTEXT.md`, 지원 범위는 `docs/guides/linux-support.md`. 지원 범위 밖 환경(native Wayland, Gamescope, GNOME)은 이 작업에서 보장하지 않음
 - 선행: 11.2 Linux 창 추적 분리 완료 (11.3 전체를 기다리지 않음)
 - 위치: 컴포지터별 위치 소스는 11.2의 trait 구현으로 하위 crate에 둔다. app은 받은 좌표로 그리기만 한다
+- 진행 순서 (2026-10-28 합의): 12.3 깨우기 경로 → 12.1 문서 → 12.4 Xvfb 게이트 → 12.2 Hyprland·Sway. 12.3 깨우기 경로는 #35 종료 코멘트에서 "먼저 준비"하기로 안내한 항목
+- 개발 환경 한계: Windows + WSL Ubuntu(Wayland 컴포지터 없음). 어댑터는 IPC 응답 픽스처 단위 테스트까지만 가능, 실환경 검증·인게임 성능 측정은 불가
+- 미결정: 실환경 검증 전인 Hyprland·Sway 어댑터를 `select_geometry_source`에 기본 등록할지, 설정으로 켤 때만 쓸지 (12.2 착수 전 소유자 확인)
 
 - [ ] **12.1 지원 범위 확정 및 문서화**
   - [ ] 현재 지원 조합(Proton/XWayland + wlr-layer-shell + 테두리 없는 전체화면) 기준으로 자동 배치 대상 범위 명시
