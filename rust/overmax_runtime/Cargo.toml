@@ -14,3 +14,4 @@ path = "src/lib.rs"
 [dependencies]
 overmax-core = { path = "../overmax_core" }
 overmax-data = { path = "../overmax_data" }
+serde_json = "1"
