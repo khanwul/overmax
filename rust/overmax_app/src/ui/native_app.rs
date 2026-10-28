@@ -14,9 +14,6 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use crate::system::cache_update;
-use crate::system::native_helpers::{
-    account_path_for_steam, button_num, first_steam_from_settings,
-};
 use crate::system::single_instance::SingleInstanceGuard;
 use crate::system::steam_session;
 use crate::system::updater::{self, AppUpdateConfig};
@@ -27,6 +24,10 @@ use crate::ui::platform;
 use crate::ui::ui_command::UiCommand;
 use crate::ui::upload_history_ui;
 use eframe::egui;
+use overmax_data::config::varchive_account::{
+    account_path_for_steam, button_num, first_steam_from_settings, is_account_configured,
+    varchive_user_id,
+};
 use overmax_engine::detector::detection_pipeline::DetectionOutput;
 use overmax_engine::detector::detection_worker;
 
@@ -926,38 +927,20 @@ impl NativeApp {
         });
     }
 
-    pub(crate) fn is_varchive_account_configured(&self) -> bool {
-        let settings = self.settings.get_merged();
-        let steam = self
-            .sync_state
+    fn current_steam_id(&self) -> String {
+        self.sync_state
             .steam_id
             .lock()
             .map(|g| g.clone())
-            .unwrap_or_default();
-        let account_path = account_path_for_steam(&settings, &steam);
-        if account_path.is_empty() {
-            return false;
-        }
-        std::path::Path::new(&account_path).exists()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn is_varchive_account_configured(&self) -> bool {
+        is_account_configured(&self.settings.get_merged(), &self.current_steam_id())
     }
 
     pub(crate) fn varchive_user_id(&self) -> Option<String> {
-        let settings = self.settings.get_merged();
-        let steam = self
-            .sync_state
-            .steam_id
-            .lock()
-            .map(|g| g.clone())
-            .unwrap_or_default();
-        if steam.is_empty() {
-            return None;
-        }
-        let varchive = settings.varchive();
-        varchive
-            .user_map
-            .get(&steam)
-            .and_then(|u| u.v_id.clone())
-            .filter(|id| !id.is_empty())
+        varchive_user_id(&self.settings.get_merged(), &self.current_steam_id())
     }
 
     pub(crate) fn current_pattern_needs_upload(&self) -> bool {
