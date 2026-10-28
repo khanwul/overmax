@@ -301,7 +301,7 @@ pub struct NativeApp {
     pub(crate) game_found_rx: Receiver<()>,
     pub(crate) exit_requested: Arc<AtomicBool>,
     pub(crate) ctx_holder: Arc<Mutex<Option<egui::Context>>>,
-    pub(crate) session_initial_record: Option<overmax_data::RecordValue>,
+    pub(crate) runtime: overmax_runtime::hub::Runtime,
     /// 오버레이 렌더 경로가 매 프레임 재계산하지 않도록 캐시한 업로드 필요 여부.
     /// 입력(`session.context` 의 rate/is_max_combo, `record_manager` 상태)이 바뀌는
     /// 모든 경로가 `refresh_overlay_data` 를 거치므로 그 안에서 갱신한다.
@@ -315,14 +315,10 @@ pub struct NativeApp {
     #[cfg(any(debug_assertions, feature = "telemetry"))]
     pub(crate) runtime_telemetry:
         Option<Arc<overmax_engine::detector::telemetry::RuntimeTelemetry>>,
-    pub(crate) ipc_publisher: crate::system::ipc_server::IpcPublisher,
     pub(crate) ipc_bound_port: crate::system::ipc_server::BoundPortSlot,
     pub(crate) ipc_handle: crate::system::ipc_server::IpcServerHandle,
     pub(crate) ipc_cmd_rx: Receiver<crate::system::ipc_server::IpcCommand>,
     pub(crate) overlay_visible_override: Option<bool>,
-    pub(crate) last_ipc_scene_key: Option<String>,
-    pub(crate) last_ipc_context_key:
-        Option<(i32, overmax_core::Mode, overmax_core::Difficulty, u32, bool)>,
 }
 
 impl NativeApp {
@@ -498,6 +494,7 @@ impl NativeApp {
                 ipc_cmd_tx,
                 ipc_data,
             );
+        let runtime = overmax_runtime::hub::Runtime::new(record_manager.clone(), ipc_publisher);
 
         let settings = SharedSettings {
             defaults: defaults.clone(),
@@ -564,7 +561,7 @@ impl NativeApp {
             game_found_rx,
             exit_requested: exit_requested.clone(),
             ctx_holder: ctx_holder.clone(),
-            session_initial_record: None,
+            runtime,
             overlay_upload_needed: false,
             auto_upload: Default::default(),
             platform,
@@ -573,13 +570,10 @@ impl NativeApp {
             last_telemetry_snapshot: None,
             #[cfg(any(debug_assertions, feature = "telemetry"))]
             runtime_telemetry,
-            ipc_publisher,
             ipc_bound_port,
             ipc_handle,
             ipc_cmd_rx,
             overlay_visible_override: None,
-            last_ipc_scene_key: None,
-            last_ipc_context_key: None,
         };
 
         app.handle_auto_refresh();

@@ -659,7 +659,7 @@ impl NativeApp {
                 snap: overlay.position.snap,
                 position,
                 record_manager: self.record_manager.clone(),
-                session_initial_record: self.session_initial_record,
+                session_initial_record: self.runtime.session_initial_record(),
                 toast: self.toast.clone(),
                 window_snapshot: self.window_snapshot,
                 game_geometry: overmax_core::lock_or_recover(&self.platform.game_geometry).clone(),
@@ -947,7 +947,7 @@ impl NativeApp {
                 lite_mode: height == overlay_ui::LITE_BASE_HEIGHT,
                 is_snap_manual: snap_position == "manual",
                 record_manager: &self.record_manager,
-                session_initial_record: self.session_initial_record,
+                session_initial_record: self.runtime.session_initial_record(),
                 toast: self.toast.as_ref(),
             },
         );
