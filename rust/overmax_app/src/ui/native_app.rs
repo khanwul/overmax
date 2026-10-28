@@ -950,32 +950,8 @@ impl NativeApp {
             .is_some_and(|ctx| self.pattern_needs_upload(ctx))
     }
 
-    /// `ctx` 기록이 V-Archive 기록보다 나은지(Rate +0.01 이상 또는 MAX COMBO 신규 달성) 판단한다.
     pub(crate) fn pattern_needs_upload(&self, ctx: &PlayContext) -> bool {
-        let song_id = ctx.song_id;
-        let mode = ctx.mode;
-        let diff = ctx.diff;
-
-        let local = self.record_manager.get_local_record(song_id, mode, diff);
-        let varchive = self
-            .record_manager
-            .get_varchive_cache_record(song_id, mode, diff);
-
-        let (mut local_rate, mut local_mc) = local.unwrap_or((0.0, false));
-        if ctx.rate > local_rate {
-            local_rate = ctx.rate;
-        }
-        if ctx.is_max_combo {
-            local_mc = true;
-        }
-
-        match (Some((local_rate, local_mc)), varchive) {
-            (Some((l_rate, l_mc)), Some((v_rate, v_mc))) => {
-                (l_rate - v_rate) >= 0.01 || (l_mc && !v_mc)
-            }
-            (Some((l_rate, _)), None) => l_rate > 0.0,
-            _ => false,
-        }
+        overmax_runtime::upload_plan::pattern_needs_upload(&self.record_manager, ctx)
     }
 
     /// 자동 업로드 스케줄러를 한 프레임 진행하고, 대기가 끝난 값을 업로드한다.
@@ -1033,56 +1009,13 @@ impl NativeApp {
 
     /// `session_ctx` 기록을 로컬 최고 기록과 합쳐 V-Archive에 단일 패턴 업로드한다.
     pub(crate) fn upload_pattern(&self, session_ctx: &PlayContext, ctx: egui::Context) {
-        let song_id = session_ctx.song_id;
-        let mode = session_ctx.mode;
-        let diff = session_ctx.diff;
-
-        let Some(song) = self.varchive_db.search_by_id(song_id) else {
+        let Some(candidate) = overmax_runtime::upload_plan::prepare_pattern_upload(
+            &self.record_manager,
+            &self.varchive_db,
+            session_ctx,
+        ) else {
             return;
         };
-        let local = self.record_manager.get_local_record(song_id, mode, diff);
-        let varchive = self
-            .record_manager
-            .get_varchive_cache_record(song_id, mode, diff);
-
-        let (mut overmax_rate, mut overmax_mc) = local.unwrap_or((0.0, false));
-        if session_ctx.rate > overmax_rate {
-            overmax_rate = session_ctx.rate;
-        }
-        if session_ctx.is_max_combo {
-            overmax_mc = true;
-        }
-
-        if overmax_rate > 0.0 || overmax_mc {
-            self.record_manager
-                .upsert(song_id, mode, diff, overmax_rate, overmax_mc, true);
-        }
-
-        let (v_rate, v_mc) = match varchive {
-            Some((r, mc)) => (Some(r), Some(mc)),
-            None => (None, None),
-        };
-
-        let pattern_level = song
-            .get_pattern(session_ctx.mode, session_ctx.diff)
-            .and_then(|p| p.level);
-
-        let candidate = overmax_data::SyncCandidate {
-            song_id,
-            song_name: song.name.to_string(),
-            composer: song.composer.to_string(),
-            dlc: song.dlc_code.to_string(),
-            button_mode: session_ctx.mode,
-            difficulty: session_ctx.diff,
-            pattern_level,
-            overmax_rate: overmax_rate as f64,
-            overmax_mc,
-            varchive_rate: v_rate.map(|r| r as f64),
-            varchive_mc: v_mc,
-            upload_status: String::new(),
-            upload_message: String::new(),
-        };
-
         self.spawn_upload(candidate, true, ctx);
     }
 
