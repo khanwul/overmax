@@ -9,13 +9,15 @@
 
 ```
 overmax_app        표현 계층 (egui View/Settings/트레이/다이얼로그) + 앱 프로세스 관리(업데이터·단일 인스턴스)
+   │         └──────────────┐
+overmax_runtime             overmax_engine     감지 결과 분배·V-Archive 작업·추천 계산·IPC  /  캡처·창 추적·감지 파이프라인
+   │                        │
+overmax_data       저장·설정·외부 API·추천 엔진
    │
-overmax_runtime    감지 결과 → 기록·관찰자 분배, V-Archive 작업, 추천 계산, IPC
-   │
-overmax_engine     캡처·창 추적·감지 파이프라인        overmax_data   저장·설정·외부 API·추천 엔진
-   │                                                      │
 overmax_core / overmax_cv   공통 타입 · CV 알고리즘
 ```
+
+- `overmax_runtime`은 감지 출력을 `overmax_core` 타입(`GameSessionState`, `VerifiedPlayEvent`)으로 받으므로 `overmax_engine`에 의존하지 않는다. 다른 감지 소스를 쓰는 프론트엔드도 runtime을 그대로 쓸 수 있다.
 
 - 의존은 위에서 아래로만 흐른다. 아래 crate가 위 crate를 참조하지 않는다.
 - `overmax_app` 아래의 crate는 egui/eframe에 의존하지 않는다. 화면 갱신이 필요하면 콜백(`Fn() + Send + Sync`)을 주입받는다.
